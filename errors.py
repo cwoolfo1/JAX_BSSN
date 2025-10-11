@@ -27,7 +27,7 @@ class ConstraintViolations(NamedTuple):
     gamma_condition: jnp.ndarray   # Gamma constraint violation
 
 
-@jit
+# @jit
 def compute_hamiltonian_constraint(vars: BSSNVariables, 
                                   params: BSSNParameters) -> jnp.ndarray:
     """
@@ -50,19 +50,10 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     
     # Compute physical metric
     psi4 = vars.conformal_factor**4
-    physical_metric = jnp.zeros_like(vars.conformal_metric)
-    for i in range(3):
-        for j in range(3):
-            physical_metric = physical_metric.at[i, j].set(
-                psi4 * vars.conformal_metric[i, j])
+    physical_metric = psi4 * vars.conformal_metric
     
     # Compute physical metric derivatives
-    metric_derivs = jnp.zeros((3, 3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                metric_derivs = metric_derivs.at[k, i, j].set(
-                    diff1_field(physical_metric[i, j], k, dx))
+    metric_derivs = jnp.stack([diff1_field(physical_metric, k, dx) for k in range(3)], axis=0)
     
     # Compute physical Ricci scalar (simplified calculation)
     inv_physical_metric = invert_3x3_metric(physical_metric)
@@ -94,7 +85,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     return hamiltonian
 
 
-@jit
+# @jit
 def compute_momentum_constraint(vars: BSSNVariables,
                                params: BSSNParameters) -> jnp.ndarray:
     """
@@ -178,7 +169,7 @@ def compute_trace_A_violation(vars: BSSNVariables) -> jnp.ndarray:
     return trace_A
 
 
-@jit
+# @jit
 def compute_gamma_constraint(vars: BSSNVariables, 
                             params: BSSNParameters) -> jnp.ndarray:
     """
@@ -228,7 +219,7 @@ def compute_gamma_constraint(vars: BSSNVariables,
     return gamma_violation
 
 
-@jit
+# @jit
 def compute_all_constraints(vars: BSSNVariables,
                            params: BSSNParameters) -> ConstraintViolations:
     """
