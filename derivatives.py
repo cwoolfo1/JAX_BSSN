@@ -58,37 +58,38 @@ def diff1_field(field: jnp.ndarray, direction: int, dx: float) -> jnp.ndarray:
     return ( (-1/12)*field_forward2 + (2/3)*field_forward1 + (-2/3)*field_backward1 + (1/12)*field_backward2 ) / dx
     # Using 4th-order central difference
 
-@jit
-def diff6th_dissipation(field: jnp.ndarray, i: int, j: int, k: int, 
-                       direction: int, dx: float) -> float:
+@partial(jit, static_argnames=['direction'])
+def diff6_field(field: jnp.ndarray, direction: int, dx: float) -> jnp.ndarray:
     """
-    Compute 6th-order derivative for Kreiss-Oliger dissipation.
+    Compute 6th-order derivative of entire field in given direction.
     
     Uses 7-point stencil for 6th-order accuracy.
     
     Args:
         field: 3D array containing the field values
-        i, j, k: Grid point indices  
         direction: Direction of derivative (0=x, 1=y, 2=z)
         dx: Grid spacing
-        
     Returns:
-        6th derivative at the given point
+        3D array containing the 6th derivative
     """
-    shape = field.shape
-    
-    # Get 7-point stencil
-    points = []
-    for offset in range(-3, 4):
-        idx = get_stencil_indices(i, j, k, direction, offset, shape)
-        points.append(field[idx])
-    
+
     # 6th order finite difference coefficients
-    # [1, -6, 15, -20, 15, -6, 1]
-    result = (points[0] - 6*points[1] + 15*points[2] - 20*points[3] + 
-              15*points[4] - 6*points[5] + points[6])
-    
-    return result / (dx**6)
+    # [1, -6, 15, -20, 15, -6, 1] / (dx^6)
+    coeffs = jnp.array([1, -6, 15, -20, 15, -6, 1]) / (dx**6)
+
+    forward3 = jnp.roll(field, -3, axis=direction)
+    forward2 = jnp.roll(field, -2, axis=direction)
+    forward1 = jnp.roll(field, -1, axis=direction)
+    backward1 = jnp.roll(field, 1, axis=direction)
+    backward2 = jnp.roll(field, 2, axis=direction)
+    backward3 = jnp.roll(field, 3, axis=direction)
+    # shift the field to get stencil points
+
+    d6fdx6 = ( forward3 + (-6)*forward2 + 15*forward1 + (-20)*field +
+               15*backward1 + (-6)*backward2 + backward3 ) / (dx**6)
+    # Apply the finite difference formula directly
+
+    return d6fdx6
 
 @jit
 def compute_all_derivatives(field: jnp.ndarray, dx: float) -> jnp.ndarray:

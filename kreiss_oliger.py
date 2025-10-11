@@ -12,7 +12,7 @@ from jax import jit
 from typing import Tuple
 import numpy as np
 
-from derivatives import diff6th_dissipation, get_stencil_indices
+from derivatives import get_stencil_indices, diff6_field
 from bssn import BSSNVariables
 
 
@@ -32,22 +32,13 @@ def apply_ko_dissipation_scalar(field: jnp.ndarray, sigma: float, dx: float) -> 
         Dissipation term to be added to evolution equation
     """
     ni, nj, nk = field.shape
-    dissipation = jnp.zeros_like(field)
-    
-    # Apply 6th-order dissipation in each direction
-    for direction in range(3):
-        for i in range(ni):
-            for j in range(nj):
-                for k in range(nk):
-                    # Skip boundary points where stencil doesn't fit
-                    if ((direction == 0 and (i < 3 or i >= ni - 3)) or
-                        (direction == 1 and (j < 3 or j >= nj - 3)) or
-                        (direction == 2 and (k < 3 or k >= nk - 3))):
-                        continue
-                    
-                    # Compute 6th derivative
-                    d6 = diff6th_dissipation(field, i, j, k, direction, dx)
-                    dissipation = dissipation.at[i, j, k].add(-sigma * dx**5 * d6)
+
+    d6f_dx1 = diff6_field(field, 0, dx)
+    d6f_dx2 = diff6_field(field, 1, dx)
+    d6f_dx3 = diff6_field(field, 2, dx)
+    # compute the 6th derivative in each direction
+    dissipation = -sigma * dx**5 * (d6f_dx1 + d6f_dx2 + d6f_dx3)
+    # Combine contributions from all three spatial directions
     
     return dissipation
 

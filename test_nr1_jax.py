@@ -243,7 +243,7 @@ def test_performance():
     print(f"  Evolution time: {evolution_time:.2f} seconds for {n_steps} steps")
     print(f"  Time per step: {time_per_step*1000:.1f} ms")
     print(f"  Grid points: {ni*nj*nk:,}")
-    print(f"  Time per grid point per step: {time_per_step*1e6/(ni*nj*nk):.2f} μs")
+    print(f"  Time per grid point per step: {time_per_step*1e6/(ni*nj*nk):.5f} μs")
     
     # Performance should be reasonable
     assert time_per_step < 5.0, "Evolution too slow"
