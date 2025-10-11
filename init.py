@@ -120,15 +120,11 @@ def gravitational_wave_data(ni: int, nj: int, nk: int, dx: float,
     
     # Renormalize to maintain det(γ) = 1
     det_gamma = determinant_3x3_metric(vars.conformal_metric)
-    conformal_factor = det_gamma**(1/6)
+    conformal_factor = det_gamma**(-1/3)
     
     # Rescale conformal metric
-    conformal_metric_rescaled = jnp.zeros_like(vars.conformal_metric)
-    for i in range(3):
-        for j in range(3):
-            conformal_metric_rescaled = conformal_metric_rescaled.at[i, j].set(
-                vars.conformal_metric[i, j] / conformal_factor**(2/3))
-    
+    conformal_metric_rescaled = conformal_factor * vars.conformal_metric
+
     return vars._replace(
         conformal_metric=conformal_metric_rescaled,
         conformal_factor=conformal_factor
