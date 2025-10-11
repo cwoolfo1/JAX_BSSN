@@ -117,12 +117,10 @@ def compute_physical_metric(conformal_metric: jnp.ndarray,
         Physical metric with shape (3, 3, ni, nj, nk)
     """
     W4 = conformal_factor**4
-    physical_metric = jnp.zeros_like(conformal_metric)
-    
-    for i in range(3):
-        for j in range(3):
-            physical_metric = physical_metric.at[i, j].set(
-                W4 * conformal_metric[i, j])
+    # Scale conformal metric by W^4
+
+    physical_metric = W4 * conformal_metric
+    # compute physical metric
     
     return physical_metric
 
@@ -147,14 +145,10 @@ def compute_conformal_ricci(conformal_metric: jnp.ndarray,
     dx = params.dx
     shape = conformal_metric.shape[2:]
     
-    # Compute metric derivatives
-    metric_derivs = jnp.zeros((3, 3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                metric_derivs = metric_derivs.at[k, i, j].set(
-                    diff1_field(conformal_metric[i, j], k, dx))
-    
+    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d, dx) for d in range(3)], axis=0) 
+    # shape (3, 3, 3, ni, nj, nk)
+
+
     # Compute inverse conformal metric
     inv_metric = invert_3x3_metric(conformal_metric)
     
@@ -262,9 +256,7 @@ def evolve_conformal_metric(vars: BSSNVariables,
     dt_gamma = jnp.zeros_like(vars.conformal_metric)
     
     # First term: -2α A_ij
-    for i in range(3):
-        for j in range(3):
-            dt_gamma = dt_gamma.at[i, j].set(-2.0 * vars.lapse * vars.traceless_K[i, j])
+    dt_gamma = dt_gamma = -2.0 * vars.lapse * vars.traceless_K
     
     # Second term: Lie derivative with respect to shift
     lie_deriv = lie_derivative_conformal_metric(vars.shift, vars.conformal_metric, params.dx)
@@ -332,20 +324,20 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     
     # Make Ricci tensor traceless
     ricci_traceless = traceless_part(ricci, vars.conformal_metric, inv_metric)
+
+
+    # α R_ij^TF term
+    alpha_ricci = vars.lapse * ricci_traceless
+    # K A_ij term
+    K_A = vars.trace_K * vars.traceless_K
     
     # Evolution equation terms
     for i in range(3):
         for j in range(3):
-            # α R_ij^TF term
-            alpha_ricci = vars.lapse * ricci_traceless[i, j]
-            
-            # K A_ij term  
-            K_A = vars.trace_K * vars.traceless_K[i, j]
-            
             # Second derivative of lapse (simplified)
             d2_alpha = diff1_field(diff1_field(vars.lapse, i, dx), j, dx)
-            
-            dt_A = dt_A.at[i, j].set(alpha_ricci + K_A - d2_alpha)
+
+    dt_A = alpha_ricci + K_A - d2_alpha
     
     # Add Lie derivative with respect to shift
     lie_deriv = lie_derivative_conformal_metric(vars.shift, vars.traceless_K, dx)
@@ -473,6 +465,7 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     for k in range(3):
         dalpha_dk = diff1_field(vars.lapse, k, dx)
         dt_alpha += vars.shift[k] * dalpha_dk
+
     
     return dt_alpha
 

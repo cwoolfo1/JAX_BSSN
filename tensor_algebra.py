@@ -26,15 +26,16 @@ def invert_3x3_metric(metric: jnp.ndarray) -> jnp.ndarray:
         Inverse metric with same shape
     """
     ni, nj, nk = metric.shape[2:]
-    inv_metric = jnp.zeros_like(metric)
-    
-    # Vectorized matrix inversion
-    for i in range(ni):
-        for j in range(nj):
-            for k in range(nk):
-                g = metric[:, :, i, j, k]
-                inv_g = jnp.linalg.inv(g)
-                inv_metric = inv_metric.at[:, :, i, j, k].set(inv_g)
+
+    flatten_g = metric.reshape(3, 3, -1)
+    # flatten the last three dimensions for vectorized inversion
+
+    vectorized_inv = jax.vmap(jnp.linalg.inv, in_axes=2, out_axes=2)
+    inv_flat = vectorized_inv(flatten_g)
+    # vmap over the last dimension to invert each 3x3 matrix
+
+    inv_metric = inv_flat.reshape(3, 3, ni, nj, nk)
+    # Reshape back to original grid shape
     
     return inv_metric
 
@@ -51,13 +52,15 @@ def determinant_3x3_metric(metric: jnp.ndarray) -> jnp.ndarray:
         3D array containing determinant at each grid point
     """
     ni, nj, nk = metric.shape[2:]
-    det = jnp.zeros((ni, nj, nk))
-    
-    for i in range(ni):
-        for j in range(nj):
-            for k in range(nk):
-                g = metric[:, :, i, j, k]
-                det = det.at[i, j, k].set(jnp.linalg.det(g))
+
+    g_flatten = metric.reshape(3, 3, -1)
+    # flatten the last three dimensions for vectorized determinant
+    vectorized_det = jax.vmap(jnp.linalg.det, in_axes=2, out_axes=0)
+    det_flat = vectorized_det(g_flatten)
+    # vmap over the last dimension to compute determinant of each 3x3 matrix
+
+    det = det_flat.reshape(ni, nj, nk)
+    # Reshape back to original grid shape
     
     return det
 
@@ -78,21 +81,27 @@ def raise_index(tensor: jnp.ndarray, inverse_metric: jnp.ndarray,
     """
     ni, nj, nk = tensor.shape[2:]
     raised = jnp.zeros_like(tensor)
-    
-    if index_position == 0:
-        # Raise first index: T^i_j = g^ik T_kj
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    raised = raised.at[i, j].add(
-                        inverse_metric[i, k] * tensor[k, j])
-    else:
-        # Raise second index: T_i^j = g^jk T_ik  
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    raised = raised.at[i, j].add(
-                        tensor[i, k] * inverse_metric[k, j])
+
+    raised = jax.lax.cond(index_position == 0,
+                            lambda _: jnp.einsum('ik...,kj...->ij...', inverse_metric, tensor),
+                            lambda _: jnp.einsum('ik...,jk...->ij...', tensor, inverse_metric),
+                            operand=None)
+                            # T^i_j = g^ik T_kj or T_i^j = T_i^k g^jk
+
+    # if index_position == 0:
+    #     # Raise first index: T^i_j = g^ik T_kj
+    #     for i in range(3):
+    #         for j in range(3):
+    #             for k in range(3):
+    #                 raised = raised.at[i, j].add(
+    #                     inverse_metric[i, k] * tensor[k, j])
+    # else:
+    #     # Raise second index: T_i^j = g^jk T_ik  
+    #     for i in range(3):
+    #         for j in range(3):
+    #             for k in range(3):
+    #                 raised = raised.at[i, j].add(
+    #                     tensor[i, k] * inverse_metric[k, j])
     
     return raised
 
@@ -114,20 +123,26 @@ def lower_index(tensor: jnp.ndarray, metric: jnp.ndarray,
     ni, nj, nk = tensor.shape[2:]
     lowered = jnp.zeros_like(tensor)
     
-    if index_position == 0:
-        # Lower first index: T_ij = g_ik T^k_j
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    lowered = lowered.at[i, j].add(
-                        metric[i, k] * tensor[k, j])
-    else:
-        # Lower second index: T_i_j = T_i^k g_kj
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    lowered = lowered.at[i, j].add(
-                        tensor[i, k] * metric[k, j])
+    lowered = jax.lax.cond(index_position == 0,
+                            lambda _: jnp.einsum('ik...,kj...->ij...', metric, tensor),
+                            lambda _: jnp.einsum('ik...,jk...->ij...', tensor, metric),
+                            operand=None)
+                            # T_ij = g_ik T^k_j or T_i_j = T_i^k g_kj
+    
+    # if index_position == 0:
+    #     # Lower first index: T_ij = g_ik T^k_j
+    #     for i in range(3):
+    #         for j in range(3):
+    #             for k in range(3):
+    #                 lowered = lowered.at[i, j].add(
+    #                     metric[i, k] * tensor[k, j])
+    # else:
+    #     # Lower second index: T_i_j = T_i^k g_kj
+    #     for i in range(3):
+    #         for j in range(3):
+    #             for k in range(3):
+    #                 lowered = lowered.at[i, j].add(
+    #                     tensor[i, k] * metric[k, j])
     
     return lowered
 
