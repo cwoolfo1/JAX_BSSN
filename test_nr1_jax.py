@@ -34,8 +34,8 @@ def test_flat_spacetime():
     # Initialize flat spacetime
     vars = flat_spacetime_data(ni, nj, nk, dx)
     params = BSSNParameters(dx=dx, dt=dt)
-    
-    # Check initial constraints
+    print("Initialized flat spacetime data")
+
     violations = compute_all_constraints(vars, params)
     norms = compute_constraint_norms(violations)
     
@@ -46,6 +46,7 @@ def test_flat_spacetime():
     for step in range(10):
         vars = bssn_evolution_step(vars, params)
     
+    print("Evolved flat spacetime data for 10 steps")
     # Check that spacetime remains flat
     final_violations = compute_all_constraints(vars, params)
     final_norms = compute_constraint_norms(final_violations)
