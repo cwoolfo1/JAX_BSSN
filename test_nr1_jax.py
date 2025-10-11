@@ -13,6 +13,7 @@ import time
 
 # Enable 64-bit precision for testing
 jax.config.update("jax_enable_x64", True)
+jax.config.update('jax_default_device', jax.devices('cpu')[0])
 
 from bssn import BSSNVariables, BSSNParameters, bssn_evolution_step
 from init import get_initial_data, flat_spacetime_data, gravitational_wave_data
@@ -63,8 +64,8 @@ def test_derivatives():
     """Test finite difference derivatives."""
     print("Testing finite difference derivatives...")
     
-    ni, nj, nk = 16, 16, 16
-    dx = 0.1
+    ni, nj, nk = 25, 25, 25
+    dx = 0.05
     
     # Create coordinate arrays
     x = jnp.arange(ni) * dx
@@ -72,8 +73,8 @@ def test_derivatives():
     z = jnp.arange(nk) * dx
     X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
     
-    # Test function: f(x,y,z) = sin(x) * cos(y) * exp(-z)
-    f = jnp.sin(X) * jnp.cos(Y) * jnp.exp(-Z)
+    # Test function: f(x,y,z) = sin(x) * cos(y) * cos(z)
+    f = jnp.sin(2*jnp.pi*X / (ni*dx)) * jnp.cos(2*jnp.pi*Y / (nj*dx)) * jnp.cos(2*jnp.pi*Z / (nk*dx))
     
     # Compute numerical derivatives
     df_dx = diff1_field(f, 0, dx)
@@ -81,9 +82,9 @@ def test_derivatives():
     df_dz = diff1_field(f, 2, dx)
     
     # Analytical derivatives
-    df_dx_exact = jnp.cos(X) * jnp.cos(Y) * jnp.exp(-Z)
-    df_dy_exact = -jnp.sin(X) * jnp.sin(Y) * jnp.exp(-Z)
-    df_dz_exact = -jnp.sin(X) * jnp.cos(Y) * jnp.exp(-Z)
+    df_dx_exact = 2*jnp.pi/(ni*dx) * jnp.cos(2*jnp.pi*X / (ni*dx)) * jnp.cos(2*jnp.pi*Y / (nj*dx)) * jnp.cos(2*jnp.pi*Z / (nk*dx))
+    df_dy_exact = -2*jnp.pi/(nj*dx) * jnp.sin(2*jnp.pi*X / (ni*dx)) * jnp.sin(2*jnp.pi*Y / (nj*dx)) * jnp.cos(2*jnp.pi*Z / (nk*dx))
+    df_dz_exact = -2*jnp.pi/(nk*dx) * jnp.sin(2*jnp.pi*X / (ni*dx)) * jnp.cos(2*jnp.pi*Y / (nj*dx)) * jnp.sin(2*jnp.pi*Z / (nk*dx))
     
     # Check errors (should be small for smooth functions)
     error_x = jnp.max(jnp.abs(df_dx - df_dx_exact))
