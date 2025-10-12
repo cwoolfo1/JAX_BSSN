@@ -16,7 +16,7 @@ jax.config.update("jax_enable_x64", True)
 jax.config.update('jax_default_device', jax.devices('cpu')[0])
 
 from bssn import BSSNVariables, BSSNParameters, bssn_evolution_step
-from init import get_initial_data, flat_spacetime_data, gravitational_wave_data
+from initialization import get_initial_data, flat_spacetime_data, gravitational_wave_data
 from derivatives import diff1_field, compute_all_derivatives, laplacian_3d
 from tensor_algebra import invert_3x3_metric, determinant_3x3_metric, christoffel_symbols_second_kind
 from errors import compute_all_constraints, compute_constraint_norms

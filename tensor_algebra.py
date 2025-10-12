@@ -79,29 +79,13 @@ def raise_index(tensor: jnp.ndarray, inverse_metric: jnp.ndarray,
     Returns:
         Tensor with raised index
     """
-    ni, nj, nk = tensor.shape[2:]
-    raised = jnp.zeros_like(tensor)
 
-    raised = jax.lax.cond(index_position == 0,
-                            lambda _: jnp.einsum('ik...,kj...->ij...', inverse_metric, tensor),
-                            lambda _: jnp.einsum('ik...,jk...->ij...', tensor, inverse_metric),
-                            operand=None)
-                            # T^i_j = g^ik T_kj or T_i^j = T_i^k g^jk
-
-    # if index_position == 0:
-    #     # Raise first index: T^i_j = g^ik T_kj
-    #     for i in range(3):
-    #         for j in range(3):
-    #             for k in range(3):
-    #                 raised = raised.at[i, j].add(
-    #                     inverse_metric[i, k] * tensor[k, j])
-    # else:
-    #     # Raise second index: T_i^j = g^jk T_ik  
-    #     for i in range(3):
-    #         for j in range(3):
-    #             for k in range(3):
-    #                 raised = raised.at[i, j].add(
-    #                     tensor[i, k] * inverse_metric[k, j])
+    raised = jax.lax.cond(
+                index_position == 0,
+                lambda _: jnp.einsum('ik...,kj...->ij...', inverse_metric, tensor),
+                lambda _: jnp.einsum('ik...,jk...->ij...', tensor, inverse_metric),
+                operand=None)
+                # T^i_j = g^ik T_kj or T_i^j = T_i^k g^jk
     
     return raised
 
@@ -120,30 +104,13 @@ def lower_index(tensor: jnp.ndarray, metric: jnp.ndarray,
     Returns:
         Tensor with lowered index
     """
-    ni, nj, nk = tensor.shape[2:]
-    lowered = jnp.zeros_like(tensor)
     
-    lowered = jax.lax.cond(index_position == 0,
-                            lambda _: jnp.einsum('ik...,kj...->ij...', metric, tensor),
-                            lambda _: jnp.einsum('ik...,jk...->ij...', tensor, metric),
-                            operand=None)
-                            # T_ij = g_ik T^k_j or T_i_j = T_i^k g_kj
-    
-    # if index_position == 0:
-    #     # Lower first index: T_ij = g_ik T^k_j
-    #     for i in range(3):
-    #         for j in range(3):
-    #             for k in range(3):
-    #                 lowered = lowered.at[i, j].add(
-    #                     metric[i, k] * tensor[k, j])
-    # else:
-    #     # Lower second index: T_i_j = T_i^k g_kj
-    #     for i in range(3):
-    #         for j in range(3):
-    #             for k in range(3):
-    #                 lowered = lowered.at[i, j].add(
-    #                     tensor[i, k] * metric[k, j])
-    
+    lowered = jax.lax.cond(
+                index_position == 0,
+                lambda _: jnp.einsum('ik...,kj...->ij...', metric, tensor),
+                lambda _: jnp.einsum('ik...,jk...->ij...', tensor, metric),
+                operand=None)
+                # T_ij = g_ik T^k_j or T_i_j = T_i^k g_kj
     return lowered
 
 
@@ -161,19 +128,13 @@ def christoffel_symbols_first_kind(metric_derivatives: jnp.ndarray) -> jnp.ndarr
     Returns:
         Christoffel symbols of first kind with shape (3, 3, 3, ni, nj, nk)
     """
-    shape = metric_derivatives.shape[3:]
-    christoffel_1 = jnp.zeros((3, 3, 3) + shape)
-    
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                term1 = metric_derivatives[k, i, j]  # ∂g_ij/∂x^k
-                term2 = metric_derivatives[j, i, k]  # ∂g_ik/∂x^j  
-                term3 = metric_derivatives[i, j, k]  # ∂g_jk/∂x^i
-                
-                christoffel_1 = christoffel_1.at[i, j, k].set(
-                    0.5 * (term1 + term2 - term3))
-    
+
+    christoffel_1 = 0.5 * (
+        jnp.einsum('kij...->ijk...', metric_derivatives) +
+        jnp.einsum('jik...->ijk...', metric_derivatives) -
+        jnp.einsum('ijk...->ijk...', metric_derivatives)
+    )  # Vectorized computation using einsum
+
     return christoffel_1
 
 
@@ -183,7 +144,7 @@ def christoffel_symbols_second_kind(inverse_metric: jnp.ndarray,
     """
     Compute Christoffel symbols of the second kind.
     
-    Γ^l_ijk = g^lm * Γ_ijk,m
+    Γ^i_jk = g^im * Γ_mjk
     
     Args:
         inverse_metric: Inverse metric with shape (3, 3, ni, nj, nk)
@@ -194,16 +155,9 @@ def christoffel_symbols_second_kind(inverse_metric: jnp.ndarray,
     """
     # First compute first kind
     christoffel_1 = christoffel_symbols_first_kind(metric_derivatives)
-    
-    shape = inverse_metric.shape[2:]
-    christoffel_2 = jnp.zeros((3, 3, 3) + shape)
-    
-    for l in range(3):
-        for i in range(3):
-            for j in range(3):
-                for m in range(3):
-                    christoffel_2 = christoffel_2.at[l, i, j].add(
-                        inverse_metric[l, m] * christoffel_1[m, i, j])
+
+    christoffel_2 = jnp.einsum('im...,mjk...->ijk...', inverse_metric, christoffel_1)
+    # Vectorized computation using einsum
     
     return christoffel_2
 
@@ -222,26 +176,15 @@ def riemann_tensor(christoffel: jnp.ndarray, christoffel_derivatives: jnp.ndarra
     Returns:
         Riemann tensor with shape (3, 3, 3, 3, ni, nj, nk)
     """
-    shape = christoffel.shape[3:]
-    riemann = jnp.zeros((3, 3, 3, 3) + shape)
-    
-    for l in range(3):
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    # Derivative terms
-                    term1 = christoffel_derivatives[j, l, i, k]  # ∂Γ^l_ik/∂x^j
-                    term2 = christoffel_derivatives[k, l, i, j]  # ∂Γ^l_ij/∂x^k
-                    
-                    # Product terms
-                    term3 = 0.0
-                    term4 = 0.0
-                    for m in range(3):
-                        term3 += christoffel[l, m, j] * christoffel[m, i, k]
-                        term4 += christoffel[l, m, k] * christoffel[m, i, j]
-                    
-                    riemann = riemann.at[l, i, j, k].set(term1 - term2 + term3 - term4)
-    
+
+    riemann = (
+        jnp.einsum('jlik...->lijk...', christoffel_derivatives) -
+        jnp.einsum('klij...->lijk...', christoffel_derivatives) +
+        jnp.einsum('lmj...,mik...->lijk...', christoffel, christoffel) -
+        jnp.einsum('lmk...,mij...->lijk...', christoffel, christoffel)
+    )
+    # Vectorized computation using einsum
+
     return riemann
 
 
@@ -258,13 +201,9 @@ def ricci_tensor(riemann: jnp.ndarray) -> jnp.ndarray:
     Returns:
         Ricci tensor with shape (3, 3, ni, nj, nk)
     """
-    shape = riemann.shape[4:]
-    ricci = jnp.zeros((3, 3) + shape)
-    
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                ricci = ricci.at[i, j].add(riemann[k, i, k, j])
+
+    ricci = jnp.einsum('kikj...->ij...', riemann)
+    # Vectorized computation using einsum
     
     return ricci
 
@@ -283,13 +222,10 @@ def ricci_scalar(ricci: jnp.ndarray, inverse_metric: jnp.ndarray) -> jnp.ndarray
     Returns:
         Ricci scalar with shape (ni, nj, nk)
     """
-    shape = ricci.shape[2:]
-    scalar = jnp.zeros(shape)
-    
-    for i in range(3):
-        for j in range(3):
-            scalar += inverse_metric[i, j] * ricci[i, j]
-    
+
+    scalar = trace_tensor(ricci, inverse_metric)
+    # Vectorized computation using trace_tensor
+
     return scalar
 
 
@@ -308,43 +244,24 @@ def lie_derivative_metric(vector: jnp.ndarray, metric: jnp.ndarray, dx: float) -
     Returns:
         Lie derivative with shape (3, 3, ni, nj, nk)
     """
-    shape = metric.shape[2:]
-    lie_deriv = jnp.zeros_like(metric)
+
+    metric_derivs = jnp.stack( [diff1_field(metric, d, dx) for d in range(3)], axis=0)
+    # shape (3, 3, 3, ni, nj, nk)
+    # Vectorized computation using stacking
+
+    vector_derivs = jnp.stack( [diff1_field(vector, d, dx) for d in range(3)], axis=0)
+    # shape (3, 3, ni, nj, nk)
+    # Vectorized computation using stacking
     
-    # Compute derivatives of metric
-    metric_derivs = jnp.zeros((3, 3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                metric_derivs = metric_derivs.at[k, i, j].set(
-                    diff1_field(metric[i, j], k, dx))
-    
-    # Compute derivatives of vector
-    vector_derivs = jnp.zeros((3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            vector_derivs = vector_derivs.at[i, j].set(
-                diff1_field(vector[i], j, dx))
-    
-    for i in range(3):
-        for j in range(3):
-            # First term: v^k ∂g_ij/∂x^k
-            term1 = 0.0
-            for k in range(3):
-                term1 += vector[k] * metric_derivs[k, i, j]
-            
-            # Second term: g_kj ∂v^k/∂x^i  
-            term2 = 0.0
-            for k in range(3):
-                term2 += metric[k, j] * vector_derivs[k, i]
-            
-            # Third term: g_ik ∂v^k/∂x^j
-            term3 = 0.0
-            for k in range(3):
-                term3 += metric[i, k] * vector_derivs[k, j]
-            
-            lie_deriv = lie_deriv.at[i, j].set(term1 + term2 + term3)
-    
+    term1 = jnp.einsum('k...,kij...->ij...', vector, metric_derivs)
+    term2 = jnp.einsum('kj...,ki...->ij...', metric, vector_derivs)
+    term3 = jnp.einsum('ik...,kj...->ij...', metric, vector_derivs)
+    # Vectorized computation using einsum
+
+    lie_deriv = term1 + term2 + term3
+    # add the three terms together
+
+
     return lie_deriv
 
 
@@ -366,17 +283,16 @@ def lie_derivative_conformal_metric(vector: jnp.ndarray, metric: jnp.ndarray,
     """
     # Start with regular Lie derivative
     lie_deriv = lie_derivative_metric(vector, metric, dx)
-    
-    # Compute divergence of vector
-    div_v = jnp.zeros(metric.shape[2:])
-    for k in range(3):
-        div_v += diff1_field(vector[k], k, dx)
-    
-    # Subtract conformal weight term
-    for i in range(3):
-        for j in range(3):
-            lie_deriv = lie_deriv.at[i, j].set(
-                lie_deriv[i, j] - (2.0/3.0) * metric[i, j] * div_v)
+
+    grad_v = jnp.stack( [diff1_field(vector, d, dx) for d in range(3)], axis=0)
+    # shape (3, 3, ni, nj, nk)
+    # Vectorized computation using stacking
+
+    div_v = jnp.sum(grad_v, axis=0)
+    # shape (ni, nj, nk)
+
+    lie_deriv = lie_deriv - (2.0/3.0) * metric * div_v
+    # Vectorized computation using broadcasting
     
     return lie_deriv
 
@@ -395,13 +311,11 @@ def trace_tensor(tensor: jnp.ndarray, inverse_metric: jnp.ndarray) -> jnp.ndarra
     Returns:
         Trace with shape (ni, nj, nk)
     """
-    shape = tensor.shape[2:]
-    trace = jnp.zeros(shape)
+
+    trace = jnp.einsum('ij...,ij...->...', inverse_metric, tensor)
+    # Vectorized computation using einsum
     
-    for i in range(3):
-        for j in range(3):
-            trace += inverse_metric[i, j] * tensor[i, j]
-    
+
     return trace
 
 
@@ -422,11 +336,9 @@ def traceless_part(tensor: jnp.ndarray, metric: jnp.ndarray,
         Traceless tensor with shape (3, 3, ni, nj, nk)
     """
     trace = trace_tensor(tensor, inverse_metric)
-    traceless = jnp.zeros_like(tensor)
-    
-    for i in range(3):
-        for j in range(3):
-            traceless = traceless.at[i, j].set(
-                tensor[i, j] - (1.0/3.0) * metric[i, j] * trace)
+    # compute trace
+
+    traceless = tensor - (1.0/3.0) * metric * trace
+    # Vectorized computation using broadcasting
     
     return traceless

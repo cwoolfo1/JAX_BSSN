@@ -54,7 +54,7 @@ def run_basic_tests():
     try:
         # Test imports
         from bssn import BSSNVariables, BSSNParameters
-        from init import flat_spacetime_data
+        from initialization import flat_spacetime_data
         from derivatives import diff1_field
         
         print("✓ All modules import successfully")

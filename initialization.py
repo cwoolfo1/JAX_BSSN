@@ -15,6 +15,36 @@ import math
 
 from bssn import BSSNVariables, BSSNParameters
 from tensor_algebra import invert_3x3_metric, determinant_3x3_metric, traceless_part
+from kreiss_oliger import apply_ko_dissipation_bssn, get_optimal_dissipation_coefficient
+
+def setup_simulation_parameters():
+    """Set up default simulation parameters."""
+    # Grid parameters
+    ni, nj, nk = 64, 64, 64  # Grid size
+    dx = 0.1                 # Grid spacing
+    
+    # Evolution parameters
+    dt = 0.001              # Time step
+    t_final = 1.0           # Final time
+    
+    # BSSN parameters
+    bssn_params = BSSNParameters(
+        eta=2.0,            # Gamma damping
+        f=2.0,              # 1+log slicing parameter
+        g=0.75,             # Gamma driver parameter
+        dx=dx,
+        dt=dt
+    )
+    
+    # Dissipation parameters
+    ko_sigma = get_optimal_dissipation_coefficient(dx, dt)
+    
+    return {
+        'grid': (ni, nj, nk, dx),
+        'evolution': (dt, t_final),
+        'bssn_params': bssn_params,
+        'ko_sigma': ko_sigma
+    }
 
 
 def create_coordinate_arrays(ni: int, nj: int, nk: int, 
