@@ -14,6 +14,7 @@ import time
 from typing import List, Tuple
 import argparse
 import json
+import time
 
 # Import our modules
 from bssn import BSSNVariables, BSSNParameters, bssn_evolution_step
@@ -55,6 +56,58 @@ def setup_simulation_parameters():
         'ko_sigma': ko_sigma
     }
 
+
+@jit 
+def forward_euler_step(vars: BSSNVariables, params: BSSNParameters,
+                        ko_sigma: float) -> BSSNVariables:
+    """
+    Perform one forward Euler timestep with dissipation.
+    
+    Args:
+        vars: Current BSSN variables
+        params: Evolution parameters
+        ko_sigma: Kreiss-Oliger dissipation coefficient
+        
+    Returns:
+        Updated BSSN variables
+    """
+    dt = params.dt
+    
+    # Compute BSSN time derivatives
+    new_vars = bssn_evolution_step(vars, params)
+    
+    # Extract time derivatives
+    dt_gamma = (new_vars.conformal_metric - vars.conformal_metric) / dt
+    dt_W = (new_vars.conformal_factor - vars.conformal_factor) / dt
+    dt_A = (new_vars.traceless_K - vars.traceless_K) / dt
+    dt_K = (new_vars.trace_K - vars.trace_K) / dt
+    dt_Gamma = (new_vars.conformal_connection - vars.conformal_connection) / dt
+    dt_alpha = (new_vars.lapse - vars.lapse) / dt
+    dt_beta = (new_vars.shift - vars.shift) / dt
+    
+    # Add Kreiss-Oliger dissipation
+    dissipation = apply_ko_dissipation_bssn(vars, ko_sigma, params.dx)
+    
+    dt_gamma += dissipation.conformal_metric
+    dt_W += dissipation.conformal_factor
+    dt_A += dissipation.traceless_K
+    dt_K += dissipation.trace_K
+    dt_Gamma += dissipation.conformal_connection
+    dt_alpha += dissipation.lapse
+    dt_beta += dissipation.shift
+    
+    # Update variables
+    new_vars = BSSNVariables(
+        conformal_metric=vars.conformal_metric + dt * dt_gamma,
+        conformal_factor=vars.conformal_factor + dt * dt_W,
+        traceless_K=vars.traceless_K + dt * dt_A,
+        trace_K=vars.trace_K + dt * dt_K,
+        conformal_connection=vars.conformal_connection + dt * dt_Gamma,
+        lapse=vars.lapse + dt * dt_alpha,
+        shift=vars.shift + dt * dt_beta
+    )
+    
+    return new_vars
 
 @jit
 def runge_kutta_4_step(vars: BSSNVariables, params: BSSNParameters,
@@ -158,7 +211,7 @@ def runge_kutta_4_step(vars: BSSNVariables, params: BSSNParameters,
     return new_vars
 
 
-def save_data(vars: BSSNVariables, time: float, step: int, 
+def save_data(vars: BSSNVariables, t: float, step: int, 
               output_dir: str = "output"):
     """Save simulation data to files."""
     import os
@@ -166,7 +219,7 @@ def save_data(vars: BSSNVariables, time: float, step: int,
     
     # Save key quantities
     np.savez(f"{output_dir}/data_step_{step:06d}.npz",
-             time=time,
+             time=t,
              conformal_metric=np.array(vars.conformal_metric),
              conformal_factor=np.array(vars.conformal_factor),
              traceless_K=np.array(vars.traceless_K),
@@ -174,7 +227,7 @@ def save_data(vars: BSSNVariables, time: float, step: int,
              lapse=np.array(vars.lapse))
 
 
-def plot_results(vars: BSSNVariables, time: float, params: BSSNParameters):
+def plot_results(vars: BSSNVariables, t: float, params: BSSNParameters):
     """Create diagnostic plots."""
     ni, nj, nk = vars.conformal_factor.shape
     
@@ -184,7 +237,7 @@ def plot_results(vars: BSSNVariables, time: float, params: BSSNParameters):
     k_center = nk // 2
     
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle(f'BSSN Evolution at t = {time:.3f}')
+    fig.suptitle(f'BSSN Evolution at t = {t:.3f}')
     
     # Conformal factor
     im1 = axes[0, 0].imshow(vars.conformal_factor[:, :, k_center], 
@@ -224,7 +277,7 @@ def plot_results(vars: BSSNVariables, time: float, params: BSSNParameters):
     plt.colorbar(im6, ax=axes[1, 2])
     
     plt.tight_layout()
-    plt.savefig(f'evolution_t_{time:.3f}.png', dpi=150)
+    plt.savefig(f'evolution_t_{t:.3f}.png', dpi=150)
     plt.show()
 
 
@@ -288,7 +341,7 @@ def run_simulation(initial_data_type: str = 'wave',
         print()
     
     # Evolution loop
-    time = 0.0
+    t = 0.0
     step = 0
     next_plot_time = 0.0
     next_save_time = 0.0
@@ -301,14 +354,15 @@ def run_simulation(initial_data_type: str = 'wave',
     
     start_wall_time = time.time()
     
-    while time < t_final:
+    while t < t_final:
         # Evolve one step
-        vars = runge_kutta_4_step(vars, bssn_params, ko_sigma)
-        time += dt
+        # vars = runge_kutta_4_step(vars, bssn_params, ko_sigma)
+        vars = forward_euler_step(vars, bssn_params, ko_sigma)  # evolve using forward Euler
+        t += dt
         step += 1
         
         # Monitor simulation health
-        if not monitor_simulation_health(vars, bssn_params, time):
+        if not monitor_simulation_health(vars, bssn_params, t):
             print("Simulation stopped due to instability")
             break
         
@@ -316,36 +370,36 @@ def run_simulation(initial_data_type: str = 'wave',
         if step % 10 == 0:  # Every 10 steps
             violations = compute_all_constraints(vars, bssn_params)
             norms = compute_constraint_norms(violations)
-            constraint_history.append((time, norms))
-            
+            constraint_history.append((t, norms))
+
             if verbose and step % 100 == 0:
-                print_constraint_summary(violations, time)
-        
+                print_constraint_summary(violations, t)
+
         # Save data
-        if time >= next_save_time:
-            save_data(vars, time, step)
+        if t >= next_save_time:
+            save_data(vars, t, step)
             next_save_time += save_interval
         
         # Plot results
-        if time >= next_plot_time:
-            plot_results(vars, time, bssn_params)
+        if t >= next_plot_time:
+            plot_results(vars, t, bssn_params)
             next_plot_time += plot_interval
     
     wall_time = time.time() - start_wall_time
     
     if verbose:
         print(f"Evolution completed!")
-        print(f"Final time: {time:.4f}")
+        print(f"Final time: {t:.4f}")
         print(f"Total steps: {step}")
         print(f"Wall time: {wall_time:.2f} seconds")
         print(f"Time per step: {wall_time/step*1000:.2f} ms")
-        print(f"Simulation time per wall time: {time/wall_time:.1f}x")
-    
+        print(f"Simulation time per wall time: {t/wall_time:.1f}x")
+
     # Final diagnostics
     violations = compute_all_constraints(vars, bssn_params)
     if verbose:
         print("\nFinal constraint violations:")
-        print_constraint_summary(violations, time)
+        print_constraint_summary(violations, t)
     
     # Plot constraint evolution
     if constraint_history:
