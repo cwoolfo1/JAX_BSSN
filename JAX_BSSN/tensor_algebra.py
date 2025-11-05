@@ -11,7 +11,8 @@ import jax.numpy as jnp
 from jax import jit
 from typing import Tuple
 import numpy as np
-from derivatives import diff1_field, compute_all_derivatives
+
+from JAX_BSSN.derivatives import diff1_field, compute_all_derivatives
 
 
 @jit
@@ -245,22 +246,30 @@ def lie_derivative_metric(vector: jnp.ndarray, metric: jnp.ndarray, dx: float) -
         Lie derivative with shape (3, 3, ni, nj, nk)
     """
 
-    metric_derivs = jnp.stack( [diff1_field(metric, d, dx) for d in range(3)], axis=0)
-    # shape (3, 3, 3, ni, nj, nk)
-    # Vectorized computation using stacking
+    # Compute metric derivatives: ∂g_ij/∂x^k
+    metric_derivs = jnp.zeros((3, 3, 3) + metric.shape[2:])
+    for i in range(3):
+        for j in range(3):
+            for k in range(3):
+                metric_derivs = metric_derivs.at[k, i, j].set(
+                    diff1_field(metric[i, j], k, dx)
+                )
 
-    vector_derivs = jnp.stack( [diff1_field(vector, d, dx) for d in range(3)], axis=0)
-    # shape (3, 3, ni, nj, nk)
-    # Vectorized computation using stacking
+    # Compute vector derivatives: ∂v^k/∂x^i
+    vector_derivs = jnp.zeros((3, 3) + vector.shape[1:])
+    for k in range(3):
+        for i in range(3):
+            vector_derivs = vector_derivs.at[i, k].set(
+                diff1_field(vector[k], i, dx)
+            )
     
+    # Compute the three terms of the Lie derivative
+    # £_v g_ij = v^k ∂g_ij/∂x^k + g_kj ∂v^k/∂x^i + g_ik ∂v^k/∂x^j
     term1 = jnp.einsum('k...,kij...->ij...', vector, metric_derivs)
-    term2 = jnp.einsum('kj...,ki...->ij...', metric, vector_derivs)
-    term3 = jnp.einsum('ik...,kj...->ij...', metric, vector_derivs)
-    # Vectorized computation using einsum
+    term2 = jnp.einsum('kj...,ik...->ij...', metric, vector_derivs)  # g_kj * ∂v^k/∂x^i  
+    term3 = jnp.einsum('ik...,jk...->ij...', metric, vector_derivs)  # g_ik * ∂v^k/∂x^j
 
     lie_deriv = term1 + term2 + term3
-    # add the three terms together
-
 
     return lie_deriv
 
@@ -284,12 +293,10 @@ def lie_derivative_conformal_metric(vector: jnp.ndarray, metric: jnp.ndarray,
     # Start with regular Lie derivative
     lie_deriv = lie_derivative_metric(vector, metric, dx)
 
-    grad_v = jnp.stack( [diff1_field(vector, d, dx) for d in range(3)], axis=0)
-    # shape (3, 3, ni, nj, nk)
-    # Vectorized computation using stacking
-
-    div_v = jnp.sum(grad_v, axis=0)
-    # shape (ni, nj, nk)
+    # Compute divergence: ∂v^k/∂x^k
+    div_v = jnp.zeros(vector.shape[1:])
+    for k in range(3):
+        div_v += diff1_field(vector[k,...], k, dx)
 
     lie_deriv = lie_deriv - (2.0/3.0) * metric * div_v
     # Vectorized computation using broadcasting

@@ -12,8 +12,8 @@ from jax import jit
 from typing import Tuple
 import numpy as np
 
-from derivatives import get_stencil_indices, diff6_field
-from bssn import BSSNVariables
+from JAX_BSSN.derivatives import get_stencil_indices, diff6_field
+from JAX_BSSN.bssn import BSSNVariables
 
 
 @jit

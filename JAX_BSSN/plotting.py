@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple
 
-from bssn import BSSNVariables, BSSNParameters
-from errors import compute_energy_density
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
+from JAX_BSSN.errors import compute_energy_density
 
 
 def save_data(vars: BSSNVariables, t: float, step: int, 

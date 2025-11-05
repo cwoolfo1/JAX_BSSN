@@ -17,16 +17,16 @@ import json
 import time
 
 # Import our modules
-from bssn import BSSNVariables, BSSNParameters, bssn_evolution_step
-from initialization import get_initial_data, compute_adm_mass, compute_adm_momentum
-from kreiss_oliger import apply_ko_dissipation_bssn, get_optimal_dissipation_coefficient
-from errors import (compute_all_constraints, compute_constraint_norms,
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
+from JAX_BSSN.initialization import get_initial_data, compute_adm_mass, compute_adm_momentum
+from JAX_BSSN.kreiss_oliger import apply_ko_dissipation_bssn, get_optimal_dissipation_coefficient
+from JAX_BSSN.errors import (compute_all_constraints, compute_constraint_norms,
                    compute_energy_density, print_constraint_summary,
                    monitor_simulation_health)
-from derivatives import compute_all_derivatives
-from plotting import plot_results, plot_constraint_evolution, save_data
-from initialization import setup_simulation_parameters
-from evolve import forward_euler_step, backward_euler_step
+from JAX_BSSN.derivatives import compute_all_derivatives
+from JAX_BSSN.plotting import plot_results, plot_constraint_evolution, save_data
+from JAX_BSSN.initialization import setup_simulation_parameters
+from JAX_BSSN.evolve import rk4_step
 
 
 
@@ -107,8 +107,7 @@ def run_simulation(initial_data_type: str = 'wave',
 
         print(f"Step {step}, Time {t:.4f}")
         # Evolve one step
-        # vars = forward_euler_step(vars, bssn_params, ko_sigma)  # evolve using forward Euler
-        vars = backward_euler_step(vars, bssn_params, ko_sigma)  # evolve using backward Euler
+        vars = rk4_step(vars, bssn_params, ko_sigma)  # evolve using RK4
         t += dt
         step += 1
         

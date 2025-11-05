@@ -18,10 +18,11 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from derivatives import (diff1_field, compute_all_derivatives, 
+from JAX_BSSN.derivatives import (diff1_field, compute_all_derivatives, 
                         laplacian_3d, divergence_3d)
-from tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
+from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind,
+                           christoffel_symbols_first_kind,
                            ricci_tensor, ricci_scalar, trace_tensor,
                            traceless_part, lie_derivative_conformal_metric,
                            raise_index, lower_index)
@@ -145,46 +146,42 @@ def compute_conformal_ricci(conformal_metric: jnp.ndarray,
     dx = params.dx
     shape = conformal_metric.shape[2:]
     
-    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d, dx) for d in range(3)], axis=0) 
+    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
     # shape (3, 3, 3, ni, nj, nk)
-
-    print("  Completed metric derivatives computation")
 
     # Compute inverse conformal metric
     inv_metric = invert_3x3_metric(conformal_metric)
-
-    print("  Completed inverse metric computation")
     
     # Compute Christoffel symbols
-    christoffel = christoffel_symbols_second_kind(inv_metric, metric_derivs)
-    
-    print("  Completed Christoffel symbols computation")
-    # Compute conformal connection derivatives
-    connection_derivs = jnp.zeros((3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            connection_derivs = connection_derivs.at[i, j].set(
-                diff1_field(conformal_connection[i], j, dx))
-    
-    # Conformal Ricci tensor calculation
-    # This is a simplified version - full implementation would include
-    # second derivatives and more complex terms
-    conformal_ricci = jnp.zeros((3, 3) + shape)
-    
-    for i in range(3):
-        for j in range(3):
-            # Leading order terms
-            term1 = 0.0
-            for k in range(3):
-                term1 += connection_derivs[k, j] * inv_metric[k, i]
-                term1 += connection_derivs[k, i] * inv_metric[k, j]
+    christoffel_first  = christoffel_symbols_first_kind(metric_derivs)
+    christoffel_second = christoffel_symbols_second_kind(inv_metric, metric_derivs)
+
+    mixed_derivatives = jnp.zeros((3, 3, 3, 3) + shape)
+    for m in range(3):
+        for n in range(3):
+            mixed_derivatives = mixed_derivatives.at[m, n, ...].set(
+                diff1_field( metric_derivs[m, ...], n+2, dx))
             
-            term2 = 0.0
-            for k in range(3):
-                for l in range(3):
-                    term2 += inv_metric[k, l] * christoffel[k, i, j] * conformal_connection[l]
-            
-            conformal_ricci = conformal_ricci.at[i, j].set(-0.5 * term1 + term2)
+    term_1 = -0.5 * jnp.einsum('mn...,mnij...->ij...', inv_metric, mixed_derivatives)
+    # compute first term of Ricci tensor
+
+    connection_derivs = jnp.stack( [diff1_field(conformal_connection, d+1, dx) for d in range(3)], axis=0)
+    # shape (3, 3, ni, nj, nk)
+
+    term_2 = (jnp.einsum('mi...,jm...->ij...', inv_metric, connection_derivs) + jnp.einsum('mj...,im...->ij...', inv_metric, connection_derivs)) / 2.0
+    # compute second term of Ricci tensor
+
+    term_3 = ( jnp.einsum('m...,ijm...->ij...', conformal_connection, christoffel_first) + jnp.einsum('m...,jim...->ij...', conformal_connection, christoffel_first) ) / 2.0
+    # compute third term of Ricci tensor
+
+    term_4 = jnp.einsum('mn...,kmi...,jkn...->ij...', inv_metric, christoffel_second, christoffel_first) + \
+        jnp.einsum('mn...,kmj...,kin...->ji...', inv_metric, christoffel_second, christoffel_first)
+    # compute fourth term of Ricci tensor
+
+    term_5 = jnp.einsum('mn...,kim...,kjn...->ij...', inv_metric, christoffel_second, christoffel_first)
+    # compute fifth term of Ricci tensor
+
+    conformal_ricci = term_1 + term_2 + term_3 + term_4 + term_5
     
     return conformal_ricci
 
@@ -260,7 +257,7 @@ def evolve_conformal_metric(vars: BSSNVariables,
     dt_gamma = jnp.zeros_like(vars.conformal_metric)
     
     # First term: -2α A_ij
-    dt_gamma = dt_gamma = -2.0 * vars.lapse * vars.traceless_K
+    dt_gamma = -2.0 * vars.lapse * vars.traceless_K
     
     # Second term: Lie derivative with respect to shift
     lie_deriv = lie_derivative_conformal_metric(vars.shift, vars.conformal_metric, params.dx)
@@ -314,16 +311,14 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     dx = params.dx
     shape = vars.traceless_K.shape[2:]
     dt_A = jnp.zeros_like(vars.traceless_K)
-    print("  Computing conformal Ricci tensor")
     
     # Compute conformal Ricci tensor
     conformal_ricci = compute_conformal_ricci(
         vars.conformal_metric, vars.conformal_connection, params)
-    print("  Completed conformal Ricci tensor computation")
-    # Compute full Ricci tensor  
+        
+    # Compute full Ricci tensor
     ricci = compute_ricci_with_matter(
         conformal_ricci, vars.conformal_metric, vars.conformal_factor, params)
-    print("  Completed full Ricci tensor computation")
     
     # Compute inverse conformal metric
     inv_metric = invert_3x3_metric(vars.conformal_metric)
@@ -497,49 +492,3 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     dt_beta = g * vars.conformal_connection
     
     return dt_beta
-
-
-@jit
-def bssn_evolution_step(vars: BSSNVariables, 
-                       params: BSSNParameters) -> BSSNVariables:
-    """
-    Compute one evolution step of BSSN equations.
-    
-    Args:
-        vars: Current BSSN variables
-        params: Evolution parameters
-        
-    Returns:
-        Updated BSSN variables
-    """
-    dt = params.dt
-    
-    print("  Computing BSSN evolution step")
-    # Compute time derivatives
-    dt_gamma = evolve_conformal_metric(vars, params)
-    print("  Completed conformal metric evolution")
-    dt_W = evolve_conformal_factor(vars, params)
-    print("  Completed conformal factor evolution")
-    dt_A = evolve_traceless_extrinsic_curvature(vars, params)
-    print("  Completed traceless extrinsic curvature evolution")
-    dt_K = evolve_trace_extrinsic_curvature(vars, params)
-    dt_Gamma = evolve_conformal_connection(vars, params)
-    dt_alpha = evolve_lapse(vars, params)
-    dt_beta = evolve_shift(vars, params)
-
-    print("  Completed BSSN evolution step")
-    
-    # Update variables using forward Euler (can be upgraded to RK4)
-    new_vars = BSSNVariables(
-        conformal_metric=vars.conformal_metric + dt * dt_gamma,
-        conformal_factor=vars.conformal_factor + dt * dt_W,
-        traceless_K=vars.traceless_K + dt * dt_A,
-        trace_K=vars.trace_K + dt * dt_K,
-        conformal_connection=vars.conformal_connection + dt * dt_Gamma,
-        lapse=vars.lapse + dt * dt_alpha,
-        shift=vars.shift + dt * dt_beta
-    )
-
-    print("  Completed BSSN variable update")
-
-    return new_vars

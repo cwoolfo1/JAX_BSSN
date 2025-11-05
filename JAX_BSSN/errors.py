@@ -11,9 +11,9 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from bssn import BSSNVariables, BSSNParameters
-from derivatives import diff1_field, divergence_3d, compute_all_derivatives
-from tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
+from JAX_BSSN.derivatives import diff1_field, divergence_3d, compute_all_derivatives
+from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind, ricci_tensor,
                            ricci_scalar, trace_tensor)
 

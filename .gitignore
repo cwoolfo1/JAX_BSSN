@@ -1,4 +1,5 @@
 __pycache__/*
+JAX_BSSN/__pycache__/*
 *.png
 *.npz
 *.npy
