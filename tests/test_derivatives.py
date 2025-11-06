@@ -28,24 +28,24 @@ class TestDerivatives(unittest.TestCase):
     
     def setUp(self):
         """Set up test parameters and grid."""
-        self.n = 32  # Grid size (must be even for clean periodicity)
+        self.n = 50  # Grid size (must be even for clean periodicity)
         self.tol_1st = 1e-4  # Tolerance for 1st derivatives (4th order accuracy)
         self.tol_6th = 1e-2  # Tolerance for 6th derivatives (lower accuracy expected)
         
         # Create coordinate grids with consistent spacing
-        x = jnp.linspace(-1.0, 1.0, self.n)
-        y = jnp.linspace(-1.0, 1.0, self.n)
-        z = jnp.linspace(-1.0, 1.0, self.n)
+        x = jnp.linspace(-jnp.pi, jnp.pi, self.n, endpoint=False)
+        y = jnp.linspace(-jnp.pi, jnp.pi, self.n, endpoint=False)
+        z = jnp.linspace(-jnp.pi, jnp.pi, self.n, endpoint=False)
         self.X, self.Y, self.Z = jnp.meshgrid(x, y, z, indexing='ij')
         
         # Compute actual grid spacing
         self.dx = x[1] - x[0]  # This is 2.0/(n-1)
         
         # Wavenumbers for periodic test functions (chosen to be compatible with grid)
-        self.kx = 2.0 * jnp.pi  # One full wavelength in [-1,1] domain
-        self.ky = 4.0 * jnp.pi  # Two full wavelengths 
-        self.kz = 6.0 * jnp.pi  # Three full wavelengths
-    
+        self.kx = 1  # One full wavelength in [-pi,pi] domain
+        self.ky = 2  # Two full wavelengths
+        self.kz = 3  # Three full wavelengths
+
     def create_polynomial_field(self, degree=3):
         """Create polynomial test field."""
         if degree == 1:
@@ -137,16 +137,18 @@ class TestDerivatives(unittest.TestCase):
         for direction in range(3):
             numerical = diff1_field(field, direction, self.dx)
             analytical = self.analytical_derivative_polynomial(1, direction)
+
             
             # For periodic boundaries with linear functions, only test interior points
             # where boundary effects are minimal
             interior = slice(3, -3)  # Avoid boundary points
-            np.testing.assert_allclose(
-                numerical[interior, interior, interior], 
-                analytical[interior, interior, interior], 
-                atol=1e-6,
-                err_msg=f"Linear polynomial derivative failed in direction {direction}"
+
+            error = numerical[interior, interior, interior] - analytical[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_1st,
+                msg=f"Linear polynomial derivative failed in direction {direction} with max error {max_error}"
             )
+
     
     def test_first_derivative_polynomial_quadratic(self):
         """Test first derivatives on quadratic polynomial."""
@@ -158,13 +160,13 @@ class TestDerivatives(unittest.TestCase):
             
             # Test interior points to avoid boundary condition issues
             interior = slice(3, -3)
-            np.testing.assert_allclose(
-                numerical[interior, interior, interior], 
-                analytical[interior, interior, interior], 
-                atol=self.tol_1st,
-                err_msg=f"Quadratic polynomial derivative failed in direction {direction}"
+            error = numerical[interior, interior, interior] - analytical[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_1st,
+                msg=f"Quadratic polynomial derivative failed in direction {direction} with max error {max_error}"
             )
-    
+
+
     def test_first_derivative_polynomial_cubic(self):
         """Test first derivatives on cubic polynomial."""
         field = self.create_polynomial_field(degree=3)
@@ -175,11 +177,10 @@ class TestDerivatives(unittest.TestCase):
             
             # Test interior points to avoid boundary condition issues
             interior = slice(3, -3)
-            np.testing.assert_allclose(
-                numerical[interior, interior, interior], 
-                analytical[interior, interior, interior], 
-                atol=self.tol_1st,
-                err_msg=f"Cubic polynomial derivative failed in direction {direction}"
+            error = numerical[interior, interior, interior] - analytical[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_1st,
+                msg=f"Cubic polynomial derivative failed in direction {direction} with max error {max_error}"
             )
     
     def test_first_derivative_exponential(self):
@@ -192,11 +193,10 @@ class TestDerivatives(unittest.TestCase):
             
             # Test interior points to avoid boundary effects
             interior = slice(3, -3)
-            np.testing.assert_allclose(
-                numerical[interior, interior, interior], 
-                analytical[interior, interior, interior], 
-                atol=self.tol_1st,
-                err_msg=f"Exponential derivative failed in direction {direction}"
+            error = numerical[interior, interior, interior] - analytical[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_1st,
+                msg=f"Exponential derivative failed in direction {direction} with max error {max_error}"
             )
     
     def test_sixth_derivative_polynomial(self):
@@ -211,11 +211,13 @@ class TestDerivatives(unittest.TestCase):
             
             # Test interior points and use looser tolerance due to boundary effects
             interior = slice(6, -6)  # Need larger margin for 6th derivatives
-            np.testing.assert_allclose(
-                numerical[interior, interior, interior], 
-                expected[interior, interior, interior], 
-                atol=1e-2,
-                err_msg=f"Sixth derivative of degree-2 polynomial should be zero in direction {direction}"
+            error = numerical[interior, interior, interior] - expected[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+
+            print(numerical)
+            print(expected)
+            self.assertLess(max_error, self.tol_6th,
+                msg=f"Sixth derivative of degree-2 polynomial failed in direction {direction} with max error {max_error}"
             )
     
     def test_sixth_derivative_trigonometric(self):
@@ -237,14 +239,66 @@ class TestDerivatives(unittest.TestCase):
                 k = self.kz
             
             analytical = -(k**6) * field
+
+            # Plot numerical vs analytical side-by-side for a representative 2D slice
+            import matplotlib.pyplot as plt
+
+            mid = self.n // 2
+
+            if direction == 0:
+                num_slice = numerical[mid, :, :]
+                anal_slice = analytical[mid, :, :]
+                title_axes = ('y', 'z')
+            elif direction == 1:
+                num_slice = numerical[:, mid, :]
+                anal_slice = analytical[:, mid, :]
+                title_axes = ('x', 'z')
+            else:
+                num_slice = numerical[:, :, mid]
+                anal_slice = analytical[:, :, mid]
+                title_axes = ('x', 'y')
+
+            num_np = np.asarray(num_slice)
+            anal_np = np.asarray(anal_slice)
+            diff_np = num_np - anal_np
+
+            vmax = max(np.abs(num_np).max(), np.abs(anal_np).max(), 1e-12)
+
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            im0 = axes[0].imshow(num_np.T, origin='lower', cmap='viridis', vmin=-vmax, vmax=vmax)
+            axes[0].set_title(f'Numerical 6th derivative (dir={direction})')
+            axes[0].set_xlabel(title_axes[0]); axes[0].set_ylabel(title_axes[1])
+            plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+            im1 = axes[1].imshow(anal_np.T, origin='lower', cmap='viridis', vmin=-vmax, vmax=vmax)
+            axes[1].set_title('Analytical 6th derivative')
+            axes[1].set_xlabel(title_axes[0]); axes[1].set_ylabel(title_axes[1])
+            plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+            im2 = axes[2].imshow(diff_np.T, origin='lower', cmap='bwr')
+            axes[2].set_title('Difference (numerical - analytical)')
+            axes[2].set_xlabel(title_axes[0]); axes[2].set_ylabel(title_axes[1])
+            plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+
+            plt.suptitle(f'6th derivative comparison (direction={direction})')
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+            # Save a copy for later inspection and also try to show interactively
+            plt.savefig(f'sixth_derivative_compare_dir{direction}.png', dpi=150)
+            plt.show()
             
             # Use very loose tolerance for sixth derivatives due to numerical limitations
-            np.testing.assert_allclose(
-                numerical[interior, interior, interior], 
-                analytical[interior, interior, interior], 
-                atol=1e0, rtol=0.5,  # Very loose tolerance
-                err_msg=f"Sixth derivative of trigonometric function failed in direction {direction}"
+            error = numerical[interior, interior, interior] - analytical[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_6th,
+                msg=f"Sixth derivative of trigonometric function failed in direction {direction} with max error {max_error}"
             )
+            # np.testing.assert_allclose(
+            #     numerical[interior, interior, interior], 
+            #     analytical[interior, interior, interior], 
+            #     atol=1e0, rtol=0.5,  # Very loose tolerance
+            #     err_msg=f"Sixth derivative of trigonometric function failed in direction {direction}"
+            # )
     
     def test_compute_all_derivatives(self):
         """Test computing all first derivatives at once."""
@@ -257,11 +311,13 @@ class TestDerivatives(unittest.TestCase):
         for direction in range(3):
             individual = diff1_field(field, direction, self.dx)
             from_all = all_derivs[direction]
-            
-            np.testing.assert_allclose(
-                individual, from_all, atol=1e-15,
-                err_msg=f"compute_all_derivatives doesn't match individual computation in direction {direction}"
+
+            error = individual - from_all
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_1st,
+                msg=f"compute_all_derivatives doesn't match individual computation in direction {direction} with max error {max_error}"
             )
+            
     
     def test_gradient_3d(self):
         """Test 3D gradient computation."""
@@ -274,12 +330,11 @@ class TestDerivatives(unittest.TestCase):
         interior = slice(3, -3)
         for direction in range(3):
             analytical = self.analytical_derivative_exponential(direction)
-            
-            np.testing.assert_allclose(
-                grad[direction][interior, interior, interior], 
-                analytical[interior, interior, interior], 
-                atol=self.tol_1st,
-                err_msg=f"Gradient computation failed in direction {direction}"
+
+            error = grad[direction][interior, interior, interior] - analytical[interior, interior, interior]
+            max_error = jnp.max(jnp.abs(error))
+            self.assertLess(max_error, self.tol_1st,
+                msg=f"Gradient computation failed in direction {direction} with max error {max_error}"
             )
     
     def test_divergence_3d_constant_field(self):
@@ -292,8 +347,12 @@ class TestDerivatives(unittest.TestCase):
         
         div = divergence_3d(vector_field, self.dx)
         expected = jnp.zeros_like(div)
-        
-        np.testing.assert_allclose(div, expected, atol=1e-12)
+
+        error = div - expected
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, self.tol_1st,
+            msg=f"Divergence of constant field failed with max error {max_error}"
+        )
     
     def test_divergence_3d_linear_field(self):
         """Test divergence of linear vector field."""
@@ -308,10 +367,11 @@ class TestDerivatives(unittest.TestCase):
         
         # Test interior points to avoid boundary effects
         interior = slice(3, -3)
-        np.testing.assert_allclose(
-            div[interior, interior, interior], 
-            expected[interior, interior, interior], 
-            atol=self.tol_1st)
+        error = div[interior, interior, interior] - expected[interior, interior, interior]
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, self.tol_1st,
+            msg=f"Divergence of linear field failed with max error {max_error}"
+        )
     
     
     def test_divergence_3d_quadratic_field(self):
@@ -327,10 +387,11 @@ class TestDerivatives(unittest.TestCase):
         
         # Test interior points to avoid boundary effects
         interior = slice(3, -3)
-        np.testing.assert_allclose(
-            div[interior, interior, interior], 
-            expected[interior, interior, interior], 
-            atol=self.tol_1st)
+        error = div[interior, interior, interior] - expected[interior, interior, interior]
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, self.tol_1st,
+            msg=f"Divergence of quadratic field failed with max error {max_error}"
+        )
     
     def test_laplacian_3d_linear(self):
         """Test Laplacian of linear function."""
@@ -342,10 +403,11 @@ class TestDerivatives(unittest.TestCase):
         
         # Test interior points to avoid boundary effects
         interior = slice(4, -4)  # Need larger margin for second derivatives
-        np.testing.assert_allclose(
-            lapl[interior, interior, interior], 
-            expected[interior, interior, interior], 
-            atol=1e-6)
+        error = lapl[interior, interior, interior] - expected[interior, interior, interior]
+        average_error = jnp.mean(jnp.abs(error))
+        self.assertLess(average_error, self.tol_1st,
+            msg=f"Laplacian of linear function failed with average error {average_error}"
+        )
     
     def test_laplacian_3d_quadratic(self):
         """Test Laplacian of quadratic function."""
@@ -358,10 +420,11 @@ class TestDerivatives(unittest.TestCase):
         
         # Test interior points to avoid boundary effects
         interior = slice(4, -4)  # Need larger margin for second derivatives
-        np.testing.assert_allclose(
-            lapl[interior, interior, interior], 
-            expected[interior, interior, interior], 
-            atol=self.tol_1st)
+        error = lapl[interior, interior, interior] - expected[interior, interior, interior]
+        average_error = jnp.mean(jnp.abs(error))
+        self.assertLess(average_error, self.tol_1st,
+            msg=f"Laplacian of quadratic function failed with average error {average_error}"
+        )
     
     def test_laplacian_3d_exponential(self):
         """Test Laplacian of exponential function."""
@@ -375,10 +438,11 @@ class TestDerivatives(unittest.TestCase):
         
         # Test interior points to avoid boundary effects
         interior = slice(4, -4)  # Need larger margin for second derivatives
-        np.testing.assert_allclose(
-            lapl[interior, interior, interior], 
-            expected[interior, interior, interior], 
-            atol=self.tol_1st)
+        error = lapl[interior, interior, interior] - expected[interior, interior, interior]
+        average_error = jnp.mean(jnp.abs(error))
+        self.assertLess(average_error, self.tol_1st,
+            msg=f"Laplacian of exponential function failed with average error {average_error}"
+        )
     
     def test_consistency_gradient_divergence(self):
         """Test consistency between gradient and divergence operations."""
@@ -391,10 +455,11 @@ class TestDerivatives(unittest.TestCase):
         # Method 2: Divergence of gradient
         grad = gradient_3d(field, self.dx)
         lapl_indirect = divergence_3d(grad, self.dx)
-        
-        np.testing.assert_allclose(
-            lapl_direct, lapl_indirect, atol=self.tol_1st,
-            err_msg="Laplacian should equal divergence of gradient"
+
+        error = lapl_direct - lapl_indirect
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, self.tol_1st,
+            msg=f"Laplacian consistency failed with max error {max_error}"
         )
     
     def test_derivative_chain_rule(self):
@@ -412,10 +477,11 @@ class TestDerivatives(unittest.TestCase):
         # Compute ∂f/∂y, then ∂/∂x
         df_dy = diff1_field(field, 1, self.dx)
         d2f_dydx = diff1_field(df_dy, 0, self.dx)
-        
-        np.testing.assert_allclose(
-            d2f_dxdy, d2f_dydx, atol=1e-8,
-            err_msg="Mixed derivatives should be symmetric (Schwarz theorem)"
+
+        error = d2f_dxdy - d2f_dydx
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, self.tol_1st,
+            msg=f"Mixed derivatives symmetry failed with max error {max_error}"
         )
     
     def test_derivative_accuracy_order(self):

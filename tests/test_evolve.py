@@ -393,19 +393,16 @@ class TestRK4Evolution(unittest.TestCase):
         # Compute numerical time derivatives
         dt_conformal_metric_numerical = (vars_t_plus_dt.conformal_metric - vars_t.conformal_metric) / dt_small
         dt_conformal_factor_numerical = (vars_t_plus_dt.conformal_factor - vars_t.conformal_factor) / dt_small
+
+
+        error = dt_conformal_factor_numerical - dt_vars_analytical.conformal_factor
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, 1e-5, "Max error in conformal factor time derivative too large")
+
+        error = dt_conformal_metric_numerical - dt_vars_analytical.conformal_metric
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, 1e-5, "Max error in conformal metric time derivative too large")
         
-        # Check consistency (should match within numerical precision)
-        np.testing.assert_allclose(
-            dt_conformal_metric_numerical, dt_vars_analytical.conformal_metric,
-            atol=1e-5, rtol=1e-5,
-            err_msg="Conformal metric time derivatives inconsistent"
-        )
-        
-        np.testing.assert_allclose(
-            dt_conformal_factor_numerical, dt_vars_analytical.conformal_factor,
-            atol=1e-5, rtol=1e-5,
-            err_msg="Conformal factor time derivatives inconsistent"
-        )
 
 if __name__ == '__main__':
     # Configure JAX for testing

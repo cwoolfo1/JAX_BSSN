@@ -54,8 +54,11 @@ def diff1_field(field: jnp.ndarray, direction: int, dx: float) -> jnp.ndarray:
     field_backward1 = jnp.roll(field, 1, axis=direction)
     field_backward2 = jnp.roll(field, 2, axis=direction)
 
+    dfdx = 2/3 * (field_forward1 - field_backward1) / dx + \
+            -1/12 * (field_forward2 - field_backward2) / dx
+    # Combine 2nd-order and 4th-order central differences for 4th-order accuracy
 
-    return ( (-1/12)*field_forward2 + (2/3)*field_forward1 + (-2/3)*field_backward1 + (1/12)*field_backward2 ) / dx
+    return dfdx
     # Using 4th-order central difference
 
 @partial(jit, static_argnames=['direction'])
@@ -75,7 +78,6 @@ def diff6_field(field: jnp.ndarray, direction: int, dx: float) -> jnp.ndarray:
 
     # 6th order finite difference coefficients
     # [1, -6, 15, -20, 15, -6, 1] / (dx^6)
-    coeffs = jnp.array([1, -6, 15, -20, 15, -6, 1]) / (dx**6)
 
     forward3 = jnp.roll(field, -3, axis=direction)
     forward2 = jnp.roll(field, -2, axis=direction)
@@ -86,7 +88,7 @@ def diff6_field(field: jnp.ndarray, direction: int, dx: float) -> jnp.ndarray:
     # shift the field to get stencil points
 
     d6fdx6 = ( forward3 + (-6)*forward2 + 15*forward1 + (-20)*field +
-               15*backward1 + (-6)*backward2 + backward3 ) / (dx**6)
+               15*backward1 + (-6)*backward2 + backward3 ) / ( dx**6 )
     # Apply the finite difference formula directly
 
     return d6fdx6

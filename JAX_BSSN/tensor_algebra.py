@@ -298,9 +298,9 @@ def lie_derivative_conformal_metric(vector: jnp.ndarray, metric: jnp.ndarray,
     for k in range(3):
         div_v += diff1_field(vector[k,...], k, dx)
 
-    lie_deriv = lie_deriv - (2.0/3.0) * metric * div_v
-    # Vectorized computation using broadcasting
-    
+    metric_div_v = jnp.einsum('ij..., ...->ij...', metric, div_v)
+    lie_deriv = lie_deriv - (2.0/3.0) * metric_div_v
+
     return lie_deriv
 
 
