@@ -1,6 +1,6 @@
-__pycache__/*
-JAX_BSSN/__pycache__/*
-tests/__pycache__/*
+__pycache__/
+JAX_BSSN/__pycache__/
+tests/__pycache__/
 *.png
 *.npz
 *.npy

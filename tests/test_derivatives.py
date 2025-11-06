@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit
 import jax
+from scipy import stats
 
 from JAX_BSSN.derivatives import (
     diff1_field,
@@ -27,6 +28,27 @@ class TestDerivatives(unittest.TestCase):
     """Test suite for finite difference derivatives."""
 
     def test_first_derivative_1d_trigonometric(self):
+        """
+        Test that diff1_field correctly computes the first derivative of a 1D trigonometric field
+        embedded in a 3D periodic domain.
+        Specifically:
+        - Construct a periodic 3D grid with coordinates x, y, z in [-pi, pi) and resolution 100 per axis.
+        - Define the scalar field f(X,Y,Z) = sin(X), which varies only along the x-axis.
+        - Compute the analytical derivative d/dx f = cos(X).
+        - Use diff1_field to compute numerical derivatives along axes 0 (x), 1 (y) and 2 (z).
+        Assertions:
+        - The numerical d/dx matches the analytical result with mean absolute error < 1e-6 and
+            maximum absolute error < 5e-6.
+        - The numerical d/dy and d/dz are effectively zero with the same error tolerances.
+        Purpose:
+        - Verify that the finite-difference implementation in diff1_field accurately differentiates
+            smooth periodic trigonometric functions along the direction of variation and does not
+            introduce spurious cross-axis derivatives.
+        Notes:
+        - The test relies on periodic sampling (endpoint=False) and a uniform spacing dx = x[1] - x[0].
+        - Failures indicate either insufficient stencil accuracy or incorrect axis handling in diff1_field.
+        """
+
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
         y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -57,9 +79,9 @@ class TestDerivatives(unittest.TestCase):
         mean_error_z = jnp.mean(jnp.abs(dfdz_error))
         # calculate the mean error
 
-        self.assertLess(mean_error_x, 1e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-        self.assertLess(mean_error_y, 1e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-        self.assertLess(mean_error_z, 1e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
+        self.assertLess(mean_error_x, 1e-6, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 1e-6, msg=f"Trigonometric derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 1e-6, msg=f"Trigonometric derivative failed in z direction with mean error {mean_error_z}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error_x = jnp.max(jnp.abs(dfdx_error))
@@ -67,12 +89,39 @@ class TestDerivatives(unittest.TestCase):
         max_error_z = jnp.max(jnp.abs(dfdz_error))
         # calculate the max error
 
-        self.assertLess(max_error_x, 5e-6, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-        self.assertLess(max_error_y, 5e-6, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-        self.assertLess(max_error_z, 5e-6, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
+        self.assertLess(max_error_x, 5e-6, msg=f'Trigonometric derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-6, msg=f'Trigonometric derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-6, msg=f'Trigonometric derivative failed in z direction with max error {max_error_z}')
         # ensure the max errors in the derivatives are below a certain threshold
 
     def test_first_derivative_2d_trigonometric(self):
+        """
+        Test that the first-order finite-difference derivative routine correctly
+        computes partial derivatives for a separable 2D trigonometric field
+        embedded in a 3D periodic grid.
+        Setup:
+        - Construct a uniform, periodic grid in each coordinate on [-pi, pi)
+            with 100 points per axis and spacing dx determined from the x-grid.
+        - Build the scalar field f(X, Y, Z) = sin(X) * cos(Y) on the meshgrid.
+        Analytical derivatives:
+        - ∂f/∂x =  cos(X) * cos(Y)
+        - ∂f/∂y = -sin(X) * sin(Y)
+        - ∂f/∂z =  0
+        What is tested:
+        - Compute numerical derivatives using diff1_field(f, axis, dx) for axis
+            = 0 (x), 1 (y) and 2 (z).
+        - Compute absolute errors between numerical and analytical results.
+        - Assert that the mean absolute error for x, y and z is below 1e-6.
+        - Assert that the maximum absolute error for x, y and z is below 5e-6.
+        Assumptions and notes:
+        - The derivative routine handles periodic boundaries consistently with the
+            constructed grid.
+        - dx is uniform and equal to the spacing along the x-axis; the test
+            assumes the same spacing is applicable for y and z directions.
+        - Thresholds are chosen to reflect expected accuracy of the finite-difference
+            implementation on the given resolution.
+        """
+
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
         y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -106,9 +155,9 @@ class TestDerivatives(unittest.TestCase):
         mean_error_z = jnp.mean(jnp.abs(dfdz_error))
         # calculate the mean error
 
-        self.assertLess(mean_error_x, 1e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-        self.assertLess(mean_error_y, 1e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-        self.assertLess(mean_error_z, 1e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
+        self.assertLess(mean_error_x, 1e-6, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 1e-6, msg=f"Trigonometric derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 1e-6, msg=f"Trigonometric derivative failed in z direction with mean error {mean_error_z}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error_x = jnp.max(jnp.abs(dfdx_error))
@@ -116,12 +165,36 @@ class TestDerivatives(unittest.TestCase):
         max_error_z = jnp.max(jnp.abs(dfdz_error))
         # calculate the max error
 
-        self.assertLess(max_error_x, 5e-6, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-        self.assertLess(max_error_y, 5e-6, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-        self.assertLess(max_error_z, 5e-6, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
+        self.assertLess(max_error_x, 5e-6, msg=f'Trigonometric derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-6, msg=f'Trigonometric derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-6, msg=f'Trigonometric derivative failed in z direction with max error {max_error_z}')
         # ensure the max errors in the derivatives are below a certain threshold
 
     def test_first_derivative_3d_trigonometric(self):
+        """
+        Test that numerical first derivatives computed by diff1_field match analytical
+        derivatives for a smooth 3D trigonometric scalar field.
+        This test builds a periodic 3D grid on [-pi, pi) with 100 points per axis and
+        spacing dx, defines the scalar field
+            f(x,y,z) = sin(x) * cos(y) * sin(z)
+        and its analytical first derivatives
+            df/dx =  cos(x) * cos(y) * sin(z)
+            df/dy = -sin(x) * sin(y) * sin(z)
+            df/dz =  sin(x) * cos(y) * cos(z)
+        It computes numerical derivatives along each axis with diff1_field and compares
+        them to the analytical expressions. The test asserts that, for each axis,
+        the mean absolute error is below 1e-6 and the maximum absolute error is below
+        5e-6. These tolerances reflect the expected accuracy of the finite-difference
+        (or spectral) derivative implementation on a smooth, periodic trigonometric
+        field using the chosen resolution.
+        Notes:
+        - The test uses jax.numpy (jnp) arrays and assumes periodicity consistent with
+          the grid construction (endpoint=False).
+        - Failure indicates a regression or bug in diff1_field or an unexpected change
+          in boundary handling / grid spacing.
+        """
+
+
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
         y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -160,9 +233,9 @@ class TestDerivatives(unittest.TestCase):
         mean_error_z = jnp.mean(jnp.abs(dfdz_error))
         # calculate the mean error
 
-        self.assertLess(mean_error_x, 1e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-        self.assertLess(mean_error_y, 1e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-        self.assertLess(mean_error_z, 1e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
+        self.assertLess(mean_error_x, 1e-6, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 1e-6, msg=f"Trigonometric derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 1e-6, msg=f"Trigonometric derivative failed in z direction with mean error {mean_error_z}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error_x = jnp.max(jnp.abs(dfdx_error))
@@ -170,13 +243,30 @@ class TestDerivatives(unittest.TestCase):
         max_error_z = jnp.max(jnp.abs(dfdz_error))
         # calculate the max error
 
-        self.assertLess(max_error_x, 5e-6, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-        self.assertLess(max_error_y, 5e-6, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-        self.assertLess(max_error_z, 5e-6, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
+        self.assertLess(max_error_x, 5e-6, msg=f'Trigonometric derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-6, msg=f'Trigonometric derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-6, msg=f'Trigonometric derivative failed in z direction with max error {max_error_z}')
         # ensure the max errors in the derivatives are below a certain threshold
 
 
     def test_first_derivative_1d_quadratic(self):
+        """
+        Test the first-order finite-difference derivative operator on a simple 1D quadratic field
+        embedded in a 3D grid.
+        This test constructs a regular 3D mesh (X, Y, Z) from 1D coordinates spaced by dx and
+        defines a scalar field f(X,Y,Z) = X**2 (i.e. a quadratic function varying only along
+        the x-axis). The analytical x-derivative is 2*X, while derivatives along y and z
+        should be zero.
+        The numerical derivatives are computed with diff1_field for axes 0, 1 and 2 using the
+        grid spacing dx. To avoid boundary artifacts introduced by the non-periodic quadratic
+        function, the first and last three grid points are excluded from the error metrics.
+        Assertions:
+        - Mean absolute error for each axis (over the interior slice) is below 5e-6.
+        - Maximum absolute error for each axis (over the interior slice) is below 5e-5.
+        Raises:
+        - AssertionError if any of the error thresholds are exceeded.
+        """
+
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
         y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -211,9 +301,9 @@ class TestDerivatives(unittest.TestCase):
         # calculate the mean error
 
 
-        self.assertLess(mean_error_x, 5e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-        self.assertLess(mean_error_y, 5e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-        self.assertLess(mean_error_z, 5e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
+        self.assertLess(mean_error_x, 5e-6, msg=f"Quadratic polynomial derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 5e-6, msg=f"Quadratic polynomial derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 5e-6, msg=f"Quadratic polynomial derivative failed in z direction with mean error {mean_error_z}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error_x = jnp.max(jnp.abs(dfdx_error[_slice, _slice, _slice]))
@@ -221,13 +311,43 @@ class TestDerivatives(unittest.TestCase):
         max_error_z = jnp.max(jnp.abs(dfdz_error[_slice, _slice, _slice]))
         # calculate the max error
 
-        self.assertLess(max_error_x, 5e-5, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-        self.assertLess(max_error_y, 5e-5, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-        self.assertLess(max_error_z, 5e-5, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
+        self.assertLess(max_error_x, 5e-5, msg=f'Quadratic polynomial derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-5, msg=f'Quadratic polynomial derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-5, msg=f'Quadratic polynomial derivative failed in z direction with max error {max_error_z}')
         # ensure the max errors in the derivatives are below a certain threshold
 
 
     def test_first_derivative_2d_quadratic(self):
+        """
+        Test that the first-order finite-difference operator `diff1_field` computes
+        accurate partial derivatives for a simple 2D quadratic scalar field embedded
+        in a 3D periodic grid.
+        Setup:
+        - Construct a uniform grid in x, y, z with 100 points each over [-pi, pi)
+            (endpoint=False) and compute the grid spacing dx from the x array.
+        - Create meshgrid with indexing='ij' and define the scalar field
+            f(x,y,z) = x^2 + y^2 (no z-dependence).
+        - Analytical derivatives:
+                d/dx f = 2*x
+                d/dy f = 2*y
+                d/dz f = 0
+        What is tested:
+        - Compute numerical partial derivatives using diff1_field along axes 0, 1, 2.
+        - Evaluate absolute errors between numerical and analytical derivatives.
+        - Ignore boundary points (slice(3, -3)) because the polynomial is not periodic
+            and finite-difference stencils touch boundaries.
+        - Check that the mean absolute error over the interior is below 5e-6 for x and y
+            (and near zero for z), and that the maximum absolute error over the interior
+            is below 5e-5 for all three directions.
+        Purpose:
+        - Verify correctness and expected accuracy of diff1_field on smooth fields,
+            ensure correct axis handling, spacing usage, and interior-boundary treatment.
+        Notes:
+        - Uses JAX numpy arrays (jnp) and assumes uniform spacing dx.
+        - Thresholds are chosen to reflect expected truncation error for the stencil
+            and resolution used.
+        """
+
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
         y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -266,9 +386,9 @@ class TestDerivatives(unittest.TestCase):
         # calculate the mean error
 
 
-        self.assertLess(mean_error_x, 5e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-        self.assertLess(mean_error_y, 5e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-        self.assertLess(mean_error_z, 5e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
+        self.assertLess(mean_error_x, 5e-6, msg=f"Quadratic polynomial derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 5e-6, msg=f"Quadratic polynomial derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 5e-6, msg=f"Quadratic polynomial derivative failed in z direction with mean error {mean_error_z}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error_x = jnp.max(jnp.abs(dfdx_error[_slice, _slice, _slice]))
@@ -276,13 +396,37 @@ class TestDerivatives(unittest.TestCase):
         max_error_z = jnp.max(jnp.abs(dfdz_error[_slice, _slice, _slice]))
         # calculate the max error
 
-        self.assertLess(max_error_x, 5e-5, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-        self.assertLess(max_error_y, 5e-5, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-        self.assertLess(max_error_z, 5e-5, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
+        self.assertLess(max_error_x, 5e-5, msg=f'Quadratic polynomial derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-5, msg=f'Quadratic polynomial derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-5, msg=f'Quadratic polynomial derivative failed in z direction with max error {max_error_z}')
         # ensure the max errors in the derivatives are below a certain threshold
 
 
     def test_first_derivative_3d_quadratic(self):
+        """
+        Test the numerical first-derivative operator on a 3D quadratic field.
+        This test constructs a uniform 3D Cartesian grid (100 points per axis) over
+        [-π, π) in each coordinate, builds the scalar field
+            f(x, y, z) = x**2 + y**2 + z**2,
+        and compares the numerically computed first partial derivatives returned by
+        diff1_field to the analytical derivatives
+            ∂f/∂x = 2*x,  ∂f/∂y = 2*y,  ∂f/∂z = 2*z.
+        Key details:
+        - The grid spacing dx is taken from the 1D linspace.
+        - diff1_field is invoked with axis indices 0, 1, 2 to compute derivatives
+          along x, y, z respectively.
+        - Boundary points are excluded from the error statistics via _slice = slice(3, -3)
+          because the quadratic field is not periodic and derivative stencils can be
+          inaccurate near the domain boundaries.
+        - The test asserts both mean and maximum absolute errors on the interior:
+            mean error < 5e-6
+            max  error < 5e-5
+          These tolerances encode the expected numerical accuracy of diff1_field for this
+          smooth polynomial input.
+        A failure indicates an incorrect implementation or incorrect handling of grid
+        spacing, axis ordering, boundary conditions, or stencil accuracy in diff1_field.
+        """
+
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
         y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -325,9 +469,9 @@ class TestDerivatives(unittest.TestCase):
         # calculate the mean error
 
 
-        self.assertLess(mean_error_x, 5e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-        self.assertLess(mean_error_y, 5e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-        self.assertLess(mean_error_z, 5e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
+        self.assertLess(mean_error_x, 5e-6, msg=f"Quadratic polynomial derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 5e-6, msg=f"Quadratic polynomial derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 5e-6, msg=f"Quadratic polynomial derivative failed in z direction with mean error {mean_error_z}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error_x = jnp.max(jnp.abs(dfdx_error[_slice, _slice, _slice]))
@@ -335,13 +479,208 @@ class TestDerivatives(unittest.TestCase):
         max_error_z = jnp.max(jnp.abs(dfdz_error[_slice, _slice, _slice]))
         # calculate the max error
 
-        self.assertLess(max_error_x, 5e-5, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-        self.assertLess(max_error_y, 5e-5, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-        self.assertLess(max_error_z, 5e-5, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
+        self.assertLess(max_error_x, 5e-5, msg=f'Quadratic polynomial derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-5, msg=f'Quadratic polynomial derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-5, msg=f'Quadratic polynomial derivative failed in z direction with max error {max_error_z}')
         # ensure the max errors in the derivatives are below a certain threshold
 
 
+    def test_compute_all_derivatives(self):
+        """
+        Test that compute_all_derivatives correctly computes first-order spatial derivatives
+        on a 3D periodic grid for a simple analytic field.
+        This test constructs a uniform, periodic 3D meshgrid using jnp.linspace over
+        [-pi, pi) with 100 points in each dimension and spacing dx. It defines a scalar
+        field f(x,y,z) = sin(x) (i.e., variation only along the x-axis) and the known
+        analytical derivative dfdx = cos(x). The test invokes compute_all_derivatives(f, dx)
+        to obtain numerical derivatives along the x, y and z axes.
+        Assertions:
+        - The mean absolute error between the numerical dfdx and analytical cos(x) is below 1e-6.
+        - The mean absolute errors for the derivatives in y and z are below 1e-6 (they should be zero).
+        - The maximum absolute error for dfdx is below 5e-6.
+        - The maximum absolute errors for dy and dz are below 5e-6.
+        This verifies both accuracy (against the analytical derivative) and that the
+        implementation does not introduce spurious derivatives in directions where the
+        field is constant. Uses JAX (jnp) arrays and assumes periodic boundary behavior
+        consistent with the linspace/endpoint=False setup.
+        """
+
+    
+        x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        z = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        dx = x[1] - x[0]
+
+        X, Y, Z = jnp.meshgrid(x,y,z, indexing='ij')
+        # create the meshgrid
+
+        f = jnp.sin(X)
+        # create a sin vector field along the x direction
+        dfdx_analytical = jnp.cos(X)
+        # define the derivative of the vector field analytically
+                
+        all_derivs = compute_all_derivatives(f, dx)
+        # calculate all derivatives at once
+
+        dfdx_error = all_derivs[0] - dfdx_analytical
+        dfdy_error = all_derivs[1]
+        dfdz_error = all_derivs[2]
+        # calculate the errors in the derivatives
+
+        mean_error_x = jnp.mean(jnp.abs(dfdx_error))
+        mean_error_y = jnp.mean(jnp.abs(dfdy_error))
+        mean_error_z = jnp.mean(jnp.abs(dfdz_error))
+        # calculate the mean error
+
+        self.assertLess(mean_error_x, 1e-6, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 1e-6, msg=f"Trigonometric derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 1e-6, msg=f"Trigonometric derivative failed in z direction with mean error {mean_error_z}")
+        # ensure the mean errors in the derivatives are below a certain threshold
+
+        max_error_x = jnp.max(jnp.abs(dfdx_error))
+        max_error_y = jnp.max(jnp.abs(dfdy_error))
+        max_error_z = jnp.max(jnp.abs(dfdz_error))
+        # calculate the max error
+
+        self.assertLess(max_error_x, 5e-6, msg=f'Trigonometric derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-6, msg=f'Trigonometric derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-6, msg=f'Trigonometric derivative failed in z direction with max error {max_error_z}')
+        # ensure the max errors in the derivatives are below a certain threshold
+
+
+    def test_gradient_3d(self):
+        """
+        Test the 3D finite-difference gradient implementation on a separable trigonometric field.
+        Sets up a uniform periodic grid in x, y, z over [-pi, pi) with 100 points per axis and spacing dx = x[1] - x[0].
+        Defines a scalar field f(X,Y,Z) = sin(X) that depends only on x, computes its numerical gradient via
+        gradient_3d(f, dx), and compares the result to the analytic derivatives:
+            - ∂f/∂x = cos(X)
+            - ∂f/∂y = 0
+            - ∂f/∂z = 0
+        Checks both mean and maximum absolute errors:
+            - mean absolute errors for each component must be < 1e-6
+            - maximum absolute errors for each component must be < 5e-6
+        Failure messages include the measured error to aid debugging.
+        """
+
+  
+        x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        z = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        dx = x[1] - x[0]
+
+        X, Y, Z = jnp.meshgrid(x,y,z, indexing='ij')
+        # create the meshgrid
+
+        f = jnp.sin(X)
+        # create a sin vector field along the x direction
+
+        grad = gradient_3d(f, dx)
+        # compute the gradient numerically
+
+        dfdx = jnp.cos(X)
+        # define the derivative of the vector field analytically
+
+        dfdx_error = grad[0] - dfdx
+        # calculate the error in the derivative wrt to x
+        dfdy_error = grad[1]
+        # derivative should be zero
+        dfdz_error = grad[2]
+        # derivative should be zero
+
+        mean_error_x = jnp.mean(jnp.abs(dfdx_error))
+        mean_error_y = jnp.mean(jnp.abs(dfdy_error))
+        mean_error_z = jnp.mean(jnp.abs(dfdz_error))
+        # calculate the mean error
+
+        self.assertLess(mean_error_x, 1e-6, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 1e-6, msg=f"Trigonometric derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 1e-6, msg=f"Trigonometric derivative failed in z direction with mean error {mean_error_z}")
+        # ensure the mean errors in the derivatives are below a certain threshold
+
+        max_error_x = jnp.max(jnp.abs(dfdx_error))
+        max_error_y = jnp.max(jnp.abs(dfdy_error))
+        max_error_z = jnp.max(jnp.abs(dfdz_error))
+        # calculate the max error
+
+        self.assertLess(max_error_x, 5e-6, msg=f'Trigonometric derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 5e-6, msg=f'Trigonometric derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 5e-6, msg=f'Trigonometric derivative failed in z direction with max error {max_error_z}')
+        # ensure the max errors in the derivatives are below a certain threshold
+
+    def test_divergence_3d_constant_field(self):
+        """
+        Test the numerical divergence implementation on a simple, analytic 3D vector field.
+        This test constructs a periodic 3D grid on the domain [-pi, pi) with 100 points per axis
+        and uniform spacing dx. It defines a vector field F = (sin(x), sin(y), 0) on the mesh
+        (using meshgrid with indexing='ij') and computes the divergence using divergence_3d.
+        The analytic divergence of this field is div(F) = cos(x) + cos(y). The test compares the
+        numerical divergence to the analytic result and verifies accuracy by asserting that:
+        - the mean absolute error is below 5e-6, and
+        - the maximum absolute error is below 1e-5.
+        Notes:
+        - dx is computed as the uniform spacing between consecutive grid points.
+        - The test assumes divergence_3d implements a finite-difference scheme compatible with
+            periodic boundaries for this grid setup.
+        - Tolerances are chosen for the given resolution (100 points per axis) and expected
+            convergence behavior of the derivative scheme.
+        Returns:
+                None. The function raises assertion errors if the numerical divergence does not meet
+                the prescribed accuracy thresholds.
+        """
+
+
+        x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        z = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        dx = x[1] - x[0]
+
+        X, Y, Z = jnp.meshgrid(x,y,z, indexing='ij')
+        # create the meshgrid
+
+        fx = jnp.sin(X)
+        fy = jnp.sin(Y)
+        # create a sin vector field along the x and y direction
+
+        vector_field = jnp.stack([fx, fy, jnp.zeros_like(fx)], axis=0)
+        # create the vector field
+
+        div = divergence_3d(vector_field, dx)
+        # compute the divergence numerically
+
+        analytical_div = jnp.cos(X) + jnp.cos(Y)
+        # define the divergence of the vector field analytically
+
+        error = div - analytical_div
+
+        mean_error = jnp.mean(jnp.abs(error))
+        self.assertLess(mean_error, 5e-6, msg=f"Divergence of vector field failed with mean error {mean_error}" )
+        # ensure the mean errors in the derivatives are below a certain threshold
+
+        max_error = jnp.max(jnp.abs(error))
+        self.assertLess(max_error, 1e-5, msg=f"Divergence of vector field failed with max error {max_error}" )
+        # ensure the max errors in the derivatives are below a certain threshold
+
     def test_laplacian_3d(self):
+        """
+        Unit test for laplacian_3d accuracy on a smooth, periodic 3D field.
+        This test verifies that the numerical Laplacian implementation `laplacian_3d`
+        produces results consistent with the analytical Laplacian for the
+        trigonometric test field f(X,Y,Z) = sin(X) + sin(Y) + sin(Z).
+        Procedure:
+        - Construct a uniform, periodic 3D grid on the domain [-pi, pi) in each
+            coordinate with 100 points per axis and compute the grid spacing dx.
+        - Build the scalar field f = sin(X) + sin(Y) + sin(Z).
+        - The analytical Laplacian of this field is lapl_analytical = -f.
+        - Compute the numerical Laplacian using laplacian_3d(f, dx).
+        - Compute absolute errors, then check that the mean absolute error is
+            below 5e-5 and the maximum absolute error is below 5e-4.
+        Purpose:
+        - Serves as a regression test to ensure the discrete Laplacian operator
+            is implemented correctly and is accurate for smooth, periodic fields.
+        - The tolerances are chosen to reflect expected numerical error for the
+            chosen resolution and finite-difference / spectral stencil used.
+        """
 
 
         x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
@@ -363,413 +702,190 @@ class TestDerivatives(unittest.TestCase):
 
         mean_error = jnp.mean(jnp.abs(lapl_error))
 
-        self.assertLess(mean_error, 5e-5, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error}")
+        self.assertLess(mean_error, 5e-5, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error}")
         # ensure the mean errors in the derivatives are below a certain threshold
 
         max_error = jnp.max(jnp.abs(lapl_error))
         # calculate the max error
 
-        self.assertLess(max_error, 5e-4, msg=f'Linear polynomial derivative failed with max error {max_error}')
+        self.assertLess(max_error, 5e-4, msg=f'Trigonometric derivative failed with max error {max_error}')
         # ensure the max errors in the derivatives are below a certain threshold
 
 
+    def test_first_derivative_convergence(self):
+        """Convergence test for the first derivative on a trigonometric function.
 
-    # def test_sixth_derivative_1d_polynomial(self):
+        Verifies that the numerical derivative error decreases with grid
+        refinement and that the observed convergence order is consistent with
+        a high-order finite-difference stencil (expecting order > 3).
+        """
+        Ns = [32, 64, 128, 256]
+        errors = []
+        dxs = []
 
-    #     x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
-    #     y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
-    #     z = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
-    #     dx = x[1] - x[0]
+        for N in Ns:
+            x = jnp.linspace(-jnp.pi, jnp.pi, N, endpoint=False)
+            y = x
+            z = x
+            dx = x[1] - x[0]
+            X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
+            f = jnp.sin(X)
+            # create a sin vector field along the x direction
+            dfdx_analytical = jnp.cos(X)
+            # define the derivative of the vector field analytically
 
-    #     X, Y, Z = jnp.meshgrid(x,y,z, indexing='ij')
-    #     # create the meshgrid
+            dfdx_numerical = diff1_field(f, 0, dx)
+            # calculate the derivative of the vector field numerically
 
-    #     f = jnp.sin(X)
-    #     # create a sin vector field along the x direction
-    #     dfdx6_analytical = -1 * jnp.sin(X)
-    #     # define the derivative of the vector field analytically
-    #     dfdx6_numerical = diff6_field(f, 0, dx)
-    #     # calculate the derivative of the vector field numerically
+            mse_error = jnp.mean((dfdx_numerical - dfdx_analytical)**2)
+            # compute the mean squared error
 
-    #     dfdx6_error = dfdx6_numerical - dfdx6_analytical
-    #     # calculate the error in the derivative wrt to x
+            errors.append(mse_error)
+            dxs.append(dx)
 
-    #     dfdy6_error = diff6_field(f, 1, dx)
-    #     # derivative should be zero
+        errors = jnp.array(errors)
+        dxs = jnp.array(dxs)
+        # convert to jnp arrays for processing
 
-    #     dfdz6_error = diff6_field(f, 2, dx)
-    #     # derivative should be zero
-
-    #     mean_error_x = jnp.mean(jnp.abs(dfdx6_error))
-    #     mean_error_y = jnp.mean(jnp.abs(dfdy6_error))
-    #     mean_error_z = jnp.mean(jnp.abs(dfdz6_error))
-    #     # calculate the mean error
-
-    #     self.assertLess(mean_error_x, 1e-6, msg=f"Linear polynomial derivative failed in x direction with mean error {mean_error_x}")
-    #     self.assertLess(mean_error_y, 1e-6, msg=f"Linear polynomial derivative failed in y direction with mean error {mean_error_y}")
-    #     self.assertLess(mean_error_z, 1e-6, msg=f"Linear polynomial derivative failed in z direction with mean error {mean_error_z}")
-    #     # ensure the mean errors in the derivatives are below a certain threshold
-
-    #     max_error_x = jnp.max(jnp.abs(dfdx6_error))
-    #     max_error_y = jnp.max(jnp.abs(dfdy6_error))
-    #     max_error_z = jnp.max(jnp.abs(dfdz6_error))
-    #     # calculate the max error
-
-    #     self.assertLess(max_error_x, 5e-6, msg=f'Linear polynomial derivative failed in x direction with max error {max_error_x}')
-    #     self.assertLess(max_error_y, 5e-6, msg=f'Linear polynomial derivative failed in y direction with max error {max_error_y}')
-    #     self.assertLess(max_error_z, 5e-6, msg=f'Linear polynomial derivative failed in z direction with max error {max_error_z}')
-    #     # ensure the max errors in the derivatives are below a certain threshold
+        res = stats.linregress( jnp.log(dxs), jnp.log(errors) + 3*jnp.log(dxs) )
+        slope = jnp.abs( res.slope )
+        # compute the order of the convergence using a line fit of the log(y)/log(x)
 
 
+        self.assertGreater(slope, 4.0, msg=f"First derivative convergence test failed with observed order {slope}")
+        # ensure the observed order is at least 4
 
 
+    def test_first_derivative_mixed_derivatives(self):
+        """
+        Test that mixed first partial derivatives commute up to numerical tolerance.
+        This test constructs a 3D periodic grid in x, y, z and evaluates the scalar field
+        f(x,y,z) = x^2 * y^2 on that grid. It computes the mixed derivatives
+        d/dx(d/dy f) and d/dy(d/dx f) using the numerical finite-difference helper
+        diff1_field (first derivative along a given axis with grid spacing dx) and
+        compares the two results.
+        Because the polynomial is not periodic, a small number of boundary points
+        are excluded from the error measurement (slice(3, -3)). The test asserts that
+        the mean absolute difference between the two mixed derivatives is below
+        5e-5 and that the maximum absolute difference is below 5e-4. If either
+        threshold is exceeded, the test fails with a message including the observed
+        mean or maximum error.
+        """
 
 
-    
-    # def test_sixth_derivative_polynomial(self):
-    #     """Test sixth derivative on polynomial (should be zero for degree < 6)."""
-    #     # For polynomials of degree < 6, sixth derivative should be zero
-    #     # Use a simpler quadratic for more stable results
-    #     field = self.create_polynomial_field(degree=2)
-        
-    #     for direction in range(3):
-    #         numerical = diff6_field(field, direction, self.dx)
-    #         expected = jnp.zeros_like(field)
-            
-    #         # Test interior points and use looser tolerance due to boundary effects
-    #         interior = slice(6, -6)  # Need larger margin for 6th derivatives
-    #         error = numerical[interior, interior, interior] - expected[interior, interior, interior]
-    #         max_error = jnp.max(jnp.abs(error))
+        x = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        y = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        z = jnp.linspace(-jnp.pi, jnp.pi, 100, endpoint=False)
+        dx = x[1] - x[0]
 
-    #         print(numerical)
-    #         print(expected)
-    #         self.assertLess(max_error, self.tol_6th,
-    #             msg=f"Sixth derivative of degree-2 polynomial failed in direction {direction} with max error {max_error}"
-    #         )
-    
-    # def test_sixth_derivative_trigonometric(self):
-    #     """Test sixth derivative on trigonometric function."""
-    #     field = self.create_trig_field()
-        
-    #     # For sin(kx), sixth derivative is -k^6 * sin(kx)
-    #     # Test only interior points and use very loose tolerance
-    #     interior = slice(6, -6)
-        
-    #     for direction in range(3):
-    #         numerical = diff6_field(field, direction, self.dx)
-            
-    #         if direction == 0:
-    #             k = self.kx
-    #         elif direction == 1:
-    #             k = self.ky
-    #         else:
-    #             k = self.kz
-            
-    #         analytical = -(k**6) * field
+        X, Y, Z = jnp.meshgrid(x,y,z, indexing='ij')
+        # create the meshgrid
 
-    #         # Plot numerical vs analytical side-by-side for a representative 2D slice
-    #         import matplotlib.pyplot as plt
+        f = X**2 * Y**2
+        # create a polynomial
 
-    #         mid = self.n // 2
+        dfdx = diff1_field(f, 0, dx)
+        dfdxdy = diff1_field(dfdx, 1, dx)
+        # compute dfdxdy numerically
 
-    #         if direction == 0:
-    #             num_slice = numerical[mid, :, :]
-    #             anal_slice = analytical[mid, :, :]
-    #             title_axes = ('y', 'z')
-    #         elif direction == 1:
-    #             num_slice = numerical[:, mid, :]
-    #             anal_slice = analytical[:, mid, :]
-    #             title_axes = ('x', 'z')
-    #         else:
-    #             num_slice = numerical[:, :, mid]
-    #             anal_slice = analytical[:, :, mid]
-    #             title_axes = ('x', 'y')
+        dfdy = diff1_field(f, 1, dx)
+        dfdydx = diff1_field(dfdy, 0, dx)
+        # compute dfdydx numerically
 
-    #         num_np = np.asarray(num_slice)
-    #         anal_np = np.asarray(anal_slice)
-    #         diff_np = num_np - anal_np
+        error = dfdxdy - dfdydx
+        # compute the error in the mixed derivatives
 
-    #         vmax = max(np.abs(num_np).max(), np.abs(anal_np).max(), 1e-12)
+        _slice = slice(3, -3) # ignore the first 3 points of the grid because quadratic is not periodic
 
-    #         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    #         im0 = axes[0].imshow(num_np.T, origin='lower', cmap='viridis', vmin=-vmax, vmax=vmax)
-    #         axes[0].set_title(f'Numerical 6th derivative (dir={direction})')
-    #         axes[0].set_xlabel(title_axes[0]); axes[0].set_ylabel(title_axes[1])
-    #         plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        mean_error = jnp.mean(jnp.abs(error[_slice, _slice, _slice]))
+        # calculate the mean error
 
-    #         im1 = axes[1].imshow(anal_np.T, origin='lower', cmap='viridis', vmin=-vmax, vmax=vmax)
-    #         axes[1].set_title('Analytical 6th derivative')
-    #         axes[1].set_xlabel(title_axes[0]); axes[1].set_ylabel(title_axes[1])
-    #         plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        self.assertLess(mean_error, 5e-5, msg=f"Mixed derivatives failed in x direction with mean error {mean_error}")
+        # ensure the mean errors in the derivatives are below a certain threshold
 
-    #         im2 = axes[2].imshow(diff_np.T, origin='lower', cmap='bwr')
-    #         axes[2].set_title('Difference (numerical - analytical)')
-    #         axes[2].set_xlabel(title_axes[0]); axes[2].set_ylabel(title_axes[1])
-    #         plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        max_error = jnp.max(jnp.abs(error[_slice, _slice, _slice]))
+        # calculate the max error
 
-    #         plt.suptitle(f'6th derivative comparison (direction={direction})')
-    #         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        self.assertLess(max_error, 5e-4, msg=f'Mixed derivatives failed with max error {max_error}')
+        # ensure the max errors in the derivatives are below a certain threshold
 
-    #         # Save a copy for later inspection and also try to show interactively
-    #         plt.savefig(f'sixth_derivative_compare_dir{direction}.png', dpi=150)
-    #         plt.show()
-            
-    #         # Use very loose tolerance for sixth derivatives due to numerical limitations
-    #         error = numerical[interior, interior, interior] - analytical[interior, interior, interior]
-    #         max_error = jnp.max(jnp.abs(error))
-    #         self.assertLess(max_error, self.tol_6th,
-    #             msg=f"Sixth derivative of trigonometric function failed in direction {direction} with max error {max_error}"
-    #         )
-    #         # np.testing.assert_allclose(
-    #         #     numerical[interior, interior, interior], 
-    #         #     analytical[interior, interior, interior], 
-    #         #     atol=1e0, rtol=0.5,  # Very loose tolerance
-    #         #     err_msg=f"Sixth derivative of trigonometric function failed in direction {direction}"
-    #         # )
-    
-    # def test_compute_all_derivatives(self):
-    #     """Test computing all first derivatives at once."""
-    #     field = self.create_polynomial_field(degree=2)
-        
-    #     # Compute all derivatives
-    #     all_derivs = compute_all_derivatives(field, self.dx)
-        
-    #     # Compare with individual computations
-    #     for direction in range(3):
-    #         individual = diff1_field(field, direction, self.dx)
-    #         from_all = all_derivs[direction]
 
-    #         error = individual - from_all
-    #         max_error = jnp.max(jnp.abs(error))
-    #         self.assertLess(max_error, self.tol_1st,
-    #             msg=f"compute_all_derivatives doesn't match individual computation in direction {direction} with max error {max_error}"
-    #         )
-            
-    
-    # def test_gradient_3d(self):
-    #     """Test 3D gradient computation."""
-    #     field = self.create_exponential_field()
-        
-    #     # Compute gradient
-    #     grad = gradient_3d(field, self.dx)
-        
-    #     # Compare with analytical gradient
-    #     interior = slice(3, -3)
-    #     for direction in range(3):
-    #         analytical = self.analytical_derivative_exponential(direction)
+    def test_sixth_derivative_1d_trigonometric(self):
+        """
+        Test that the sixth-order finite-difference derivative routine correctly computes
+        the derivative of a trigonometric field and returns near-zero derivatives in
+        directions with no variation.
+        This unit test constructs a 3D periodic grid (linspace with endpoint=False) and
+        defines a scalar field f(x,y,z) = sin(x) that only varies along the x-axis.
+        A relatively high wave number is chosen to exercise the stencil and reduce
+        noise sensitivity. The analytical sixth derivative of sin(x) is -sin(x).
+        What is verified:
+        - The numerical sixth-order derivative along the x-axis (computed by diff6_field)
+            matches the analytical result up to tolerances for both mean and maximum
+            absolute errors.
+        - The numerical sixth-order derivatives along the y- and z-axes are essentially
+            zero (since the field has no y or z dependence), again checked for mean and
+            maximum absolute errors.
+        Key numerical settings used in the test (for context; not mutated by the test):
+        - Wave number k = 4 * (2*pi) and grid resolution n = 150 (uniform dx).
+        - The derivative operator under test is invoked as diff6_field(f, axis, dx).
+        Failure mode:
+        - The test fails if the mean or max absolute errors exceed the specified
+            thresholds (mean_x < 5e-2, mean_y/z < 5e-4; max_x < 5e-2, max_y/z < 6e-4),
+            indicating an incorrect implementation or insufficient resolution for the
+            chosen wave number.
+        """
 
-    #         error = grad[direction][interior, interior, interior] - analytical[interior, interior, interior]
-    #         max_error = jnp.max(jnp.abs(error))
-    #         self.assertLess(max_error, self.tol_1st,
-    #             msg=f"Gradient computation failed in direction {direction} with max error {max_error}"
-    #         )
-    
-    # def test_divergence_3d_constant_field(self):
-    #     """Test divergence of constant vector field."""
-    #     # Constant vector field should have zero divergence
-    #     vector_field = jnp.zeros((3, self.n, self.n, self.n))
-    #     vector_field = vector_field.at[0].set(2.0)
-    #     vector_field = vector_field.at[1].set(3.0)
-    #     vector_field = vector_field.at[2].set(4.0)
-        
-    #     div = divergence_3d(vector_field, self.dx)
-    #     expected = jnp.zeros_like(div)
+        #### NEED HIGH WAVE NUMBER OR TOO MUCH NOISE!!!
+        k = 4 * (2*jnp.pi)
+        n = 150
+        # wave number and numerical resolution
 
-    #     error = div - expected
-    #     max_error = jnp.max(jnp.abs(error))
-    #     self.assertLess(max_error, self.tol_1st,
-    #         msg=f"Divergence of constant field failed with max error {max_error}"
-    #     )
-    
-    # def test_divergence_3d_linear_field(self):
-    #     """Test divergence of linear vector field."""
-    #     # Vector field v = (x, y, z) should have divergence = 3
-    #     vector_field = jnp.zeros((3, self.n, self.n, self.n))
-    #     vector_field = vector_field.at[0].set(self.X)
-    #     vector_field = vector_field.at[1].set(self.Y)
-    #     vector_field = vector_field.at[2].set(self.Z)
-        
-    #     div = divergence_3d(vector_field, self.dx)
-    #     expected = 3.0 * jnp.ones_like(div)
-        
-    #     # Test interior points to avoid boundary effects
-    #     interior = slice(3, -3)
-    #     error = div[interior, interior, interior] - expected[interior, interior, interior]
-    #     max_error = jnp.max(jnp.abs(error))
-    #     self.assertLess(max_error, self.tol_1st,
-    #         msg=f"Divergence of linear field failed with max error {max_error}"
-    #     )
-    
-    
-    # def test_divergence_3d_quadratic_field(self):
-    #     """Test divergence of quadratic vector field."""
-    #     # Vector field v = (x^2, y^2, z^2) should have divergence = 2x + 2y + 2z
-    #     vector_field = jnp.zeros((3, self.n, self.n, self.n))
-    #     vector_field = vector_field.at[0].set(self.X**2)
-    #     vector_field = vector_field.at[1].set(self.Y**2)
-    #     vector_field = vector_field.at[2].set(self.Z**2)
-        
-    #     div = divergence_3d(vector_field, self.dx)
-    #     expected = 2.0 * (self.X + self.Y + self.Z)
-        
-    #     # Test interior points to avoid boundary effects
-    #     interior = slice(3, -3)
-    #     error = div[interior, interior, interior] - expected[interior, interior, interior]
-    #     max_error = jnp.max(jnp.abs(error))
-    #     self.assertLess(max_error, self.tol_1st,
-    #         msg=f"Divergence of quadratic field failed with max error {max_error}"
-    #     )
-    
-    # def test_laplacian_3d_linear(self):
-    #     """Test Laplacian of linear function."""
-    #     # Linear function should have zero Laplacian
-    #     field = self.create_polynomial_field(degree=1)
-        
-    #     lapl = laplacian_3d(field, self.dx)
-    #     expected = jnp.zeros_like(field)
-        
-    #     # Test interior points to avoid boundary effects
-    #     interior = slice(4, -4)  # Need larger margin for second derivatives
-    #     error = lapl[interior, interior, interior] - expected[interior, interior, interior]
-    #     average_error = jnp.mean(jnp.abs(error))
-    #     self.assertLess(average_error, self.tol_1st,
-    #         msg=f"Laplacian of linear function failed with average error {average_error}"
-    #     )
-    
-    # def test_laplacian_3d_quadratic(self):
-    #     """Test Laplacian of quadratic function."""
-    #     # f = x^2 + 2y^2 + 3z^2 + xy
-    #     # ∇²f = 2 + 4 + 6 = 12
-    #     field = self.create_polynomial_field(degree=2)
-        
-    #     lapl = laplacian_3d(field, self.dx)
-    #     expected = 12.0 * jnp.ones_like(field)
-        
-    #     # Test interior points to avoid boundary effects
-    #     interior = slice(4, -4)  # Need larger margin for second derivatives
-    #     error = lapl[interior, interior, interior] - expected[interior, interior, interior]
-    #     average_error = jnp.mean(jnp.abs(error))
-    #     self.assertLess(average_error, self.tol_1st,
-    #         msg=f"Laplacian of quadratic function failed with average error {average_error}"
-    #     )
-    
-    # def test_laplacian_3d_exponential(self):
-    #     """Test Laplacian of exponential function."""
-    #     # f = exp(-0.5(x² + y² + z²))
-    #     # ∇²f = exp(-0.5(x² + y² + z²)) * ((x² + y² + z²) - 3)
-    #     field = self.create_exponential_field()
-    #     r_squared = self.X**2 + self.Y**2 + self.Z**2
-        
-    #     lapl = laplacian_3d(field, self.dx)
-    #     expected = field * (r_squared - 3.0)
-        
-    #     # Test interior points to avoid boundary effects
-    #     interior = slice(4, -4)  # Need larger margin for second derivatives
-    #     error = lapl[interior, interior, interior] - expected[interior, interior, interior]
-    #     average_error = jnp.mean(jnp.abs(error))
-    #     self.assertLess(average_error, self.tol_1st,
-    #         msg=f"Laplacian of exponential function failed with average error {average_error}"
-    #     )
-    
-    # def test_consistency_gradient_divergence(self):
-    #     """Test consistency between gradient and divergence operations."""
-    #     # ∇ · ∇f = ∇²f (Laplacian)
-    #     field = self.create_exponential_field()
-        
-    #     # Method 1: Direct Laplacian
-    #     lapl_direct = laplacian_3d(field, self.dx)
-        
-    #     # Method 2: Divergence of gradient
-    #     grad = gradient_3d(field, self.dx)
-    #     lapl_indirect = divergence_3d(grad, self.dx)
+        x = jnp.linspace(-k, k, n, endpoint=False)
+        y = jnp.linspace(-k, k, n, endpoint=False)
+        z = jnp.linspace(-k, k, n, endpoint=False)
+        dx = x[1] - x[0]
 
-    #     error = lapl_direct - lapl_indirect
-    #     max_error = jnp.max(jnp.abs(error))
-    #     self.assertLess(max_error, self.tol_1st,
-    #         msg=f"Laplacian consistency failed with max error {max_error}"
-    #     )
-    
-    # def test_derivative_chain_rule(self):
-    #     """Test derivatives satisfy chain rule properties."""
-    #     # For f(x,y,z) = sin(x) * cos(y) * sin(z)
-    #     field = self.create_trig_field()
-        
-    #     # Test that mixed derivatives are symmetric (Schwarz theorem)
-    #     # ∂²f/∂x∂y = ∂²f/∂y∂x
-        
-    #     # Compute ∂f/∂x, then ∂/∂y
-    #     df_dx = diff1_field(field, 0, self.dx)
-    #     d2f_dxdy = diff1_field(df_dx, 1, self.dx)
-        
-    #     # Compute ∂f/∂y, then ∂/∂x
-    #     df_dy = diff1_field(field, 1, self.dx)
-    #     d2f_dydx = diff1_field(df_dy, 0, self.dx)
+        X, Y, Z = jnp.meshgrid(x,y,z, indexing='ij')
+        # create the meshgrid
 
-    #     error = d2f_dxdy - d2f_dydx
-    #     max_error = jnp.max(jnp.abs(error))
-    #     self.assertLess(max_error, self.tol_1st,
-    #         msg=f"Mixed derivatives symmetry failed with max error {max_error}"
-    #     )
-    
-    # def test_derivative_accuracy_order(self):
-    #     """Test that derivative accuracy improves with grid refinement."""
-    #     # Use a simpler test that avoids boundary condition issues
-    #     # Test with a smooth function in the interior
-        
-    #     # Create coarse and fine grids
-    #     n_coarse = 16
-    #     n_fine = 32
-        
-    #     x_coarse = jnp.linspace(-0.5, 0.5, n_coarse)
-    #     x_fine = jnp.linspace(-0.5, 0.5, n_fine)
-        
-    #     dx_coarse = x_coarse[1] - x_coarse[0] 
-    #     dx_fine = x_fine[1] - x_fine[0]
-        
-    #     # Use exponential function (smooth and well-behaved)
-    #     field_coarse = jnp.exp(-x_coarse**2)
-    #     field_fine = jnp.exp(-x_fine**2)
-        
-    #     analytical_coarse = -2 * x_coarse * jnp.exp(-x_coarse**2)
-    #     analytical_fine = -2 * x_fine * jnp.exp(-x_fine**2)
-        
-    #     # Convert to 3D arrays
-    #     field_3d_coarse = jnp.tile(field_coarse[None, None, :], (1, 1, 1))
-    #     field_3d_fine = jnp.tile(field_fine[None, None, :], (1, 1, 1))
-        
-    #     numerical_coarse = diff1_field(field_3d_coarse, 2, dx_coarse)[0, 0, :]
-    #     numerical_fine = diff1_field(field_3d_fine, 2, dx_fine)[0, 0, :]
-        
-    #     # Check error only in interior points
-    #     interior_coarse = slice(3, -3)
-    #     interior_fine = slice(6, -6)  # Scale the interior appropriately
-        
-    #     error_coarse = jnp.max(jnp.abs(numerical_coarse[interior_coarse] - analytical_coarse[interior_coarse]))
-    #     error_fine = jnp.max(jnp.abs(numerical_fine[interior_fine] - analytical_fine[interior_fine]))
-        
-    #     # Just check that the fine grid is more accurate
-    #     self.assertLess(error_fine, error_coarse, 
-    #                    "Fine grid should be more accurate than coarse grid")
-    
-    # def test_vector_field_operations(self):
-    #     """Test vector field operations on realistic field."""
-    #     # Create a divergence-free vector field (should have zero divergence)
-    #     # v = ∇ × A where A is a vector potential
-    #     # For simplicity, use A = (0, 0, xy) so v = (y, -x, 0)
-        
-    #     vector_field = jnp.zeros((3, self.n, self.n, self.n))
-    #     vector_field = vector_field.at[0].set(self.Y)   # v_x = y
-    #     vector_field = vector_field.at[1].set(-self.X)  # v_y = -x
-    #     vector_field = vector_field.at[2].set(0.0)      # v_z = 0
-        
-    #     # This field should have zero divergence
-    #     div = divergence_3d(vector_field, self.dx)
-    #     expected_div = jnp.zeros_like(div)
-        
-    #     np.testing.assert_allclose(
-    #         div, expected_div, atol=self.tol_1st,
-    #         err_msg="Divergence-free vector field should have zero divergence"
-    #     )
+        f = jnp.sin(X)
+        # create a sin vector field along the x direction
+        dfdx6_analytical = -1 * jnp.sin(X)
+        # define the derivative of the vector field analytically
+        dfdx6_numerical = diff6_field(f, 0, dx)
+        # calculate the derivative of the vector field numerically
+
+        dfdx6_error = dfdx6_numerical - dfdx6_analytical
+        # calculate the error in the derivative wrt to x
+
+        dfdy6_error = diff6_field(f, 1, dx)
+        # derivative should be zero
+
+        dfdz6_error = diff6_field(f, 2, dx)
+        # derivative should be zero
+
+        mean_error_x = jnp.mean(jnp.abs(dfdx6_error))
+        mean_error_y = jnp.mean(jnp.abs(dfdy6_error))
+        mean_error_z = jnp.mean(jnp.abs(dfdz6_error))
+        # calculate the mean error
+
+        self.assertLess(mean_error_x, 5e-2, msg=f"Trigonometric derivative failed in x direction with mean error {mean_error_x}")
+        self.assertLess(mean_error_y, 5e-4, msg=f"Trigonometric derivative failed in y direction with mean error {mean_error_y}")
+        self.assertLess(mean_error_z, 5e-4, msg=f"Trigonometric derivative failed in z direction with mean error {mean_error_z}")
+        # ensure the mean errors in the derivatives are below a certain threshold
+
+        max_error_x = jnp.max(jnp.abs(dfdx6_error))
+        max_error_y = jnp.max(jnp.abs(dfdy6_error))
+        max_error_z = jnp.max(jnp.abs(dfdz6_error))
+        # calculate the max error
+
+        self.assertLess(max_error_x, 5e-2, msg=f'Trigonometric derivative failed in x direction with max error {max_error_x}')
+        self.assertLess(max_error_y, 6e-4, msg=f'Trigonometric derivative failed in y direction with max error {max_error_y}')
+        self.assertLess(max_error_z, 6e-4, msg=f'Trigonometric derivative failed in z direction with max error {max_error_z}')
+        # ensure the max errors in the derivatives are below a certain threshold
+
+
 
 
 if __name__ == '__main__':
