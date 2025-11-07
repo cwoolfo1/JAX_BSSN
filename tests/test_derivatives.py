@@ -836,7 +836,7 @@ class TestDerivatives(unittest.TestCase):
             chosen wave number.
         """
 
-        #### NEED HIGH WAVE NUMBER OR TOO MUCH NOISE!!!
+        #### TOO MANY POINTS PER WAVELENGTH CAN CAUSE THE TEST TO FAIL DUE TO FLOATING POINT PRECISION ISSUES ####
         k = 4 * (2*jnp.pi)
         n = 150
         # wave number and numerical resolution
