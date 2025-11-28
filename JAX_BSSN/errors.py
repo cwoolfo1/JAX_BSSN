@@ -11,7 +11,7 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_conformal_ricci
 from JAX_BSSN.derivatives import diff1_field, divergence_3d, compute_all_derivatives
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind, ricci_tensor,
@@ -27,7 +27,7 @@ class ConstraintViolations(NamedTuple):
     gamma_condition: jnp.ndarray   # Gamma constraint violation
 
 
-# @jit
+@jit
 def compute_hamiltonian_constraint(vars: BSSNVariables, 
                                   params: BSSNParameters) -> jnp.ndarray:
     """
@@ -57,11 +57,10 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     
     # Compute physical Ricci scalar (simplified calculation)
     inv_physical_metric = invert_3x3_metric(physical_metric)
-    christoffel = christoffel_symbols_second_kind(inv_physical_metric, metric_derivs)
     
-    # This is a simplified Ricci calculation
-    # Full implementation would include all derivative terms
-    ricci_3d = jnp.zeros(shape)
+    ricci_tensor = compute_conformal_ricci(vars.conformal_metric, vars.conformal_connection, params)
+    ricci_scalar = trace_tensor(ricci_tensor, inv_physical_metric)
+    # compute the ricci scalar from the conformal Ricci tensor
     
     # Compute extrinsic curvature terms
     # K² = (tr K)²
@@ -69,18 +68,14 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     
     # K_ij K^ij = A_ij A^ij + (1/3) K²
     inv_conformal_metric = invert_3x3_metric(vars.conformal_metric)
-    A_squared = 0.0
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                for l in range(3):
-                    A_squared += (inv_conformal_metric[i, k] * inv_conformal_metric[j, l] * 
-                                vars.traceless_K[i, j] * vars.traceless_K[k, l])
-    
+
+    A_squared = jnp.einsum('ik...,jl...,ij...,kl...->', inv_conformal_metric, inv_conformal_metric,
+                            vars.traceless_K, vars.traceless_K)
+
     K_ij_K_ij = A_squared + K_squared / 3.0
-    
+
     # Hamiltonian constraint
-    hamiltonian = ricci_3d + K_squared - K_ij_K_ij
+    hamiltonian = ricci_scalar + K_squared - K_ij_K_ij
     
     return hamiltonian
 
