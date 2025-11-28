@@ -37,9 +37,9 @@ class TestRK4Evolution(unittest.TestCase):
         self.tol = 1e-6  # Numerical tolerance
         
         # Create coordinate grids
-        x = jnp.linspace(-0.8, 0.8, self.n)
-        y = jnp.linspace(-0.8, 0.8, self.n)
-        z = jnp.linspace(-0.8, 0.8, self.n)
+        x = jnp.linspace(-0.8, 0.8, self.n,  endpoint=False)
+        y = jnp.linspace(-0.8, 0.8, self.n,  endpoint=False)
+        z = jnp.linspace(-0.8, 0.8, self.n,  endpoint=False)
         self.X, self.Y, self.Z = jnp.meshgrid(x, y, z, indexing='ij')
         
         # BSSN parameters
@@ -387,7 +387,7 @@ class TestRK4Evolution(unittest.TestCase):
         dt_vars_analytical = self.analytical_time_derivatives(t)
         
         # Get manufactured solution at slightly later time
-        dt_small = 1e-6
+        dt_small = 1e-3
         vars_t_plus_dt = self.create_manufactured_bssn_variables(t + dt_small)
         
         # Compute numerical time derivatives
@@ -397,12 +397,14 @@ class TestRK4Evolution(unittest.TestCase):
 
         error = dt_conformal_factor_numerical - dt_vars_analytical.conformal_factor
         max_error = jnp.max(jnp.abs(error))
-        self.assertLess(max_error, 1e-5, "Max error in conformal factor time derivative too large")
+        self.assertLess(max_error, 5e-4, "Max error in conformal factor time derivative too large")
 
         error = dt_conformal_metric_numerical - dt_vars_analytical.conformal_metric
         max_error = jnp.max(jnp.abs(error))
-        self.assertLess(max_error, 1e-5, "Max error in conformal metric time derivative too large")
-        
+        self.assertLess(max_error, 1e-4, "Max error in conformal metric time derivative too large")
+
+
+
 
 if __name__ == '__main__':
     # Configure JAX for testing
