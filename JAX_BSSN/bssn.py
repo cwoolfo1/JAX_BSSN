@@ -127,8 +127,7 @@ def compute_physical_metric(conformal_metric: jnp.ndarray,
 
 
 @jit
-def compute_conformal_ricci(conformal_metric: jnp.ndarray, 
-                           conformal_connection: jnp.ndarray,
+def compute_conformal_ricci(vars: BSSNVariables,
                            params: BSSNParameters) -> jnp.ndarray:
     """
     Compute conformal Ricci tensor R̃_ij.
@@ -144,6 +143,8 @@ def compute_conformal_ricci(conformal_metric: jnp.ndarray,
         Conformal Ricci tensor with shape (3, 3, ni, nj, nk)
     """
     dx = params.dx
+    conformal_metric = vars.conformal_metric
+    conformal_connection = vars.conformal_connection
     shape = conformal_metric.shape[2:]
     
     metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
@@ -187,9 +188,7 @@ def compute_conformal_ricci(conformal_metric: jnp.ndarray,
 
 
 @jit 
-def compute_ricci_with_matter(conformal_ricci: jnp.ndarray,
-                             conformal_metric: jnp.ndarray,
-                             conformal_factor: jnp.ndarray,
+def compute_ricci_with_matter(vars: BSSNVariables,
                              params: BSSNParameters) -> jnp.ndarray:
     """
     Compute full Ricci tensor including conformal factor contributions.
@@ -207,35 +206,41 @@ def compute_ricci_with_matter(conformal_ricci: jnp.ndarray,
     Returns:
         Full Ricci tensor
     """
+
     dx = params.dx
-    shape = conformal_metric.shape[2:]
-    
-    # Compute conformal factor derivatives
-    W_derivs = compute_all_derivatives(conformal_factor, dx)
-    
-    # Compute conformal factor Laplacian
-    W_laplacian = laplacian_3d(conformal_factor, dx)
-    
-    # Compute inverse conformal metric
-    inv_metric = invert_3x3_metric(conformal_metric)
-    
-    # Conformal factor contribution to Ricci tensor
-    ricci_phi = jnp.zeros_like(conformal_ricci)
-    
+    alpha = vars.lapse
+    K = vars.trace_K
+    A_ij = vars.traceless_K
+    W    = vars.conformal_factor
+    gamma = vars.conformal_metric
+    inv_gamma = invert_3x3_metric(gamma)
+
+
+    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    dWdij = jnp.zeros((3,3) + W.shape)
     for i in range(3):
         for j in range(3):
-            # ∇_i ∇_j φ term (simplified)
-            term1 = diff1_field(W_derivs[i], j, dx)
-            
-            # Connection term corrections
-            term2 = 0.0
-            for k in range(3):
-                # Simplified Christoffel correction
-                term2 += W_derivs[k] * diff1_field(conformal_metric[i, j], k, dx)
-            
-            ricci_phi = ricci_phi.at[i, j].set(term1 - 0.5 * term2)
-    
-    return conformal_ricci + ricci_phi
+            dWdij = dWdij.at[i,j].set( diff1_field( dWdi[i], j, dx) )
+    # second derivatives of W
+
+
+    first_term = dWdij / W
+    # first term
+
+    second_term = jnp.einsum('ij...,mn...,nm...->ij...', gamma, inv_gamma, dWdij) / W
+    # second term
+
+    third_term = -2 * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dWdi) / W**2
+    # third term
+
+    R_ij_W = first_term + second_term + third_term
+    # conformal factor contribution to Ricci tensor
+
+
+    R_ij = compute_conformal_ricci(vars, params) + R_ij_W
+    # full Ricci tensor
+
+    return R_ij
 
 
 @jit
@@ -244,8 +249,6 @@ def evolve_conformal_metric(vars: BSSNVariables,
     """
     Evolve conformal metric γ_ij.
     
-    ∂_t γ_ij = -2α A_ij + £_β γ_ij
-    
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
@@ -253,16 +256,12 @@ def evolve_conformal_metric(vars: BSSNVariables,
     Returns:
         Time derivative of conformal metric
     """
-    shape = vars.conformal_metric.shape[2:]
-    dt_gamma = jnp.zeros_like(vars.conformal_metric)
+    # Note: this is only valid in the harmonic gauge where shift is 0
     
     # First term: -2α A_ij
     dt_gamma = -2.0 * vars.lapse * vars.traceless_K
-    
-    # Second term: Lie derivative with respect to shift
-    lie_deriv = lie_derivative_conformal_metric(vars.shift, vars.conformal_metric, params.dx)
-    
-    return dt_gamma + lie_deriv
+
+    return dt_gamma
 
 
 @jit
@@ -271,8 +270,6 @@ def evolve_conformal_factor(vars: BSSNVariables,
     """
     Evolve conformal factor W.
     
-    ∂_t W = -(1/3) α W K + £_β W
-    
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
@@ -280,70 +277,14 @@ def evolve_conformal_factor(vars: BSSNVariables,
     Returns:
         Time derivative of conformal factor
     """
-    dx = params.dx
     
-    # First term: -(1/3) α W K
-    dt_W = -(1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K
+    # Note: this is only valid in the harmonic gauge where shift is 0
     
-    # Second term: shift advection
-    for k in range(3):
-        dW_dk = diff1_field(vars.conformal_factor, k, dx)
-        dt_W += vars.shift[k] * dW_dk
+    # First term: (1/3) α W K
+    dt_W = (1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K
+
     
     return dt_W
-
-
-@jit
-def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
-                                        params: BSSNParameters) -> jnp.ndarray:
-    """
-    Evolve traceless extrinsic curvature A_ij.
-    
-    ∂_t A_ij = -∇_i ∇_j α + α(R_ij - 8πS_ij) + K A_ij + £_β A_ij
-    
-    Args:
-        vars: Current BSSN variables  
-        params: Evolution parameters
-        
-    Returns:
-        Time derivative of traceless extrinsic curvature
-    """
-    dx = params.dx
-    shape = vars.traceless_K.shape[2:]
-    dt_A = jnp.zeros_like(vars.traceless_K)
-    
-    # Compute conformal Ricci tensor
-    conformal_ricci = compute_conformal_ricci(
-        vars.conformal_metric, vars.conformal_connection, params)
-        
-    # Compute full Ricci tensor
-    ricci = compute_ricci_with_matter(
-        conformal_ricci, vars.conformal_metric, vars.conformal_factor, params)
-    
-    # Compute inverse conformal metric
-    inv_metric = invert_3x3_metric(vars.conformal_metric)
-    
-    # Make Ricci tensor traceless
-    ricci_traceless = traceless_part(ricci, vars.conformal_metric, inv_metric)
-
-
-    # α R_ij^TF term
-    alpha_ricci = vars.lapse * ricci_traceless
-    # K A_ij term
-    K_A = vars.trace_K * vars.traceless_K
-    
-    # Evolution equation terms
-    for i in range(3):
-        for j in range(3):
-            # Second derivative of lapse (simplified)
-            d2_alpha = diff1_field(diff1_field(vars.lapse, i, dx), j, dx)
-
-    dt_A = alpha_ricci + K_A - d2_alpha
-    
-    # Add Lie derivative with respect to shift
-    lie_deriv = lie_derivative_conformal_metric(vars.shift, vars.traceless_K, dx)
-    
-    return dt_A + lie_deriv
 
 
 @jit
@@ -352,8 +293,6 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     """
     Evolve trace of extrinsic curvature K.
     
-    ∂_t K = -∇^2 α + α(A_ij A^ij + K^2/3) + £_β K
-    
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
@@ -361,31 +300,109 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     Returns:
         Time derivative of trace K
     """
+
+    # Note: this is only valid in the harmonic gauge where shift is 0
+
     dx = params.dx
-    
-    # Laplacian of lapse
-    lapl_alpha = laplacian_3d(vars.lapse, dx)
-    
-    # A_ij A^ij term
-    inv_metric = invert_3x3_metric(vars.conformal_metric)
-    A_squared = 0.0
+    alpha = vars.lapse
+    K = vars.trace_K
+    A_ij = vars.traceless_K
+    W    = vars.conformal_factor
+    gamma = vars.conformal_metric
+    inv_gamma = invert_3x3_metric(gamma)
+
+
+    dalphadi = jnp.stack( [diff1_field(alpha, d, dx) for d in range(3)], axis=0)
+    dalphadij = jnp.zeros((3,3) + alpha.shape)
     for i in range(3):
         for j in range(3):
-            for k in range(3):
-                for l in range(3):
-                    A_squared += (inv_metric[i, k] * inv_metric[j, l] * 
-                                vars.traceless_K[i, j] * vars.traceless_K[k, l])
+            dalphadij = dalphadij.at[i,j].set( diff1_field( dalphadi[i], j, dx) )
+    # second derivatives of alpha
 
+    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    # first derivatives of W
 
-    # Evolution equation
-    dt_K = (-lapl_alpha + vars.lapse * (A_squared + vars.trace_K**2 / 3.0))
+    DiDj_alpha = dalphadij
+    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha - 1/W * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
+    # full covariant second derivative of alpha
+
+    first_term = - W**2 * jnp.einsum('ij...,ij...->...', inv_gamma, DiDj_alpha)
+    # first term
+
+    second_term = alpha * jnp.einsum('ij...,kl...,ik...,jl...->...', inv_gamma, inv_gamma, A_ij, A_ij)
+    # second term
+
+    third_term = alpha * K**2 / 3.0
+    # third term
     
-    # Add shift advection
-    for k in range(3):
-        dK_dk = diff1_field(vars.trace_K, k, dx)
-        dt_K += vars.shift[k] * dK_dk
+    dt_K = first_term + second_term + third_term
+    # compute dt_K
     
     return dt_K
+
+
+@jit
+def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
+                                        params: BSSNParameters) -> jnp.ndarray:
+    """
+    Evolve traceless extrinsic curvature A_ij.
+    
+    Args:
+        vars: Current BSSN variables  
+        params: Evolution parameters
+        
+    Returns:
+        Time derivative of traceless extrinsic curvature
+    """
+
+    # Note this is only valid in holonomic gauge (shift=0)
+
+    dx = params.dx
+    alpha = vars.lapse
+    K = vars.trace_K
+    A_ij = vars.traceless_K
+    W    = vars.conformal_factor
+    gamma = vars.conformal_metric
+    inv_gamma = invert_3x3_metric(gamma)
+
+
+    first_term = alpha * K * A_ij
+    # first term
+
+    second_term = -2 * alpha * jnp.einsum('ik...,kl...,lj...->ij...', A_ij, inv_gamma, A_ij)
+    # second term
+
+    dalphadi = jnp.stack( [diff1_field(alpha, d, dx) for d in range(3)], axis=0)
+    dalphadij = jnp.zeros((3,3) + alpha.shape)
+    for i in range(3):
+        for j in range(3):
+            dalphadij = dalphadij.at[i,j].set( diff1_field( dalphadi[i], j, dx) )
+    # second derivatives of alpha
+
+    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    # first derivatives of W
+
+    DiDj_alpha = dalphadij
+    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha - 1/W * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
+    # full covariant second derivative of alpha
+        
+    # Compute full Ricci tensor
+    ricci = compute_ricci_with_matter(vars, params)
+
+    
+    third_term = alpha * ricci - DiDj_alpha
+    third_term = traceless_part(third_term, vars.conformal_metric, inv_gamma)
+    third_term = W**2 * third_term
+    # third term
+    
+    dt_A = first_term + second_term + third_term
+    # compute dt_A
+
+    return dt_A
 
 
 @jit
@@ -393,8 +410,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
                                params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve conformal connection functions Γ̃^i.
-    
-    ∂_t Γ̃^i = -2 A^ij ∇_j α + 2α(Γ̃^i_jk A^jk - 2/3 γ^ij ∇_j K) + £_β Γ̃^i
+
     
     Args:
         vars: Current BSSN variables
@@ -403,43 +419,47 @@ def evolve_conformal_connection(vars: BSSNVariables,
     Returns:
         Time derivative of conformal connection
     """
+
     dx = params.dx
-    eta = params.eta
-    shape = vars.conformal_connection.shape[1:]
-    dt_Gamma = jnp.zeros_like(vars.conformal_connection)
-    
-    # Compute inverse metric
-    inv_metric = invert_3x3_metric(vars.conformal_metric)
-    
-    # Raise indices of A_ij
-    A_raised = raise_index(vars.traceless_K, inv_metric, 1)
-    
-    for i in range(3):
-        # First term: -2 A^ij ∇_j α
-        term1 = 0.0
-        for j in range(3):
-            dalpha_dj = diff1_field(vars.lapse, j, dx)
-            term1 += A_raised[i, j] * dalpha_dj
-        term1 *= -2.0
-        
-        # Second term: 2α(-2/3 γ^ij ∇_j K) (simplified)
-        term2 = 0.0
-        for j in range(3):
-            dK_dj = diff1_field(vars.trace_K, j, dx)
-            term2 += inv_metric[i, j] * dK_dj
-        term2 *= vars.lapse * (-4.0/3.0)
-        
-        # Damping term (Gamma driver)
-        damping = -eta * vars.conformal_connection[i]
-        
-        dt_Gamma = dt_Gamma.at[i].set(term1 + term2 + damping)
-    
-    # Add shift advection
-    for i in range(3):
-        for k in range(3):
-            dGamma_dk = diff1_field(vars.conformal_connection[i], k, dx)
-            dt_Gamma = dt_Gamma.at[i].add(vars.shift[k] * dGamma_dk)
-    
+    alpha = vars.lapse
+    K = vars.trace_K
+    A_ij = vars.traceless_K
+    W    = vars.conformal_factor
+    gamma = vars.conformal_metric
+    inv_gamma = invert_3x3_metric(gamma)
+
+    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    # first derivatives of W
+
+    dalphadi = jnp.stack( [diff1_field(alpha, d, dx) for d in range(3)], axis=0)
+    # first derivatives of alpha
+
+    dKdi = jnp.stack( [diff1_field(K, d, dx) for d in range(3)], axis=0)
+    # first derivatives of K
+
+    first_term = -4/3 * alpha * jnp.einsum('ij...,j...->i...', inv_gamma, dKdi)
+    # first term
+
+
+    metric_derivs = jnp.stack( [diff1_field(gamma, d+2, dx) for d in range(3)], axis=0) 
+    # shape (3, 3, 3, ni, nj, nk)
+    christoffel_second = christoffel_symbols_second_kind(inv_gamma, metric_derivs)
+    # compute Christoffel symbols of the second kind
+
+    A_ij_raised = jnp.einsum('ik...,kl...,lj...->ij...', A_ij, inv_gamma, inv_gamma)
+    # raise indices of A_ij
+    second_term = 2 * alpha * jnp.einsum('ijk...,jk...->i...', christoffel_second, A_ij_raised)
+    # second term
+
+    third_term = -6 * alpha / W * jnp.einsum('ij...,j...->i...', A_ij_raised, dWdi)
+    # third term
+
+    fourth_term = -2 * jnp.einsum('ij...,j...->i...', A_ij_raised, dalphadi)
+    # fourth term
+
+    dt_Gamma = first_term + second_term + third_term + fourth_term
+    # compute dt_Gamma
+
     return dt_Gamma
 
 
