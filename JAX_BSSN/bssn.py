@@ -361,8 +361,6 @@ def compute_momentum_constraint(vars: BSSNVariables,
     """
     Compute momentum constraint M_i.
     
-    M_i = D_j A^j_i - (2/3) D_i K
-    
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
@@ -575,7 +573,6 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve shift vector β^i using Gamma driver.
     
-    ∂_t β^i = (3/4) Γ̃^i
     
     Args:
         vars: Current BSSN variables
