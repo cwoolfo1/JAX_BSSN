@@ -11,7 +11,7 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_conformal_ricci
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_conformal_ricci, compute_ricci_with_matter
 from JAX_BSSN.derivatives import diff1_field, divergence_3d, compute_all_derivatives
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind, ricci_tensor,
@@ -46,20 +46,16 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
         Hamiltonian constraint violation H
     """
     dx = params.dx
-    shape = vars.conformal_metric.shape[2:]
-    
-    # Compute physical metric
-    psi4 = vars.conformal_factor**4
-    physical_metric = psi4 * vars.conformal_metric
-    
-    # Compute physical metric derivatives
-    metric_derivs = jnp.stack([diff1_field(physical_metric, k, dx) for k in range(3)], axis=0)
-    
+    conformal_metric = vars.conformal_metric
+    conformal_connection = vars.conformal_connection
+
+    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
+
     # Compute physical Ricci scalar (simplified calculation)
-    inv_physical_metric = invert_3x3_metric(physical_metric)
+    inv_metric = invert_3x3_metric(conformal_metric)
     
-    ricci_tensor = compute_conformal_ricci(vars.conformal_metric, vars.conformal_connection, params)
-    ricci_scalar = trace_tensor(ricci_tensor, inv_physical_metric)
+    ricci_tensor = compute_ricci_with_matter(vars, params)
+    ricci_scalar = trace_tensor(ricci_tensor, inv_metric)
     # compute the ricci scalar from the conformal Ricci tensor
     
     # Compute extrinsic curvature terms
@@ -67,9 +63,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     K_squared = vars.trace_K**2
     
     # K_ij K^ij = A_ij A^ij + (1/3) K²
-    inv_conformal_metric = invert_3x3_metric(vars.conformal_metric)
-
-    A_squared = jnp.einsum('ik...,jl...,ij...,kl...->', inv_conformal_metric, inv_conformal_metric,
+    A_squared = jnp.einsum('ik...,jl...,ij...,kl...->', inv_metric, inv_metric,
                             vars.traceless_K, vars.traceless_K)
 
     K_ij_K_ij = A_squared + K_squared / 3.0
@@ -270,150 +264,6 @@ def compute_constraint_norms(violations: ConstraintViolations) -> dict:
     norms['gamma_linf'] = jnp.max(jnp.abs(violations.gamma_condition))
     
     return norms
-
-
-@jit
-def compute_energy_density(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
-    """
-    Compute gravitational energy density.
-    
-    This is useful for monitoring wave propagation and energy conservation.
-    
-    Args:
-        vars: BSSN variables
-        params: Evolution parameters
-        
-    Returns:
-        Energy density at each grid point
-    """
-    # Simplified energy density based on extrinsic curvature
-    inv_metric = invert_3x3_metric(vars.conformal_metric)
-    
-    # Kinetic energy from extrinsic curvature
-    K_energy = 0.0
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                for l in range(3):
-                    K_energy += (inv_metric[i, k] * inv_metric[j, l] * 
-                                vars.traceless_K[i, j] * vars.traceless_K[k, l])
-    
-    K_energy += vars.trace_K**2 / 3.0
-    
-    # Potential energy from conformal factor gradients (simplified)
-    dx = params.dx
-    W_derivs = compute_all_derivatives(vars.conformal_factor, dx)
-    
-    potential_energy = 0.0
-    for i in range(3):
-        for j in range(3):
-            potential_energy += inv_metric[i, j] * W_derivs[i] * W_derivs[j]
-    
-    total_energy = K_energy + potential_energy
-    
-    return total_energy
-
-
-@jit
-def compute_wave_extraction_quantities(vars: BSSNVariables, 
-                                      params: BSSNParameters,
-                                      radius: float) -> dict:
-    """
-    Compute quantities for gravitational wave extraction (simplified).
-    
-    This extracts the ψ4 Weyl scalar at a given radius, which is related
-    to outgoing gravitational radiation.
-    
-    Args:
-        vars: BSSN variables
-        params: Evolution parameters
-        radius: Extraction radius
-        
-    Returns:
-        Dictionary of wave extraction quantities
-    """
-    dx = params.dx
-    shape = vars.conformal_metric.shape[2:]
-    ni, nj, nk = shape
-    
-    # Create coordinate arrays
-    x = jnp.arange(ni) * dx - (ni - 1) * dx / 2
-    y = jnp.arange(nj) * dx - (nj - 1) * dx / 2
-    z = jnp.arange(nk) * dx - (nk - 1) * dx / 2
-    X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
-    
-    r = jnp.sqrt(X**2 + Y**2 + Z**2)
-    
-    # Find points near extraction radius
-    mask = jnp.abs(r - radius) < dx
-    
-    # Extract metric perturbations (simplified)
-    h_plus = vars.conformal_metric[0, 0] - vars.conformal_metric[1, 1]
-    h_cross = vars.conformal_metric[0, 1]
-    
-    # Compute averages on extraction sphere
-    if jnp.sum(mask) > 0:
-        h_plus_avg = jnp.sum(h_plus * mask) / jnp.sum(mask)
-        h_cross_avg = jnp.sum(h_cross * mask) / jnp.sum(mask)
-    else:
-        h_plus_avg = 0.0
-        h_cross_avg = 0.0
-    
-    # Time derivatives (would need to store previous timestep)
-    # For now, return spatial quantities
-    quantities = {
-        'h_plus': h_plus_avg,
-        'h_cross': h_cross_avg,
-        'extraction_radius': radius
-    }
-    
-    return quantities
-
-
-@jit
-def compute_convergence_test(vars_coarse: BSSNVariables, 
-                            vars_fine: BSSNVariables,
-                            refinement_factor: int = 2) -> dict:
-    """
-    Compute convergence test between different resolutions.
-    
-    This compares solutions at different grid resolutions to verify
-    convergence to the continuum limit.
-    
-    Args:
-        vars_coarse: BSSN variables on coarse grid
-        vars_fine: BSSN variables on fine grid (interpolated to coarse)
-        refinement_factor: Factor by which fine grid is refined
-        
-    Returns:
-        Dictionary of convergence measures
-    """
-    # Compute differences in key quantities
-    diff_gamma = vars_fine.conformal_metric - vars_coarse.conformal_metric
-    diff_W = vars_fine.conformal_factor - vars_coarse.conformal_factor
-    diff_A = vars_fine.traceless_K - vars_coarse.traceless_K
-    diff_K = vars_fine.trace_K - vars_coarse.trace_K
-    
-    # L2 norms of differences
-    gamma_diff_norm = jnp.sqrt(jnp.mean(diff_gamma**2))
-    W_diff_norm = jnp.sqrt(jnp.mean(diff_W**2))
-    A_diff_norm = jnp.sqrt(jnp.mean(diff_A**2))
-    K_diff_norm = jnp.sqrt(jnp.mean(diff_K**2))
-    
-    # Expected convergence rate for 4th-order methods
-    expected_rate = refinement_factor**4
-    
-    convergence = {
-        'gamma_diff_norm': gamma_diff_norm,
-        'W_diff_norm': W_diff_norm,
-        'A_diff_norm': A_diff_norm,
-        'K_diff_norm': K_diff_norm,
-        'expected_rate': expected_rate,
-        'refinement_factor': refinement_factor
-    }
-    
-    return convergence
-
 
 def print_constraint_summary(violations: ConstraintViolations, time: float):
     """
