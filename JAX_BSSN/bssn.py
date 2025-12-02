@@ -458,10 +458,9 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     # Compute full Ricci tensor
     ricci = compute_ricci_with_matter(vars, params)
 
-    
-    third_term = alpha * ricci - DiDj_alpha
+
+    third_term = W**2 * (alpha * ricci - DiDj_alpha)
     third_term = traceless_part(third_term, vars.conformal_metric, inv_gamma)
-    third_term = W**2 * third_term
     # third term
 
     M = compute_momentum_constraint(vars, params)

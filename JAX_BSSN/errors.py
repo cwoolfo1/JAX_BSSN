@@ -33,9 +33,6 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     """
     Compute Hamiltonian constraint violation.
     
-    The Hamiltonian constraint is:
-    H = R + K² - K_ij K^ij = 0
-    
     where R is the 3D Ricci scalar.
     
     Args:
