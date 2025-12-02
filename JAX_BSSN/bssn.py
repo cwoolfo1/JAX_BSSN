@@ -169,7 +169,7 @@ def compute_conformal_ricci(vars: BSSNVariables,
     connection_derivs = jnp.stack( [diff1_field(conformal_connection, d+1, dx) for d in range(3)], axis=0)
     # shape (3, 3, ni, nj, nk)
 
-    term_2 = (jnp.einsum('mi...,jm...->ij...', inv_metric, connection_derivs) + jnp.einsum('mj...,im...->ij...', inv_metric, connection_derivs)) / 2.0
+    term_2 = (jnp.einsum('mi...,jm...->ij...', conformal_metric, connection_derivs) + jnp.einsum('mj...,im...->ij...', conformal_metric, connection_derivs)) / 2.0
     # compute second term of Ricci tensor
 
     term_3 = ( jnp.einsum('m...,ijm...->ij...', conformal_connection, christoffel_first) + jnp.einsum('m...,jim...->ij...', conformal_connection, christoffel_first) ) / 2.0
@@ -328,7 +328,7 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     DiDj_alpha = DiDj_alpha - 1/W * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
     # full covariant second derivative of alpha
 
-    first_term = - W**2 * jnp.einsum('ij...,ij...->...', inv_gamma, DiDj_alpha)
+    first_term = -1 * W**2 * jnp.einsum('ij...,ij...->...', inv_gamma, DiDj_alpha)
     # first term
 
     second_term = alpha * jnp.einsum('ij...,kl...,ik...,jl...->...', inv_gamma, inv_gamma, A_ij, A_ij)
@@ -466,9 +466,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 @jit
 def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     """
-    Evolve lapse function α using 1+log slicing.
-    
-    ∂_t α = -f α^2 K + £_β α
+    Evolve lapse function.
     
     Args:
         vars: Current BSSN variables
@@ -480,14 +478,8 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     dx = params.dx
     f = params.f
     
-    # 1+log slicing evolution
+    # harmonic slicing evolution
     dt_alpha = -f * vars.lapse**2 * vars.trace_K
-    
-    # Add shift advection
-    for k in range(3):
-        dalpha_dk = diff1_field(vars.lapse, k, dx)
-        dt_alpha += vars.shift[k] * dalpha_dk
-
     
     return dt_alpha
 
