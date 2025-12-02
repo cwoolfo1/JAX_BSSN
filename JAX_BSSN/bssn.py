@@ -42,6 +42,7 @@ class BSSNVariables(NamedTuple):
 class BSSNParameters(NamedTuple):
     """Parameters for BSSN evolution."""
     eta: float = 2.0          # Damping parameter for Γ^i evolution
+    kappa: float = 0.0        # Constraint damping parameter
     f: float = 2.0            # Multiple of 1+log slicing
     g: float = 0.75           # Gamma driver shift parameter
     dx: float = 0.1           # Grid spacing
@@ -354,6 +355,56 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
 
 
 @jit
+def compute_momentum_constraint(vars: BSSNVariables,
+                               params: BSSNParameters) -> jnp.ndarray:
+    """
+    Compute momentum constraint M_i.
+    
+    M_i = D_j A^j_i - (2/3) D_i K
+    
+    Args:
+        vars: Current BSSN variables
+        params: Evolution parameters
+        
+    Returns:
+        Momentum constraint vector M_i
+    """
+
+    dx = params.dx
+    K = vars.trace_K
+    A_ij = vars.traceless_K
+    W    = vars.conformal_factor
+    gamma = vars.conformal_metric
+    inv_gamma = invert_3x3_metric(gamma)
+
+    dKdi = jnp.stack( [diff1_field(K, d, dx) for d in range(3)], axis=0)
+    # first derivatives of K
+
+    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    # first derivatives of W
+
+    dA_ij_dk = jnp.stack( [diff1_field(A_ij, d+2, dx) for d in range(3)], axis=0)
+    # derivatives of A_ij
+
+    first_term = jnp.einsum('jl...,lij...->i...', inv_gamma, dA_ij_dk)
+    # first term
+
+    second_term = -0.5 * jnp.einsum('jk...,ijk...->i...', inv_gamma, dA_ij_dk)
+    # second term
+
+    third_term = -3 * jnp.einsum('kj...,k...,ij...->i...', inv_gamma, dWdi, A_ij) / W
+    # third term
+
+    fourth_term = -2.0/3.0 * jnp.einsum('i...,->i...', dKdi)
+    # fourth term
+
+    M_i = first_term + second_term + third_term + fourth_term
+    # compute momentum constraint
+
+    return M_i
+
+
+@jit
 def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
                                         params: BSSNParameters) -> jnp.ndarray:
     """
@@ -413,8 +464,27 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     third_term = traceless_part(third_term, vars.conformal_metric, inv_gamma)
     third_term = W**2 * third_term
     # third term
-    
-    dt_A = first_term + second_term + third_term
+
+    M = compute_momentum_constraint(vars, params)
+    # Momentum constraint term
+
+    kappa = params.kappa
+    # constraint damping parameter
+
+    dMidj = jnp.zeros((3,3) + M.shape)
+
+    for i in range(3):
+        for j in range(3):
+            dMidj = dMidj.at[i,j].set( diff1_field( M[i,...], j, dx) ) 
+        
+    DjMi = dMidj - jnp.einsum('kij...,k...->ij...', christoffel_second, M)
+    DiMj = jnp.swapaxes(DjMi, 0, 1)
+    # compute covariant derivatives of M_i
+
+    fourth_term = kappa/2 * alpha * (DjMi + DiMj)
+    # fourth term
+
+    dt_A = first_term + second_term + third_term + fourth_term
     # compute dt_A
 
     return dt_A
@@ -513,9 +583,8 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     Returns:
         Time derivative of shift
     """
-    g = params.g
-    
-    # Gamma driver evolution
-    dt_beta = g * vars.conformal_connection
+    # in Harmonic gauge with 0 shift, the shift does not evolve
+
+    dt_beta = 0.0 * vars.conformal_connection  # Placeholder for no evolution
     
     return dt_beta

@@ -90,37 +90,41 @@ def compute_momentum_constraint(vars: BSSNVariables,
     Returns:
         Momentum constraint violation M_i (3-vector)
     """
-    dx = params.dx
-    shape = vars.conformal_metric.shape[2:]
+
+
+    raise NotImplementedError("Momentum constraint computation not implemented")
+
+    # dx = params.dx
+    # shape = vars.conformal_metric.shape[2:]
     
-    # Compute inverse conformal metric
-    inv_metric = invert_3x3_metric(vars.conformal_metric)
+    # # Compute inverse conformal metric
+    # inv_metric = invert_3x3_metric(vars.conformal_metric)
     
-    # Compute K^j_i = γ^jk K_ki
-    K_mixed = jnp.zeros((3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                K_mixed = K_mixed.at[j, i].add(
-                    inv_metric[j, k] * vars.traceless_K[k, i])
-            # Add trace part
-            K_mixed = K_mixed.at[j, i].add((1.0/3.0) * inv_metric[j, i] * vars.trace_K)
+    # # Compute K^j_i = γ^jk K_ki
+    # K_mixed = jnp.zeros((3, 3) + shape)
+    # for i in range(3):
+    #     for j in range(3):
+    #         for k in range(3):
+    #             K_mixed = K_mixed.at[j, i].add(
+    #                 inv_metric[j, k] * vars.traceless_K[k, i])
+    #         # Add trace part
+    #         K_mixed = K_mixed.at[j, i].add((1.0/3.0) * inv_metric[j, i] * vars.trace_K)
     
-    # Compute divergence of K^j_i for each i
-    momentum = jnp.zeros((3,) + shape)
-    for i in range(3):
-        # Construct K^j_i - δ^j_i K for this i
-        K_term = jnp.zeros((3,) + shape)
-        for j in range(3):
-            K_term = K_term.at[j].set(K_mixed[j, i])
-            if i == j:
-                K_term = K_term.at[j].add(-vars.trace_K)
+    # # Compute divergence of K^j_i for each i
+    # momentum = jnp.zeros((3,) + shape)
+    # for i in range(3):
+    #     # Construct K^j_i - δ^j_i K for this i
+    #     K_term = jnp.zeros((3,) + shape)
+    #     for j in range(3):
+    #         K_term = K_term.at[j].set(K_mixed[j, i])
+    #         if i == j:
+    #             K_term = K_term.at[j].add(-vars.trace_K)
         
-        # Compute divergence
-        div_K = divergence_3d(K_term, dx)
-        momentum = momentum.at[i].set(div_K)
+    #     # Compute divergence
+    #     div_K = divergence_3d(K_term, dx)
+    #     momentum = momentum.at[i].set(div_K)
     
-    return momentum
+    # return momentum
 
 
 @jit
@@ -174,38 +178,41 @@ def compute_gamma_constraint(vars: BSSNVariables,
     Returns:
         Gamma constraint violation
     """
-    dx = params.dx
-    shape = vars.conformal_metric.shape[2:]
+
+    raise NotImplementedError("Gamma constraint computation not implemented")
     
-    # Compute metric derivatives
-    metric_derivs = jnp.zeros((3, 3, 3) + shape)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                metric_derivs = metric_derivs.at[k, i, j].set(
-                    diff1_field(vars.conformal_metric[i, j], k, dx))
+    # dx = params.dx
+    # shape = vars.conformal_metric.shape[2:]
     
-    # Compute inverse metric
-    inv_metric = invert_3x3_metric(vars.conformal_metric)
+    # # Compute metric derivatives
+    # metric_derivs = jnp.zeros((3, 3, 3) + shape)
+    # for i in range(3):
+    #     for j in range(3):
+    #         for k in range(3):
+    #             metric_derivs = metric_derivs.at[k, i, j].set(
+    #                 diff1_field(vars.conformal_metric[i, j], k, dx))
     
-    # Compute Christoffel symbols
-    christoffel = christoffel_symbols_second_kind(inv_metric, metric_derivs)
+    # # Compute inverse metric
+    # inv_metric = invert_3x3_metric(vars.conformal_metric)
     
-    # Compute γ^jk Γ^i_jk
-    gamma_from_christoffel = jnp.zeros((3,) + shape)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                gamma_from_christoffel = gamma_from_christoffel.at[i].add(
-                    inv_metric[j, k] * christoffel[i, j, k])
+    # # Compute Christoffel symbols
+    # christoffel = christoffel_symbols_second_kind(inv_metric, metric_derivs)
     
-    # Constraint violation
-    gamma_violation = jnp.zeros((3,) + shape)
-    for i in range(3):
-        gamma_violation = gamma_violation.at[i].set(
-            vars.conformal_connection[i] - gamma_from_christoffel[i])
+    # # Compute γ^jk Γ^i_jk
+    # gamma_from_christoffel = jnp.zeros((3,) + shape)
+    # for i in range(3):
+    #     for j in range(3):
+    #         for k in range(3):
+    #             gamma_from_christoffel = gamma_from_christoffel.at[i].add(
+    #                 inv_metric[j, k] * christoffel[i, j, k])
     
-    return gamma_violation
+    # # Constraint violation
+    # gamma_violation = jnp.zeros((3,) + shape)
+    # for i in range(3):
+    #     gamma_violation = gamma_violation.at[i].set(
+    #         vars.conformal_connection[i] - gamma_from_christoffel[i])
+    
+    # return gamma_violation
 
 
 # @jit
