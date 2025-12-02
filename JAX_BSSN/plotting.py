@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from typing import List, Tuple
 
 from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
-from JAX_BSSN.errors import compute_energy_density
 
 
 def save_data(vars: BSSNVariables, t: float, step: int, 
@@ -23,55 +22,51 @@ def save_data(vars: BSSNVariables, t: float, step: int,
              lapse=np.array(vars.lapse))
 
 def plot_results(vars: BSSNVariables, t: float, params: BSSNParameters):
-    """Create diagnostic plots."""
+    """Create diagnostic plots (energy density plot removed)."""
     ni, nj, nk = vars.conformal_factor.shape
-    
+
     # Central slices
     i_center = ni // 2
     j_center = nj // 2
     k_center = nk // 2
-    
+
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle(f'BSSN Evolution at t = {t:.3f}')
-    
+
     # Conformal factor
-    im1 = axes[0, 0].imshow(vars.conformal_factor[:, :, k_center], 
-                           origin='lower', aspect='equal')
+    im1 = axes[0, 0].imshow(np.array(vars.conformal_factor[:, :, k_center]),
+                            origin='lower', aspect='equal')
     axes[0, 0].set_title('Conformal Factor W (z=0)')
     plt.colorbar(im1, ax=axes[0, 0])
-    
+
     # Lapse function
-    im2 = axes[0, 1].imshow(vars.lapse[:, :, k_center], 
-                           origin='lower', aspect='equal')
+    im2 = axes[0, 1].imshow(np.array(vars.lapse[:, :, k_center]),
+                            origin='lower', aspect='equal')
     axes[0, 1].set_title('Lapse α (z=0)')
     plt.colorbar(im2, ax=axes[0, 1])
-    
+
     # Trace of K
-    im3 = axes[0, 2].imshow(vars.trace_K[:, :, k_center], 
-                           origin='lower', aspect='equal')
+    im3 = axes[0, 2].imshow(np.array(vars.trace_K[:, :, k_center]),
+                            origin='lower', aspect='equal')
     axes[0, 2].set_title('Trace K (z=0)')
     plt.colorbar(im3, ax=axes[0, 2])
-    
+
     # Conformal metric component
-    im4 = axes[1, 0].imshow(vars.conformal_metric[0, 0, :, :, k_center], 
-                           origin='lower', aspect='equal')
+    im4 = axes[1, 0].imshow(np.array(vars.conformal_metric[0, 0, :, :, k_center]),
+                            origin='lower', aspect='equal')
     axes[1, 0].set_title('γ_xx (z=0)')
     plt.colorbar(im4, ax=axes[1, 0])
-    
+
     # Extrinsic curvature component
-    im5 = axes[1, 1].imshow(vars.traceless_K[0, 0, :, :, k_center], 
-                           origin='lower', aspect='equal')
+    im5 = axes[1, 1].imshow(np.array(vars.traceless_K[0, 0, :, :, k_center]),
+                            origin='lower', aspect='equal')
     axes[1, 1].set_title('A_xx (z=0)')
     plt.colorbar(im5, ax=axes[1, 1])
-    
-    # Energy density
-    energy = compute_energy_density(vars, params)
-    im6 = axes[1, 2].imshow(energy[:, :, k_center], 
-                           origin='lower', aspect='equal')
-    axes[1, 2].set_title('Energy Density (z=0)')
-    plt.colorbar(im6, ax=axes[1, 2])
-    
-    plt.tight_layout()
+
+    # The energy density plot was removed; turn off the unused axis
+    axes[1, 2].axis('off')
+
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(f'evolution_t_{t:.3f}.png', dpi=150)
     plt.show()
 
