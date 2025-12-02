@@ -48,6 +48,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     dx = params.dx
     conformal_metric = vars.conformal_metric
     conformal_connection = vars.conformal_connection
+    W = vars.conformal_factor
 
     metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
 
@@ -57,20 +58,16 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     ricci_tensor = compute_ricci_with_matter(vars, params)
     ricci_scalar = trace_tensor(ricci_tensor, inv_metric)
     # compute the ricci scalar from the conformal Ricci tensor
-    
-    # Compute extrinsic curvature terms
-    # K² = (tr K)²
+
     K_squared = vars.trace_K**2
     
-    # K_ij K^ij = A_ij A^ij + (1/3) K²
     A_squared = jnp.einsum('ik...,jl...,ij...,kl...->', inv_metric, inv_metric,
                             vars.traceless_K, vars.traceless_K)
 
-    K_ij_K_ij = A_squared + K_squared / 3.0
 
     # Hamiltonian constraint
-    hamiltonian = ricci_scalar + K_squared - K_ij_K_ij
-    
+    hamiltonian = W**2 * ricci_scalar + 2/3 * K_squared - A_squared
+
     return hamiltonian
 
 
