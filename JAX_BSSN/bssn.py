@@ -267,6 +267,7 @@ def evolve_conformal_metric(vars: BSSNVariables,
     # First term: -2α A_ij
     dt_gamma = -2.0 * vars.lapse * vars.traceless_K
 
+
     return dt_gamma
 
 
@@ -347,7 +348,7 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
 
     third_term = alpha * K**2 / 3.0
     # third term
-    
+
     dt_K = first_term + second_term + third_term
     # compute dt_K
     
@@ -395,7 +396,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
     third_term = -3 * jnp.einsum('kj...,k...,ij...->i...', inv_gamma, dWdi, A_ij) / W
     # third term
 
-    fourth_term = -2.0/3.0 * jnp.einsum('i...,->i...', dKdi)
+    fourth_term = -2.0/3.0 * dKdi
     # fourth term
 
     M_i = first_term + second_term + third_term + fourth_term
@@ -471,7 +472,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     kappa = params.kappa
     # constraint damping parameter
 
-    dMidj = jnp.zeros((3,3) + M.shape)
+    dMidj = jnp.zeros((3,) + M.shape)
 
     for i in range(3):
         for j in range(3):
