@@ -1,6 +1,9 @@
-# NR1 JAX - Numerical Relativity in Python with JAX
+# JAX-BSSN - Numerical Relativity in Python with JAX
 
 This is a Python/JAX implementation of the NR1 numerical relativity code forked from 20K on Github.
+This code uses the BSSN formulation of the ADM 3+1 decomposition of general relativity. As of right now,
+the evolution equations are limited to the harmonic gauge using the zero shift condition and fully periodic boundary 
+conditions are implemented.
 
 ## Features
 
@@ -28,13 +31,15 @@ python main.py
 
 ## Structure
 
-- `main.py` - Main simulation loop and setup
-- `bssn.py` - BSSN evolution equations and field definitions
-- `derivatives.py` - Finite difference operators
-- `init.py` - Initial data setup (gravitational waves, etc.)
-- `kreiss_oliger.py` - Kreiss-Oliger dissipation
-- `tensor_algebra.py` - Tensor operations (Christoffel symbols, etc.)
-- `errors.py` - Constraint violation analysis
+
+- `bssn.py` - BSSN evolution equations and field definitions (FULLY OPERATIONAL)
+- `derivatives.py` - Finite difference operators (FULLY OPERATIONAL)
+- `tensor_algebra.py` - Tensor operations (Christoffel symbols, etc.) (FULLY OPERATIONAL)
+- `errors.py` - Constraint violation analysis (HAMILTONIAN AND MOMENTUM ERRORS ARE FULLY OPERATIONAL)
+- `kreiss_oliger.py` - Kreiss-Oliger dissipation (NOT TESTED)
+- `main.py` - Main simulation loop and setup (NOT TESTED)
+- `init.py` - Initial data setup (gravitational waves, etc.) (NOT TESTED)
+- `tests/`  - Unit tests for tensor algebra, derivatives and MMS for BSSN evolution
 
 ## Usage
 
