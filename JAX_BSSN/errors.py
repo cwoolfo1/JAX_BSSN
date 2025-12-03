@@ -58,7 +58,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
 
     K_squared = vars.trace_K**2
     
-    A_squared = jnp.einsum('ik...,jl...,ij...,kl...->', inv_metric, inv_metric,
+    A_squared = jnp.einsum('ik...,jl...,ij...,kl...->...', inv_metric, inv_metric,
                             vars.traceless_K, vars.traceless_K)
 
 
