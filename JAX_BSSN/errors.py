@@ -18,6 +18,10 @@ from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            ricci_scalar, trace_tensor)
 
 
+# NOTE: HAMILTONIAN AND MOMENTUM CONSTRAINT METHODS HAVE BEEN TESTED AND VERIFIED AS OF DEC 3RD 2025
+# THE OTHERS ARE PARTIALLY IMPLEMENTED AND NEED FURTHER TESTING
+
+
 class ConstraintViolations(NamedTuple):
     """Container for constraint violation measures."""
     hamiltonian: jnp.ndarray      # Hamiltonian constraint violation

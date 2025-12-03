@@ -28,6 +28,9 @@ from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            raise_index, lower_index)
 
 
+# NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
+
+
 class BSSNVariables(NamedTuple):
     """Container for BSSN evolution variables."""
     conformal_metric: jnp.ndarray      # γ_ij (3x3 symmetric)

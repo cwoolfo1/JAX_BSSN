@@ -12,6 +12,8 @@ from typing import Tuple, Union
 import numpy as np
 from functools import partial
 
+# NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
+
 @jit
 def periodic_indexing(idx: int, size: int) -> int:
     """Handle periodic boundary conditions for array indexing."""

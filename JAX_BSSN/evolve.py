@@ -9,6 +9,9 @@ from jax import jit
 import jax
 
 
+# NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
+
+
 @jit
 def rk4_step(vars: BSSNVariables, params: BSSNParameters,
              ko_sigma: float = 0.0) -> BSSNVariables:

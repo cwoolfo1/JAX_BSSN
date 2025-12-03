@@ -17,6 +17,9 @@ from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
 from JAX_BSSN.tensor_algebra import invert_3x3_metric, determinant_3x3_metric, traceless_part
 from JAX_BSSN.kreiss_oliger import apply_ko_dissipation_bssn, get_optimal_dissipation_coefficient
 
+
+# NOTE: HAS NOT BEEN FULLY TESTED YET
+
 def setup_simulation_parameters():
     """Set up default simulation parameters."""
     # Grid parameters

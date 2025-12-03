@@ -16,6 +16,9 @@ from JAX_BSSN.derivatives import get_stencil_indices, diff6_field
 from JAX_BSSN.bssn import BSSNVariables
 
 
+
+# NOTE: HAS NOT BEEN FULLY TESTED YET
+
 @jit
 def apply_ko_dissipation_scalar(field: jnp.ndarray, sigma: float, dx: float) -> jnp.ndarray:
     """

@@ -6,6 +6,8 @@ from typing import List, Tuple
 from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
 
 
+# NOTE : HAS NOT BEEN FULLY TESTED YET
+
 def save_data(vars: BSSNVariables, t: float, step: int, 
               output_dir: str = "output"):
     """Save simulation data to files."""

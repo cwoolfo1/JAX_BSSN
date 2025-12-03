@@ -14,6 +14,8 @@ import numpy as np
 
 from JAX_BSSN.derivatives import diff1_field, compute_all_derivatives
 
+# NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
+
 
 @jit
 def invert_3x3_metric(metric: jnp.ndarray) -> jnp.ndarray:
