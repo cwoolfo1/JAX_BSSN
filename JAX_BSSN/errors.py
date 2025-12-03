@@ -11,7 +11,7 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_conformal_ricci, compute_ricci_with_matter
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_conformal_ricci, compute_ricci_with_matter, compute_momentum_constraint
 from JAX_BSSN.derivatives import diff1_field, divergence_3d, compute_all_derivatives
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind, ricci_tensor,
@@ -66,59 +66,6 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     hamiltonian = W**2 * ricci_scalar + 2/3 * K_squared - A_squared
 
     return hamiltonian
-
-
-# @jit
-def compute_momentum_constraint(vars: BSSNVariables,
-                               params: BSSNParameters) -> jnp.ndarray:
-    """
-    Compute momentum constraint violation.
-    
-    The momentum constraint is:
-    M_i = ∇_j (K^j_i - δ^j_i K) = 0
-    
-    Args:
-        vars: BSSN variables
-        params: Evolution parameters
-        
-    Returns:
-        Momentum constraint violation M_i (3-vector)
-    """
-
-
-    raise NotImplementedError("Momentum constraint computation not implemented")
-
-    # dx = params.dx
-    # shape = vars.conformal_metric.shape[2:]
-    
-    # # Compute inverse conformal metric
-    # inv_metric = invert_3x3_metric(vars.conformal_metric)
-    
-    # # Compute K^j_i = γ^jk K_ki
-    # K_mixed = jnp.zeros((3, 3) + shape)
-    # for i in range(3):
-    #     for j in range(3):
-    #         for k in range(3):
-    #             K_mixed = K_mixed.at[j, i].add(
-    #                 inv_metric[j, k] * vars.traceless_K[k, i])
-    #         # Add trace part
-    #         K_mixed = K_mixed.at[j, i].add((1.0/3.0) * inv_metric[j, i] * vars.trace_K)
-    
-    # # Compute divergence of K^j_i for each i
-    # momentum = jnp.zeros((3,) + shape)
-    # for i in range(3):
-    #     # Construct K^j_i - δ^j_i K for this i
-    #     K_term = jnp.zeros((3,) + shape)
-    #     for j in range(3):
-    #         K_term = K_term.at[j].set(K_mixed[j, i])
-    #         if i == j:
-    #             K_term = K_term.at[j].add(-vars.trace_K)
-        
-    #     # Compute divergence
-    #     div_K = divergence_3d(K_term, dx)
-    #     momentum = momentum.at[i].set(div_K)
-    
-    # return momentum
 
 
 @jit
