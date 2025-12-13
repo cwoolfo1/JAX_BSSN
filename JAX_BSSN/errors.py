@@ -11,7 +11,7 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_conformal_ricci, compute_ricci_with_matter, compute_momentum_constraint
+from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_ricci, compute_momentum_constraint
 from JAX_BSSN.derivatives import diff1_field, divergence_3d, compute_all_derivatives
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind, ricci_tensor,
@@ -56,7 +56,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     # Compute physical Ricci scalar (simplified calculation)
     inv_metric = invert_3x3_metric(conformal_metric)
     
-    ricci_tensor = compute_ricci_with_matter(vars, params)
+    ricci_tensor = compute_ricci(vars, params)
     ricci_scalar = trace_tensor(ricci_tensor, inv_metric)
     # compute the ricci scalar from the conformal Ricci tensor
 
