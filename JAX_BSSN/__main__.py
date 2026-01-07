@@ -9,6 +9,7 @@ import argparse
 import time
 
 import jax
+from tqdm import tqdm
 
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.errors import (
@@ -87,6 +88,9 @@ def run_simulation(
     next_plot_time = 0.0
     next_save_time = 0.0
 
+    Nt = int( (t_final - t) / dt )
+    # compute the number of time steps
+
     constraint_history = []
 
     if verbose:
@@ -94,49 +98,18 @@ def run_simulation(
 
     start_wall_time = time.time()
 
-    while t < t_final:
-        print(f"Step {step}, Time {t:.4f}")
+    for t in tqdm(range(Nt)):
         vars = rk4_step(vars, bssn_params, ko_sigma)
-        t += dt
+
         step += 1
 
-        # if not monitor_simulation_health(vars, bssn_params, t):
-        #     print("Simulation stopped due to instability")
-        #     break
-
         if step % 10 == 0:
+            current_time = step * dt
             violations = compute_all_constraints(vars, bssn_params)
             norms = compute_constraint_norms(violations)
-            constraint_history.append((t, norms))
-
-            if verbose and step % 100 == 0:
-                print_constraint_summary(violations, t)
-
-        if t >= next_save_time:
-            save_data(vars, t, step)
-            next_save_time += save_interval
-
-        # if t >= next_plot_time:
-        #     plot_results(vars, t, bssn_params)
-        #     next_plot_time += plot_interval
+            constraint_history.append((current_time, norms))
 
     wall_time = time.time() - start_wall_time
-
-    if verbose:
-        print("Evolution completed!")
-        print(f"Final time: {t:.4f}")
-        print(f"Total steps: {step}")
-        print(f"Wall time: {wall_time:.2f} seconds")
-        print(f"Time per step: {wall_time/step*1000:.2f} ms")
-        print(f"Simulation time per wall time: {t/wall_time:.1f}x")
-
-    violations = compute_all_constraints(vars, bssn_params)
-    if verbose:
-        print("\nFinal constraint violations:")
-        print_constraint_summary(violations, t)
-
-    if constraint_history:
-        plot_constraint_evolution(constraint_history)
 
     return vars, constraint_history
 
