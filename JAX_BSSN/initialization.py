@@ -9,7 +9,7 @@ from typing import Tuple
 
 import jax.numpy as jnp
 from jax import jit
-from jax.scipy.special import j0, j1
+from scipy.special import j0, j1
 
 from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
 from JAX_BSSN.derivatives import diff1_field

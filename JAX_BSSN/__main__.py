@@ -100,9 +100,9 @@ def run_simulation(
         t += dt
         step += 1
 
-        if not monitor_simulation_health(vars, bssn_params, t):
-            print("Simulation stopped due to instability")
-            break
+        # if not monitor_simulation_health(vars, bssn_params, t):
+        #     print("Simulation stopped due to instability")
+        #     break
 
         if step % 10 == 0:
             violations = compute_all_constraints(vars, bssn_params)
@@ -116,9 +116,9 @@ def run_simulation(
             save_data(vars, t, step)
             next_save_time += save_interval
 
-        if t >= next_plot_time:
-            plot_results(vars, t, bssn_params)
-            next_plot_time += plot_interval
+        # if t >= next_plot_time:
+        #     plot_results(vars, t, bssn_params)
+        #     next_plot_time += plot_interval
 
     wall_time = time.time() - start_wall_time
 

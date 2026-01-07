@@ -2,6 +2,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple
+from functools import partial
+import jax
 
 from JAX_BSSN.bssn import BSSNVariables, BSSNParameters
 
@@ -118,3 +120,24 @@ def plot_constraint_evolution(constraint_history: List[Tuple[float, dict]]):
     plt.tight_layout()
     plt.savefig('constraint_evolution.png', dpi=150)
     plt.show()
+
+@partial(jax.jit, static_argnums=(0))
+def write_data(filename, time, data):
+    """
+    Write the given time and data to a file using JAX's callback mechanism.
+    This function is designed to be used with JAX's just-in-time compilation (jit) to optimize performance.
+
+    Args:
+        filename (str): The name of the file to write to.
+        time (float): The time value to write.
+        data (any): The data to write.
+
+    Returns:
+        None
+    """
+
+    def write_to_file(filename, time, data):
+        with open(filename, "a") as f:
+            f.write(f"{time}, {data}\n")
+
+    return jax.debug.callback(write_to_file, filename, time, data, ordered=True)
