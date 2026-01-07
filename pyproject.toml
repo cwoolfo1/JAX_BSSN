@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "JAX_BSSN"
+version = "0.0.1"
+description = "A 3D BSSN Numerical Relativity code using JAX"
+authors = [
+    { name = "Christopher Woolford", email = "clwoolford@wisc.edu" }
+]
+license = { file = "LICENSE" }
+
+dependencies = [
+    "jax",
+    "jaxlib",
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[tool.setuptools]
+packages = ["JAX_BSSN"]
+
+[project.scripts]
+JAX_BSSN = "JAX_BSSN.__main__:main"
