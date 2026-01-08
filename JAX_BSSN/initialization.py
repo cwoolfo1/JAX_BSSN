@@ -188,47 +188,58 @@ def gowdy_wave_data(
     _, _, Z = create_coordinate_arrays(ni, nj, nk, dx)
 
     k = 2.0 * jnp.pi / wavelength
-    P = amplitude * j0(k * t0) * jnp.cos(k * Z)
-    P_t = -amplitude * k * j1(k * t0) * jnp.cos(k * Z)
-    P_z = -amplitude * k * j0(k * t0) * jnp.sin(k * Z)
 
-    lambda_z = 2.0 * t0 * P_t * P_z
-    lambda_raw = jnp.cumsum(lambda_z, axis=2) * dx
-    lambda_field = lambda_raw - jnp.mean(lambda_raw)
-    lambda_t = t0 * (P_t**2 + P_z**2)
+    lam = -k*t0*j0(k*t0)*j1(k*t0)*jnp.cos(k*Z)**2
+    lam += 0.5 * k**2 * t0**2 * ( j0(k*t0)**2 + j1(k*t0)**2 )
+    lam += -0.5 * ( k**2 * ( j0(k)**2 + j1(k)**2 ) - k * j0(k) * j1(k) )
+    # compute lambda constant
+    dlamdt = -k**2 * t0 * j0(k*t0) * j1(k*t0)
+    # compute time derivative of lambda
+
+    P = j0(k * t0) * jnp.cos(k * Z)
+    # compute P field
+    dPdt = -k * j1(k * t0) * jnp.cos(k * Z)
+    # compute time derivative of P field
 
     g_xx = t0 * jnp.exp(P)
     g_yy = t0 * jnp.exp(-P)
-    g_zz = t0 ** (-0.5) * jnp.exp(0.5 * lambda_field)
-
+    g_zz = t0 ** (-0.5) * jnp.exp(0.5 * lam)
+    # physical metric components
     physical_metric = jnp.zeros((3, 3) + shape)
     physical_metric = physical_metric.at[0, 0].set(g_xx)
     physical_metric = physical_metric.at[1, 1].set(g_yy)
     physical_metric = physical_metric.at[2, 2].set(g_zz)
+    # physical metric tensor
 
-    lapse = t0 ** (-0.25) * jnp.exp(0.25 * lambda_field)
+    lapse = t0 ** (-0.25) * jnp.exp(0.25 * lam)
     shift = jnp.zeros((3,) + shape)
+    # lapse and shift
 
-    dt_g_xx = g_xx * (1.0 / t0 + P_t)
-    dt_g_yy = g_yy * (1.0 / t0 - P_t)
-    dt_g_zz = g_zz * (-0.5 / t0 + 0.5 * lambda_t)
-
-    extrinsic_curvature = jnp.zeros_like(physical_metric)
-    extrinsic_curvature = extrinsic_curvature.at[0, 0].set(-0.5 * dt_g_xx / lapse)
-    extrinsic_curvature = extrinsic_curvature.at[1, 1].set(-0.5 * dt_g_yy / lapse)
-    extrinsic_curvature = extrinsic_curvature.at[2, 2].set(-0.5 * dt_g_zz / lapse)
+    K_xx = -0.5 * t0**(0.25) * jnp.exp(-lam/4) * jnp.exp(P) * (1 + t0 * dPdt)
+    K_yy = -0.5 * t0**(0.25) * jnp.exp(-lam/4) * jnp.exp(-P) * (1 - t0 * dPdt)
+    K_zz = 0.25 * t0**(-0.25) * jnp.exp(lam/4) * (1 / t0 - dlamdt)
+    # extrinsic curvature components
 
     det_gamma = determinant_3x3_metric(physical_metric)
     conformal_factor = det_gamma ** (-1.0 / 6.0)
     conformal_metric = physical_metric * conformal_factor**2
+    # conformal metric and factor
+
+    extrinsic_curvature = jnp.zeros_like(physical_metric)
+    extrinsic_curvature = extrinsic_curvature.at[0, 0].set( K_xx )
+    extrinsic_curvature = extrinsic_curvature.at[1, 1].set( K_yy )
+    extrinsic_curvature = extrinsic_curvature.at[2, 2].set( K_zz )
+    # extrinsic curvature tensor
 
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
     trace_K = jnp.einsum("mn..., mn... -> ...", inv_conformal_metric, extrinsic_curvature)
     traceless_K = conformal_factor**2 * (
         extrinsic_curvature - conformal_metric * trace_K / 3.0
     )
-
+    # traceless extrinsic curvature and trace
     conformal_connection = _compute_conformal_connection(conformal_metric, dx)
+    # conformal connection functions
+
 
     return BSSNVariables(
         conformal_metric=conformal_metric,
