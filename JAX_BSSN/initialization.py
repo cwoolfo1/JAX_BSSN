@@ -18,7 +18,6 @@ from JAX_BSSN.tensor_algebra import (
     determinant_3x3_metric,
     christoffel_symbols_second_kind,
 )
-from JAX_BSSN.kreiss_oliger import get_optimal_dissipation_coefficient
 
 
 # NOTE: GAUGE WAVE AND GOWDY WAVE INITIAL DATA ARE ALIGNED WITH THE HARMONIC GAUGE FORMULATION.
@@ -40,16 +39,14 @@ def setup_simulation_parameters():
         g=0.0,
         dx=dx,
         dt=dt,
+        nu=0.25,  # Kreiss-Oliger dissipation coefficient
     )
 
-    # Dissipation parameters
-    ko_sigma = get_optimal_dissipation_coefficient(dx, dt)
 
     return {
         "grid": (ni, nj, nk, dx),
         "evolution": (dt, t_final),
         "bssn_params": bssn_params,
-        "ko_sigma": ko_sigma,
     }
 
 

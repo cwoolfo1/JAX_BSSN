@@ -4,7 +4,6 @@ from JAX_BSSN.bssn import (
     evolve_traceless_extrinsic_curvature, evolve_trace_extrinsic_curvature,
     evolve_conformal_connection, evolve_lapse, evolve_shift
 )
-from JAX_BSSN.kreiss_oliger import apply_ko_dissipation_bssn
 from jax import jit
 import jax
 
@@ -13,8 +12,7 @@ import jax
 
 
 @jit
-def rk4_step(vars: BSSNVariables, params: BSSNParameters,
-             ko_sigma: float = 0.0) -> BSSNVariables:
+def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     """
     Perform one RK4 timestep with Kreiss-Oliger dissipation.
     
@@ -115,14 +113,5 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters,
         lapse=vars.lapse + (dt / 6.0) * (k1[5] + 2 * k2[5] + 2 * k3[5] + k4[5]),
         shift=vars.shift + (dt / 6.0) * (k1[6] + 2 * k2[6] + 2 * k3[6] + k4[6])
     )
-
-    # Apply Kreiss-Oliger dissipation if requested
-    # Use jnp.where to make this JIT-compatible
-    # new_vars = jax.lax.cond(
-    #     ko_sigma > 0,
-    #     lambda _: apply_ko_dissipation_bssn(new_vars, ko_sigma, params.dx),
-    #     lambda x_: new_vars,
-    #     operand=None
-    # )
 
     return new_vars

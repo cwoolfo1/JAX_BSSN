@@ -19,7 +19,7 @@ from typing import Tuple, NamedTuple
 import numpy as np
 
 from JAX_BSSN.derivatives import (diff1_field, compute_all_derivatives, 
-                        laplacian_3d, divergence_3d)
+                        laplacian_3d, divergence_3d, diff6_field)
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind,
                            christoffel_symbols_first_kind,
@@ -46,6 +46,7 @@ class BSSNParameters(NamedTuple):
     """Parameters for BSSN evolution."""
     eta: float = 2.0          # Damping parameter for Γ^i evolution
     kappa: float = 0.0        # Constraint damping parameter
+    nu: float = 0.25          # Kreiss-Oliger dissipation coefficient
     f: float = 2.0            # Multiple of 1+log slicing
     g: float = 0.75           # Gamma driver shift parameter
     dx: float = 0.1           # Grid spacing
@@ -243,8 +244,17 @@ def evolve_conformal_metric(vars: BSSNVariables,
     # First term: -2α A_ij
     dt_gamma = -2.0 * vars.lapse * vars.traceless_K
 
+    # Kreiss-Oliger dissipation can be added here if desired
+    dgamma_dx1 = diff6_field(vars.conformal_metric, 2, params.dx)
+    dgamma_dx2 = diff6_field(vars.conformal_metric, 3, params.dx)
+    dgamma_dx3 = diff6_field(vars.conformal_metric, 4, params.dx)
+    # gamma is shape (3, 3, ni, nj, nk)
+    # compute the 6th derivative in each direction
 
-    return dt_gamma
+    dissipation_term = params.nu / 64 * params.dx**5 * (dgamma_dx1 + dgamma_dx2 + dgamma_dx3)
+    # compute dissipation term
+
+    return dt_gamma + dissipation_term
 
 
 @jit
@@ -266,9 +276,16 @@ def evolve_conformal_factor(vars: BSSNVariables,
     # First term: (1/3) α W K
     dt_W = (1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K
 
-    
-    return dt_W
+    dW_dx1 = diff6_field(vars.conformal_factor, 0, params.dx)
+    dW_dx2 = diff6_field(vars.conformal_factor, 1, params.dx)
+    dW_dx3 = diff6_field(vars.conformal_factor, 2, params.dx)
+    # compute the 6th derivative in each direction
 
+    dissipation_term = params.nu / 64 * params.dx**5 * (dW_dx1 + dW_dx2 + dW_dx3)
+    # compute dissipation term
+
+    
+    return dt_W + dissipation_term
 
 @jit
 def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
@@ -327,8 +344,16 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
 
     dt_K = first_term + second_term + third_term
     # compute dt_K
+
+    dK_dx1 = diff6_field(vars.trace_K, 0, params.dx)
+    dK_dx2 = diff6_field(vars.trace_K, 1, params.dx)
+    dK_dx3 = diff6_field(vars.trace_K, 2, params.dx)
+    # compute the 6th derivative in each direction
+
+    dissipation_term = params.nu / 64 * params.dx**5 * (dK_dx1 + dK_dx2 + dK_dx3)
+    # compute dissipation term
     
-    return dt_K
+    return dt_K + dissipation_term
 
 
 @jit
@@ -461,7 +486,16 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     dt_A = first_term + second_term + third_term #+ fourth_term
     # compute dt_A
 
-    return dt_A
+    dA_dx1 = diff6_field(vars.traceless_K, 2, params.dx)
+    dA_dx2 = diff6_field(vars.traceless_K, 3, params.dx)
+    dA_dx3 = diff6_field(vars.traceless_K, 4, params.dx)
+    # A_ij is shape (3, 3, ni, nj, nk)
+    # compute the 6th derivative in each direction
+
+    dissipation_term = params.nu / 64 * params.dx**5 * (dA_dx1 + dA_dx2 + dA_dx3)
+    # compute dissipation term
+
+    return dt_A + dissipation_term
 
 
 @jit
@@ -519,7 +553,16 @@ def evolve_conformal_connection(vars: BSSNVariables,
     dt_Gamma = first_term + second_term + third_term + fourth_term
     # compute dt_Gamma
 
-    return dt_Gamma
+    dGamma_dx1 = diff6_field(vars.conformal_connection, 1, params.dx)
+    dGamma_dx2 = diff6_field(vars.conformal_connection, 2, params.dx)
+    dGamma_dx3 = diff6_field(vars.conformal_connection, 3, params.dx)
+    # Gamma is shape (3, ni, nj, nk)
+    # compute the 6th derivative in each direction
+
+    dissipation_term = params.nu / 64 * params.dx**5 * (dGamma_dx1 + dGamma_dx2 + dGamma_dx3)
+    # compute dissipation term
+
+    return dt_Gamma + dissipation_term
 
 
 @jit
@@ -539,8 +582,16 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     
     # harmonic slicing evolution
     dt_alpha = -f * jnp.power(vars.lapse, 2) * vars.trace_K
+
+    dalpha_dx1 = diff6_field(vars.lapse, 0, params.dx)
+    dalpha_dx2 = diff6_field(vars.lapse, 1, params.dx)
+    dalpha_dx3 = diff6_field(vars.lapse, 2, params.dx)
+    # compute the 6th derivative in each direction
+
+    dissipation_term = params.nu / 64 * params.dx**5 * (dalpha_dx1 + dalpha_dx2 + dalpha_dx3)
+    # compute dissipation term
     
-    return dt_alpha
+    return dt_alpha + dissipation_term
 
 
 @jit

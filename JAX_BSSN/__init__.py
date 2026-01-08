@@ -11,6 +11,5 @@ from . import derivatives
 from . import errors
 from . import evolve
 from . import initialization
-from . import kreiss_oliger
 from . import plotting
 from . import tensor_algebra

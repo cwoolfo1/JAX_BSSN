@@ -24,7 +24,6 @@ from JAX_BSSN.initialization import (
     get_initial_data,
     setup_simulation_parameters,
 )
-from JAX_BSSN.kreiss_oliger import get_optimal_dissipation_coefficient
 from JAX_BSSN.plotting import plot_results, plot_constraint_evolution, save_data
 from JAX_BSSN.evolve import rk4_step
 
@@ -68,7 +67,6 @@ def run_simulation(
         dx=dx,
         dt=dt,
     )
-    ko_sigma = get_optimal_dissipation_coefficient(dx, dt)
 
     if verbose:
         print("Initializing data...")
@@ -99,7 +97,7 @@ def run_simulation(
     start_wall_time = time.time()
 
     for t in tqdm(range(Nt)):
-        vars = rk4_step(vars, bssn_params, ko_sigma)
+        vars = rk4_step(vars, bssn_params)
 
         step += 1
 
