@@ -120,9 +120,9 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters,
     # Use jnp.where to make this JIT-compatible
     # new_vars = jax.lax.cond(
     #     ko_sigma > 0,
-    #     lambda x: apply_ko_dissipation_bssn(x, ko_sigma, params.dx),
-    #     lambda x: x,
-    #     new_vars
+    #     lambda _: apply_ko_dissipation_bssn(new_vars, ko_sigma, params.dx),
+    #     lambda x_: new_vars,
+    #     operand=None
     # )
 
     return new_vars

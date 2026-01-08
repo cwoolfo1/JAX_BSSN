@@ -110,41 +110,59 @@ def gauge_wave_data(
 
     k = 2.0 * jnp.pi / wavelength
     H = amplitude * jnp.sin(k * X)
-
-    physical_metric = jnp.zeros((3, 3) + shape)
-    physical_metric = physical_metric.at[0, 0].set(1.0 - H)
-    physical_metric = physical_metric.at[1, 1].set(jnp.ones(shape))
-    physical_metric = physical_metric.at[2, 2].set(jnp.ones(shape))
-
-    lapse = jnp.sqrt(1.0 - H)
-    shift = jnp.zeros((3,) + shape)
-
-    det_gamma = determinant_3x3_metric(physical_metric)
-    conformal_factor = det_gamma ** (-1.0 / 6.0)
-    conformal_metric = physical_metric * conformal_factor**2
-
+    # H = amplitude * jnp.sin(k (X - t0)), t0 = 0
     dHdt = -amplitude * k * jnp.cos(k * X)
-    dt_g_xx = -dHdt
-    extrinsic_curvature = jnp.zeros_like(physical_metric)
-    extrinsic_curvature = extrinsic_curvature.at[0, 0].set(-0.5 * dt_g_xx / lapse)
 
-    inv_conformal_metric = invert_3x3_metric(conformal_metric)
-    trace_K = jnp.einsum("mn..., mn... -> ...", inv_conformal_metric, extrinsic_curvature)
-    traceless_K = conformal_factor**2 * (
-        extrinsic_curvature - conformal_metric * trace_K / 3.0
+    g_00 = -1 * (1 - H)
+    g_11 = 1 - H
+    g_22 = 1.0 * jnp.ones_like(H)
+    g_33 = g_22
+    # metric tensor being evolved
+
+    induced_metric = jnp.zeros((3, 3) + shape)
+    induced_metric = induced_metric.at[0,0].set(g_11)
+    induced_metric = induced_metric.at[1,1].set(g_22)
+    induced_metric = induced_metric.at[2,2].set(g_33)
+    # add the space components of the metric to the induced metric variable
+
+    conformal_factor = jnp.power(1 - H, -1/6)
+    initial_conformal_metric = jnp.zeros((3, 3) + shape)
+    initial_conformal_metric = initial_conformal_metric.at[0,0].set( jnp.power(1 - H, 2/3) )
+    initial_conformal_metric = initial_conformal_metric.at[1,1].set( jnp.power(1 - H, -1/3) )
+    initial_conformal_metric = initial_conformal_metric.at[2,2].set( jnp.power(1 - H, -1/3) )
+    # compute initial conformal metric
+
+    initial_lapse = jnp.sqrt( -1 * g_00 )
+    initial_shift = jnp.zeros( (3,) + shape )
+    # initial lapse and shift
+
+    derivs = jnp.stack( [diff1_field(initial_conformal_metric, d+2, dx) for d in range(3)], axis=0)
+    inv_metric = invert_3x3_metric(initial_conformal_metric)
+    christoffel_2 = christoffel_symbols_second_kind(inv_metric, derivs)
+    # compute Christoffel symbols for initial conformal metric
+
+    inv_conformal_metric = invert_3x3_metric(initial_conformal_metric)
+    initial_conformal_connection = jnp.einsum('mn..., imn... -> i...', inv_conformal_metric, christoffel_2)
+    # compute initial conformal connection functions
+
+    extrinsic_curvature = jnp.zeros_like(induced_metric)
+    extrinsic_curvature = extrinsic_curvature.at[0,0].set( -0.1*jnp.pi*jnp.cos(2*jnp.pi*X) / initial_lapse )
+    trace_extrinsic_curvature = jnp.einsum('mn..., mn... -> ...', inv_metric, extrinsic_curvature)
+    traceless_extrinsic_curvature = conformal_factor**2 * ( extrinsic_curvature - initial_conformal_metric * trace_extrinsic_curvature / 3 )
+    # intitial extrinsic curvature
+
+    vars = BSSNVariables(
+    conformal_metric=initial_conformal_metric,
+    conformal_factor=conformal_factor,
+    traceless_K=traceless_extrinsic_curvature,
+    trace_K=trace_extrinsic_curvature,
+    conformal_connection=initial_conformal_connection,
+    lapse=initial_lapse,
+    shift=initial_shift
     )
+    # package initial data into BSSNVariables dataclass
 
-    conformal_connection = _compute_conformal_connection(conformal_metric, dx)
-
-    return BSSNVariables(
-        conformal_metric=conformal_metric,
-        conformal_factor=conformal_factor,
-        traceless_K=traceless_K,
-        trace_K=trace_K,
-        conformal_connection=conformal_connection,
-        lapse=lapse,
-        shift=shift,
-    )
+    return vars
 
 
 def gowdy_wave_data(

@@ -75,12 +75,12 @@ def run_simulation(
 
     vars = get_initial_data(initial_data_type, grid_size, grid_size, grid_size, dx)
 
-    adm_mass = compute_adm_mass(vars, dx)
-    adm_momentum = compute_adm_momentum(vars, dx)
+    initial_adm_mass = compute_adm_mass(vars, dx)
+    initial_adm_momentum = compute_adm_momentum(vars, dx)
 
     if verbose:
-        print(f"Initial ADM mass: {adm_mass:.6f}")
-        print(f"Initial ADM momentum: {adm_momentum}")
+        print(f"Initial ADM mass: {initial_adm_mass}")
+        print(f"Initial ADM momentum: {initial_adm_momentum}")
         print()
 
     t = 0.0
@@ -103,13 +103,25 @@ def run_simulation(
 
         step += 1
 
-        if step % 10 == 0:
+        if step % 20 == 0:
             current_time = step * dt
             violations = compute_all_constraints(vars, bssn_params)
             norms = compute_constraint_norms(violations)
             constraint_history.append((current_time, norms))
 
     wall_time = time.time() - start_wall_time
+
+    final_adm_mass = compute_adm_mass(vars, dx)
+    final_adm_momentum = compute_adm_momentum(vars, dx)
+
+    if verbose:
+        print(f"Final ADM mass: {final_adm_mass}")
+        print(f"Final ADM momentum: {final_adm_momentum}")
+
+    adm_mass_error = abs(final_adm_mass - initial_adm_mass) / ( abs(initial_adm_mass) + 1e-12)
+    adm_momentum_error = abs(final_adm_momentum - initial_adm_momentum) / ( abs(initial_adm_momentum) + 1e-12)
+    print(f"ADM mass relative error: {adm_mass_error}")
+    print(f"ADM momentum relative error: {adm_momentum_error}")
 
     return vars, constraint_history
 
@@ -152,7 +164,6 @@ def main():
 if __name__ == "__main__":
     jax.config.update("jax_enable_x64", True)
 
-    try:
-        final_vars, constraint_history = main()
-    except SystemExit:
-        pass
+    final_vars, constraint_history = main()
+
+    print("Simulation complete")
