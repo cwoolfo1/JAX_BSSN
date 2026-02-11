@@ -47,7 +47,7 @@ class BSSNParameters(NamedTuple):
     eta: float = 2.0          # Damping parameter for Γ^i evolution
     kappa: float = 0.0        # Constraint damping parameter
     nu: float = 0.25          # Kreiss-Oliger dissipation coefficient
-    f: float = 2.0            # Multiple of 1+log slicing
+    f: float = 1.0            # Multiple of 1+log slicing
     g: float = 0.75           # Gamma driver shift parameter
     dx: float = 0.1           # Grid spacing
     dt: float = 0.001         # Time step
@@ -194,6 +194,7 @@ def compute_ricci(vars: BSSNVariables,
     # conformal Ricci tensor without conformal factor terms
 
     dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+
     dWdij = jnp.zeros((3,3) + W.shape)
     for i in range(3):
         for j in range(3):

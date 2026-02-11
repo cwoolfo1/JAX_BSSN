@@ -62,6 +62,9 @@ def run_simulation(
     bssn_params = BSSNParameters(
         eta=0.0,
         kappa=0.025,
+        # momentum constraint damping
+        nu = 0.25,
+        # Kreiss–Oliger dissipation coefficient
         f=1.0,
         g=0.0,
         dx=dx,
