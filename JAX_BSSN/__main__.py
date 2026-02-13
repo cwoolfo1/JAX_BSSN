@@ -40,7 +40,7 @@ def run_simulation(
     Run numerical relativity simulation.
 
     Args:
-        initial_data_type: Type of initial data ('gauge_wave', 'gowdy_wave')
+        initial_data_type: Type of initial data ('gauge_wave', 'gowdy_wave', 'linear_wave')
         grid_size: Grid size (cubic grid)
         final_time: Final simulation time
         plot_interval: Time interval for plotting
@@ -59,17 +59,30 @@ def run_simulation(
     dt = dx
     t_final = final_time
 
-    bssn_params = BSSNParameters(
-        eta=0.0,
-        kappa=0.025,
-        # momentum constraint damping
-        nu = 0.25,
-        # Kreiss–Oliger dissipation coefficient
-        f=1.0,
-        g=0.0,
-        dx=dx,
-        dt=dt,
-    )
+    if initial_data_type == "linear_wave":
+        # Match the linear-wave notebook setup (Gauss coordinates).
+        dt = dx / 4.0
+        bssn_params = BSSNParameters(
+            eta=0.0,
+            kappa=0.0,
+            nu=0.0,
+            f=0.0,
+            g=0.0,
+            dx=dx,
+            dt=dt,
+        )
+    else:
+        bssn_params = BSSNParameters(
+            eta=0.0,
+            kappa=0.025,
+            # momentum constraint damping
+            nu=0.25,
+            # Kreiss–Oliger dissipation coefficient
+            f=1.0,
+            g=0.0,
+            dx=dx,
+            dt=dt,
+        )
 
     if verbose:
         print("Initializing data...")
@@ -133,7 +146,7 @@ def main():
     parser.add_argument(
         "--initial-data",
         default="gauge_wave",
-        choices=["gauge_wave", "gowdy_wave"],
+        choices=["gauge_wave", "gowdy_wave", "linear_wave"],
         help="Type of initial data",
     )
     parser.add_argument("--grid-size", type=int, default=64, help="Grid size (cubic)")
