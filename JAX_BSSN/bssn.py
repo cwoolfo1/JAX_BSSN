@@ -540,7 +540,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
     christoffel_second = christoffel_symbols_second_kind(inv_gamma, metric_derivs)
     # compute Christoffel symbols of the second kind
 
-    A_ij_raised = jnp.einsum('ik...,kl...,lj...->ij...', A_ij, inv_gamma, inv_gamma)
+    A_ij_raised = jnp.einsum('ik...,jl...,kl...->ij...', inv_gamma, inv_gamma, A_ij)
     # raise indices of A_ij
     second_term = 2 * alpha * jnp.einsum('ijk...,jk...->i...', christoffel_second, A_ij_raised)
     # second term
