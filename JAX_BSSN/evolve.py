@@ -4,6 +4,7 @@ from JAX_BSSN.bssn import (
     evolve_traceless_extrinsic_curvature, evolve_trace_extrinsic_curvature,
     evolve_conformal_connection, evolve_lapse, evolve_shift
 )
+from JAX_BSSN.tensor_algebra import invert_3x3_metric, traceless_part
 from jax import jit
 import jax
 
@@ -23,6 +24,26 @@ def evolve_shift_or_freeze(vars: BSSNVariables, params: BSSNParameters):
 
 
 @jit
+def eliminate_trace_A(vars: BSSNVariables) -> BSSNVariables:
+    """Project A_ij onto its trace-free part with the current conformal metric."""
+
+    inv_gamma = invert_3x3_metric(vars.conformal_metric)
+    traceless_K = traceless_part(
+        vars.traceless_K, vars.conformal_metric, inv_gamma
+    )
+
+    return BSSNVariables(
+        conformal_metric=vars.conformal_metric,
+        conformal_factor=vars.conformal_factor,
+        traceless_K=traceless_K,
+        trace_K=vars.trace_K,
+        conformal_connection=vars.conformal_connection,
+        lapse=vars.lapse,
+        shift=vars.shift,
+    )
+
+
+@jit
 def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     """
     Perform one RK4 timestep with Kreiss-Oliger dissipation.
@@ -36,6 +57,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         Updated BSSN variables
     """
     dt = params.dt
+    vars = eliminate_trace_A(vars)
     
     # k1 time derivatives
     dt_gamma = evolve_conformal_metric(vars, params)
@@ -49,7 +71,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     k1 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
     # k2 - midpoint with k1
-    mid_vars = BSSNVariables(
+    mid_vars = eliminate_trace_A(BSSNVariables(
         conformal_metric=vars.conformal_metric + 0.5 * dt * k1[0],
         conformal_factor=vars.conformal_factor + 0.5 * dt * k1[1],
         traceless_K=vars.traceless_K + 0.5 * dt * k1[2],
@@ -57,7 +79,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + 0.5 * dt * k1[4],
         lapse=vars.lapse + 0.5 * dt * k1[5],
         shift=vars.shift + 0.5 * dt * k1[6]
-    )
+    ))
 
     # k2 time derivatives
     dt_gamma = evolve_conformal_metric(mid_vars, params)
@@ -71,7 +93,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     k2 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
     # k3 - midpoint with k2
-    mid_vars = BSSNVariables(
+    mid_vars = eliminate_trace_A(BSSNVariables(
         conformal_metric=vars.conformal_metric + 0.5 * dt * k2[0],
         conformal_factor=vars.conformal_factor + 0.5 * dt * k2[1],
         traceless_K=vars.traceless_K + 0.5 * dt * k2[2],
@@ -79,7 +101,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + 0.5 * dt * k2[4],
         lapse=vars.lapse + 0.5 * dt * k2[5],
         shift=vars.shift + 0.5 * dt * k2[6]
-    )
+    ))
 
     # k3 time derivatives
     dt_gamma = evolve_conformal_metric(mid_vars, params)
@@ -93,7 +115,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     k3 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
     # k4 - endpoint with k3
-    end_vars = BSSNVariables(
+    end_vars = eliminate_trace_A(BSSNVariables(
         conformal_metric=vars.conformal_metric + dt * k3[0],
         conformal_factor=vars.conformal_factor + dt * k3[1],
         traceless_K=vars.traceless_K + dt * k3[2],
@@ -101,7 +123,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + dt * k3[4],
         lapse=vars.lapse + dt * k3[5],
         shift=vars.shift + dt * k3[6]
-    )
+    ))
 
     # k4 time derivatives
     dt_gamma = evolve_conformal_metric(end_vars, params)
@@ -115,7 +137,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     k4 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
     # Final RK4 update
-    new_vars = BSSNVariables(
+    new_vars = eliminate_trace_A(BSSNVariables(
         conformal_metric=vars.conformal_metric + (dt / 6.0) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]),
         conformal_factor=vars.conformal_factor + (dt / 6.0) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]),
         traceless_K=vars.traceless_K + (dt / 6.0) * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]),
@@ -123,6 +145,6 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + (dt / 6.0) * (k1[4] + 2 * k2[4] + 2 * k3[4] + k4[4]),
         lapse=vars.lapse + (dt / 6.0) * (k1[5] + 2 * k2[5] + 2 * k3[5] + k4[5]),
         shift=vars.shift + (dt / 6.0) * (k1[6] + 2 * k2[6] + 2 * k3[6] + k4[6])
-    )
+    ))
 
     return new_vars
