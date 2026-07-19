@@ -52,6 +52,15 @@ class BSSNParameters(NamedTuple):
     dt: float = 0.001         # Time step
     zero_shift: int = 0       # If 1, hold the shift fixed during RK stages
     gauge: int = 0            # 0 = harmonic slicing, 1 = 1+log slicing
+    xl_bc: int = 0            # x-left boundary code: 0 periodic, 1 super-Gaussian
+    xr_bc: int = 0            # x-right boundary code: 0 periodic, 1 super-Gaussian
+    yl_bc: int = 0            # y-left boundary code: 0 periodic, 1 super-Gaussian
+    yr_bc: int = 0            # y-right boundary code: 0 periodic, 1 super-Gaussian
+    zl_bc: int = 0            # z-left boundary code: 0 periodic, 1 super-Gaussian
+    zr_bc: int = 0            # z-right boundary code: 0 periodic, 1 super-Gaussian
+    bc_width: float = 8.0     # Super-Gaussian layer width in grid cells
+    bc_order: float = 4.0     # Super-Gaussian exponent
+    bc_strength: float = 1.0  # Boundary blend strength
 
 
 @jit

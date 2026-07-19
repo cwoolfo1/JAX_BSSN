@@ -7,6 +7,7 @@ from functools import partial
 
 
 from . import bssn
+from . import boundaries
 from . import derivatives
 from . import errors
 from . import evolve
