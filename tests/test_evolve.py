@@ -183,7 +183,7 @@ class TestRK4Evolution(unittest.TestCase):
         
         # Test that we can call rk4_step without errors
         try:
-            vars_evolved = rk4_step(vars_initial, params_small, ko_sigma=0.01)
+            vars_evolved = rk4_step(vars_initial, params_small)
             
             # Check that the structure is preserved
             self.assertEqual(vars_evolved.conformal_metric.shape, (3, 3, self.n, self.n, self.n))
@@ -238,7 +238,7 @@ class TestRK4Evolution(unittest.TestCase):
             eta=self.params.eta, f=self.params.f, g=self.params.g, 
             dx=self.params.dx, dt=dt_small
         )
-        vars_t_plus_dt_rk4 = rk4_step(vars_t, params_small_dt, ko_sigma=0.0)
+        vars_t_plus_dt_rk4 = rk4_step(vars_t, params_small_dt)
         
         # Compute numerical time derivatives from RK4 step
         dt_conformal_metric_rk4 = (vars_t_plus_dt_rk4.conformal_metric - vars_t.conformal_metric) / dt_small
@@ -306,7 +306,7 @@ class TestRK4Evolution(unittest.TestCase):
             n_steps = int(t_final / dt)
             
             for _ in range(n_steps):
-                vars_current = rk4_step(vars_current, params, ko_sigma=0.0)
+                vars_current = rk4_step(vars_current, params)
             
             results.append(vars_current)
         
@@ -353,7 +353,7 @@ class TestRK4Evolution(unittest.TestCase):
         n_steps = 20  # Smaller number of steps
         
         for step in range(n_steps):
-            vars_new = rk4_step(vars_current, params_stable, ko_sigma=0.01)
+            vars_new = rk4_step(vars_current, params_stable)
             
             # Check that solution remains finite
             self.assertTrue(jnp.all(jnp.isfinite(vars_new.conformal_metric)),
@@ -412,4 +412,3 @@ if __name__ == '__main__':
     jax.config.update("jax_enable_x64", True)  # Use double precision
     
     unittest.main(verbosity=2)
-

@@ -19,7 +19,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        ko_sigma: Kreiss-Oliger dissipation coefficient
+        Kreiss-Oliger dissipation is controlled by params.nu.
         
     Returns:
         Updated BSSN variables
