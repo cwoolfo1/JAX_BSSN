@@ -460,16 +460,22 @@ def compute_momentum_constraint(vars: BSSNVariables,
     dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
     # first derivatives of W
 
+    A_i_up_j = jnp.einsum('jk...,ik...->ij...', inv_gamma, A_ij)
+    # raise the second index in A_i^j
+
+    dA_i_up_j_dk = jnp.stack( [diff1_field(A_i_up_j, d+2, dx) for d in range(3)], axis=0)
+    # derivatives of A_i^j
+
     dA_ij_dk = jnp.stack( [diff1_field(A_ij, d+2, dx) for d in range(3)], axis=0)
     # derivatives of A_ij
 
-    first_term = jnp.einsum('jl...,lij...->i...', inv_gamma, dA_ij_dk)
+    first_term = jnp.einsum('jij...->i...', dA_i_up_j_dk)
     # first term
 
     second_term = -0.5 * jnp.einsum('jk...,ijk...->i...', inv_gamma, dA_ij_dk)
     # second term
 
-    third_term = -3 * jnp.einsum('kj...,k...,ij...->i...', inv_gamma, dWdi, A_ij) / W
+    third_term = -3 * jnp.einsum('ij...,j...->i...', A_i_up_j, dWdi) / W
     # third term
 
     fourth_term = -2.0/3.0 * dKdi
@@ -594,7 +600,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     dissipation_term = params.nu / 64 * params.dx**5 * (dA_dx1 + dA_dx2 + dA_dx3)
     # compute dissipation term
 
-    return dt_A + dissipation_term
+    return dt_A + seventh_term + dissipation_term
 
 
 @jit

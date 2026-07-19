@@ -73,7 +73,7 @@ class TestBSSNEquationRegressions(unittest.TestCase):
             shift=jnp.zeros((3,) + self.shape),
         )
 
-    def test_momentum_constraint_includes_contracted_connection_term(self):
+    def test_momentum_constraint_matches_notes_formula(self):
         vars = self.nontrivial_vars()
         gamma = vars.conformal_metric
         inv_gamma = invert_3x3_metric(gamma)
@@ -84,33 +84,45 @@ class TestBSSNEquationRegressions(unittest.TestCase):
         params = BSSNParameters(dx=self.dx, dt=0.01, nu=0.0)
         momentum = compute_momentum_constraint(vars, params)
 
-        dA_ij_dk = jnp.stack(
-            [diff1_field(A_ij, d + 2, self.dx) for d in range(3)],
+        A_i_up_j = jnp.einsum("jk...,ik...->ij...", inv_gamma, A_ij)
+        dA_i_up_j_dk = jnp.stack(
+            [diff1_field(A_i_up_j, d + 2, self.dx) for d in range(3)],
             axis=0,
         )
-        dgamma_ij_dk = jnp.stack(
-            [diff1_field(gamma, d + 2, self.dx) for d in range(3)],
+        dA_jk_di = jnp.stack(
+            [diff1_field(A_ij, d + 2, self.dx) for d in range(3)],
             axis=0,
         )
         dWdi = jnp.stack([diff1_field(W, d, self.dx) for d in range(3)], axis=0)
         dKdi = jnp.stack([diff1_field(K, d, self.dx) for d in range(3)], axis=0)
 
-        A_ij_raised = jnp.einsum(
-            "ik...,jl...,kl...->ij...", inv_gamma, inv_gamma, A_ij
-        )
-        A_i_up_j = jnp.einsum("jk...,ik...->ij...", inv_gamma, A_ij)
-
-        expected = jnp.einsum("jl...,lij...->i...", inv_gamma, dA_ij_dk)
+        expected = jnp.einsum("jij...->i...", dA_i_up_j_dk)
         expected += -0.5 * jnp.einsum(
-            "jk...,ijk...->i...", A_ij_raised, dgamma_ij_dk
-        )
-        expected += -jnp.einsum(
-            "j...,ij...->i...", vars.conformal_connection, A_ij
+            "jk...,ijk...->i...", inv_gamma, dA_jk_di
         )
         expected += -3.0 * jnp.einsum("ij...,j...->i...", A_i_up_j, dWdi) / W
         expected += -(2.0 / 3.0) * dKdi
 
-        np.testing.assert_allclose(momentum, expected, atol=3.0e-6)
+        np.testing.assert_allclose(momentum, expected, atol=1.0e-12)
+
+    def test_momentum_constraint_does_not_depend_on_evolved_Gamma(self):
+        vars = self.nontrivial_vars()
+        params = BSSNParameters(dx=self.dx, dt=0.01, nu=0.0)
+
+        shifted_Gamma = vars.conformal_connection + jnp.stack(
+            [
+                0.1 * jnp.sin(self.X),
+                0.05 * jnp.cos(self.Y),
+                0.07 * jnp.sin(self.Z),
+            ],
+            axis=0,
+        )
+        vars_with_shifted_Gamma = vars._replace(conformal_connection=shifted_Gamma)
+
+        momentum = compute_momentum_constraint(vars, params)
+        shifted_momentum = compute_momentum_constraint(vars_with_shifted_Gamma, params)
+
+        np.testing.assert_allclose(shifted_momentum, momentum, atol=1.0e-12)
 
     def test_kappa_term_changes_traceless_extrinsic_curvature_rhs(self):
         vars = self.nontrivial_vars()
