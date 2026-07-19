@@ -51,6 +51,8 @@ class BSSNParameters(NamedTuple):
     g: float = 0.75           # Gamma driver shift parameter
     dx: float = 0.1           # Grid spacing
     dt: float = 0.001         # Time step
+    zero_shift: int = 0       # If 1, hold the shift fixed during RK stages
+    gauge: int = 0            # 0 = harmonic slicing, 1 = 1+log slicing
 
 
 @jit
@@ -734,9 +736,20 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     """
     dx = params.dx
     f = params.f
-    
-    # harmonic slicing evolution
-    dt_alpha = -f * jnp.power(vars.lapse, 2) * vars.trace_K
+
+    def harmonic_slicing(_):
+        return -f * jnp.power(vars.lapse, 2) * vars.trace_K
+
+    def one_plus_log_slicing(_):
+        return -2.0 * vars.lapse * vars.trace_K
+
+    slicing_term = jax.lax.cond(
+        params.gauge == 0,
+        harmonic_slicing,
+        one_plus_log_slicing,
+        operand=None,
+    )
+    # choose the lapse source term without leaving JIT-compatible control flow
 
     grad_alpha = jnp.stack(
         [diff1_field(vars.lapse, d, dx) for d in range(3)],
@@ -755,7 +768,7 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     dissipation_term = params.nu / 64 * params.dx**5 * (dalpha_dx1 + dalpha_dx2 + dalpha_dx3)
     # compute dissipation term
     
-    return dt_alpha + advection_term + dissipation_term
+    return slicing_term + advection_term + dissipation_term
 
 
 @jit

@@ -11,6 +11,17 @@ import jax
 # NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
 
 
+def evolve_shift_or_freeze(vars: BSSNVariables, params: BSSNParameters):
+    """Return the shift RHS, or zero it when the zero-shift gauge is selected."""
+
+    return jax.lax.cond(
+        params.zero_shift == 0,
+        lambda _: evolve_shift(vars, params),
+        lambda _: 0.0 * vars.shift,
+        operand=None,
+    )
+
+
 @jit
 def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     """
@@ -33,7 +44,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     dt_K = evolve_trace_extrinsic_curvature(vars, params)
     dt_Gamma = evolve_conformal_connection(vars, params)
     dt_alpha = evolve_lapse(vars, params)
-    dt_beta = evolve_shift(vars, params)
+    dt_beta = evolve_shift_or_freeze(vars, params)
 
     k1 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
@@ -55,7 +66,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     dt_K = evolve_trace_extrinsic_curvature(mid_vars, params)
     dt_Gamma = evolve_conformal_connection(mid_vars, params)
     dt_alpha = evolve_lapse(mid_vars, params)
-    dt_beta = evolve_shift(mid_vars, params)
+    dt_beta = evolve_shift_or_freeze(mid_vars, params)
 
     k2 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
@@ -77,7 +88,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     dt_K = evolve_trace_extrinsic_curvature(mid_vars, params)
     dt_Gamma = evolve_conformal_connection(mid_vars, params)
     dt_alpha = evolve_lapse(mid_vars, params)
-    dt_beta = evolve_shift(mid_vars, params)
+    dt_beta = evolve_shift_or_freeze(mid_vars, params)
 
     k3 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 
@@ -99,7 +110,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     dt_K = evolve_trace_extrinsic_curvature(end_vars, params)
     dt_Gamma = evolve_conformal_connection(end_vars, params)
     dt_alpha = evolve_lapse(end_vars, params)
-    dt_beta = evolve_shift(end_vars, params)
+    dt_beta = evolve_shift_or_freeze(end_vars, params)
 
     k4 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
 

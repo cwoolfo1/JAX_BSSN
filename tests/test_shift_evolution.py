@@ -17,6 +17,7 @@ from JAX_BSSN.bssn import (
     evolve_shift,
 )
 from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.evolve import rk4_step
 
 
 class TestShiftEvolution(unittest.TestCase):
@@ -79,6 +80,12 @@ class TestShiftEvolution(unittest.TestCase):
         np.testing.assert_allclose(d_beta[1, 2], 0.5 * jnp.cos(self.Y + self.Z), atol=6.0e-5)
         np.testing.assert_allclose(d_beta[2, 0], -0.25 * jnp.sin(self.X - self.Z), atol=6.0e-5)
         np.testing.assert_allclose(d_beta[2, 2], 0.25 * jnp.sin(self.X - self.Z), atol=6.0e-5)
+
+    def test_bssn_parameters_default_to_evolved_shift_and_harmonic_lapse(self):
+        params = BSSNParameters()
+
+        self.assertEqual(params.zero_shift, 0)
+        self.assertEqual(params.gauge, 0)
 
     def test_conformal_metric_uses_weighted_lie_derivative_of_shift(self):
         beta = jnp.stack(
@@ -155,6 +162,56 @@ class TestShiftEvolution(unittest.TestCase):
 
         np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
 
+    def test_lapse_rhs_uses_harmonic_gauge_when_gauge_is_zero(self):
+        beta = jnp.stack(
+            [
+                0.1 * jnp.sin(self.X),
+                0.2 * jnp.sin(self.Y),
+                0.3 * jnp.sin(self.Z),
+            ],
+            axis=0,
+        )
+        alpha = 1.0 + 0.05 * jnp.cos(self.X + self.Y)
+        K = 0.02 * jnp.sin(self.X + self.Z)
+        params = self.params._replace(gauge=0, f=1.5)
+        vars = self.flat_vars(shift=beta, lapse=alpha, trace_K=K)
+
+        dt_alpha = evolve_lapse(vars, params)
+
+        grad_alpha = jnp.stack(
+            [diff1_field(alpha, d, self.dx) for d in range(3)],
+            axis=0,
+        )
+        advection = jnp.einsum("i...,i...->...", beta, grad_alpha)
+        expected = -params.f * alpha**2 * K + advection
+
+        np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
+
+    def test_lapse_rhs_uses_one_plus_log_gauge_when_gauge_is_one(self):
+        beta = jnp.stack(
+            [
+                0.1 * jnp.sin(self.X),
+                0.2 * jnp.sin(self.Y),
+                0.3 * jnp.sin(self.Z),
+            ],
+            axis=0,
+        )
+        alpha = 1.0 + 0.05 * jnp.cos(self.X + self.Y)
+        K = 0.02 * jnp.sin(self.X + self.Z)
+        params = self.params._replace(gauge=1, f=1.5)
+        vars = self.flat_vars(shift=beta, lapse=alpha, trace_K=K)
+
+        dt_alpha = evolve_lapse(vars, params)
+
+        grad_alpha = jnp.stack(
+            [diff1_field(alpha, d, self.dx) for d in range(3)],
+            axis=0,
+        )
+        advection = jnp.einsum("i...,i...->...", beta, grad_alpha)
+        expected = -2.0 * alpha * K + advection
+
+        np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
+
     def test_shift_rhs_uses_single_gamma_driver(self):
         beta = jnp.stack(
             [
@@ -185,6 +242,47 @@ class TestShiftEvolution(unittest.TestCase):
         )
 
         np.testing.assert_allclose(dt_beta, expected, atol=2.0e-5)
+
+    def test_rk4_keeps_shift_fixed_when_zero_shift_is_one(self):
+        beta = jnp.stack(
+            [
+                0.1 * jnp.sin(self.X),
+                0.2 * jnp.sin(self.Y),
+                0.3 * jnp.sin(self.Z),
+            ],
+            axis=0,
+        )
+        Gamma = jnp.stack(
+            [
+                0.01 * jnp.cos(self.X),
+                0.02 * jnp.cos(self.Y),
+                0.03 * jnp.cos(self.Z),
+            ],
+            axis=0,
+        )
+        params = self.params._replace(zero_shift=1, g=0.7, eta=0.2, dt=0.001)
+        vars = self.flat_vars(shift=beta, conformal_connection=Gamma)
+
+        evolved_vars = rk4_step(vars, params)
+
+        np.testing.assert_allclose(evolved_vars.shift, beta, atol=0.0)
+
+    def test_rk4_evolves_shift_when_zero_shift_is_zero(self):
+        Gamma = jnp.stack(
+            [
+                0.01 * jnp.cos(self.X),
+                0.02 * jnp.cos(self.Y),
+                0.03 * jnp.cos(self.Z),
+            ],
+            axis=0,
+        )
+        params = self.params._replace(zero_shift=0, g=0.7, eta=0.2, dt=0.001)
+        vars = self.flat_vars(conformal_connection=Gamma)
+
+        evolved_vars = rk4_step(vars, params)
+
+        max_shift_change = jnp.max(jnp.abs(evolved_vars.shift - vars.shift))
+        self.assertGreater(float(max_shift_change), 0.0)
 
 
 if __name__ == "__main__":
