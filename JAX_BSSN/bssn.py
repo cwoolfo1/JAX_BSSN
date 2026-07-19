@@ -242,8 +242,32 @@ def evolve_conformal_metric(vars: BSSNVariables,
     """
     # Note: this is only valid in the harmonic gauge where shift is 0
     
-    # First term: -2α A_ij
-    dt_gamma = -2.0 * vars.lapse * vars.traceless_K
+
+    grad_gamma = jnp.stack( [diff1_field(vars.conformal_metric, d+2, params.dx) for d in range(3)], axis=0)
+    # compute the gradient of the conformal metric
+
+    shift = vars.shift
+    # unpack the shift vector
+
+    grad_shift = jnp.stack( [diff1_field(shift[i,...], d, params.dx) for i in range(3) for d in range(3)], axis=0)
+
+    first_term = jnp.einsum("m...,mij...->ij...", shift, grad_gamma)
+    # compute the advection term due to shift
+
+    second_term = jnp.einsum("mi...,jm...->ij...", grad_shift, vars.conformal_metric)
+    # compute the term due to the gradient of the shift
+
+    third_term = jnp.einsum("mj...,im...->ij...", grad_shift, vars.conformal_metric)
+    # compute the term due to the gradient of the shift
+
+    fourth_term = -2.0/3.0 * vars.conformal_metric * jnp.sum(grad_shift, axis=0)
+    # compute the term due to the divergence of the shift
+
+    fifth_term = -2.0 * vars.lapse * vars.traceless_K
+    # compute the term due to the traceless extrinsic curvature
+
+    dt_gamma = first_term + second_term + third_term + fourth_term + fifth_term
+    # compute dt_gamma
 
     # Kreiss-Oliger dissipation can be added here if desired
     dgamma_dx1 = diff6_field(vars.conformal_metric, 2, params.dx)
@@ -272,10 +296,24 @@ def evolve_conformal_factor(vars: BSSNVariables,
         Time derivative of conformal factor
     """
     
-    # Note: this is only valid in the harmonic gauge where shift is 0
-    
-    # First term: (1/3) α W K
-    dt_W = (1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K
+    shift = vars.shift
+    # unpack the shift vector
+
+    grad_W = jnp.stack( [diff1_field(vars.conformal_factor, d, params.dx) for d in range(3)], axis=0)
+    # compute the gradient of the conformal factor
+
+    # First term: advection due to shift: beta^i ∂_i W
+    first_term = jnp.einsum('i...,i...->...', shift, grad_W)
+    # compute the advection term due to shift
+
+    # Second term: (1/3) α W K
+    second_term = (1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K
+
+    div_shift = jnp.sum(diff1_field(shift[i,...], i, params.dx) for i in range(3))
+    # compute the divergence of the shift vector
+
+    third_term = -(1.0/3.0) * vars.conformal_factor * div_shift
+    # compute the term due to divergence of shift
 
     dW_dx1 = diff6_field(vars.conformal_factor, 0, params.dx)
     dW_dx2 = diff6_field(vars.conformal_factor, 1, params.dx)
@@ -286,7 +324,7 @@ def evolve_conformal_factor(vars: BSSNVariables,
     # compute dissipation term
 
     
-    return dt_W + dissipation_term
+    return first_term + second_term + third_term + dissipation_term
 
 @jit
 def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
@@ -343,7 +381,18 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     third_term = alpha * K**2 / 3.0
     # third term
 
-    dt_K = first_term + second_term + third_term
+
+    shift = vars.shift
+    # unpack the shift vector
+
+    grad_K = jnp.stack( [diff1_field(K, d, params.dx) for d in range(3)], axis=0)
+    # compute the gradient of K
+
+    fourth_term = jnp.einsum('i...,i...->...', shift, grad_K)
+    # compute the advection term due to shift
+
+
+    dt_K = first_term + second_term + third_term + fourth_term
     # compute dt_K
 
     dK_dx1 = diff6_field(vars.trace_K, 0, params.dx)
@@ -465,6 +514,37 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     third_term = traceless_part(third_term, vars.conformal_metric, inv_gamma)
     # third term
 
+    shift = vars.shift
+    # unpack the shift vector
+
+    grad_shift = jnp.stack( [diff1_field(shift[i,...], d, params.dx) for i in range(3) for d in range(3)], axis=0)
+    # compute the gradient of the shift vector
+
+    grad_A = jnp.stack( [diff1_field(A_ij, d+2, params.dx) for d in range(3)], axis=0)
+    # compute the gradient of A_ij
+
+    fourth_term = jnp.einsum('m...,mij...->ij...', shift, grad_A)
+    # compute the advection term due to shift
+
+    fifth_term = jnp.einsum('mi...,jm...->ij...', A_ij, grad_shift) + jnp.einsum('mj...,im...->ij...', A_ij, grad_shift)
+    # compute the term due to the gradient of the shift)
+
+    div_shift = jnp.einsum("ii...,->...", grad_shift)
+    # compute the divergence of the shift vector
+
+    sixth_term = -2.0/3.0 * A_ij * div_shift
+    # compute the term due to divergence of shift
+
+
+    dt_A = first_term + second_term + third_term + fourth_term + fifth_term + sixth_term
+    # compute dt_A
+
+    dA_dx1 = diff6_field(vars.traceless_K, 2, params.dx)
+    dA_dx2 = diff6_field(vars.traceless_K, 3, params.dx)
+    dA_dx3 = diff6_field(vars.traceless_K, 4, params.dx)
+    # A_ij is shape (3, 3, ni, nj, nk)
+    # compute the 6th derivative in each direction
+
     M = compute_momentum_constraint(vars, params)
     # Momentum constraint term
 
@@ -480,18 +560,8 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     DjMi = dMidj - jnp.einsum('kij...,k...->ij...', christoffel_second, M)
     DiMj = jnp.swapaxes(DjMi, 0, 1)
     # compute covariant derivatives of M_i
-
-    fourth_term = kappa/2 * alpha * (DjMi + DiMj)
-    # fourth term
-
-    dt_A = first_term + second_term + third_term #+ fourth_term
-    # compute dt_A
-
-    dA_dx1 = diff6_field(vars.traceless_K, 2, params.dx)
-    dA_dx2 = diff6_field(vars.traceless_K, 3, params.dx)
-    dA_dx3 = diff6_field(vars.traceless_K, 4, params.dx)
-    # A_ij is shape (3, 3, ni, nj, nk)
-    # compute the 6th derivative in each direction
+    seventh_term = kappa/2 * alpha * (DjMi + DiMj)
+    # seventh term
 
     dissipation_term = params.nu / 64 * params.dx**5 * (dA_dx1 + dA_dx2 + dA_dx3)
     # compute dissipation term
