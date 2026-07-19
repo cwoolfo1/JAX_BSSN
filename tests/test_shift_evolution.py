@@ -84,6 +84,7 @@ class TestShiftEvolution(unittest.TestCase):
     def test_bssn_parameters_default_to_evolved_shift_and_harmonic_lapse(self):
         params = BSSNParameters()
 
+        self.assertNotIn("f", params._fields)
         self.assertEqual(params.zero_shift, 0)
         self.assertEqual(params.gauge, 0)
 
@@ -173,7 +174,7 @@ class TestShiftEvolution(unittest.TestCase):
         )
         alpha = 1.0 + 0.05 * jnp.cos(self.X + self.Y)
         K = 0.02 * jnp.sin(self.X + self.Z)
-        params = self.params._replace(gauge=0, f=1.5)
+        params = self.params._replace(gauge=0)
         vars = self.flat_vars(shift=beta, lapse=alpha, trace_K=K)
 
         dt_alpha = evolve_lapse(vars, params)
@@ -183,7 +184,7 @@ class TestShiftEvolution(unittest.TestCase):
             axis=0,
         )
         advection = jnp.einsum("i...,i...->...", beta, grad_alpha)
-        expected = -params.f * alpha**2 * K + advection
+        expected = -alpha**2 * K + advection
 
         np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
 
@@ -198,7 +199,7 @@ class TestShiftEvolution(unittest.TestCase):
         )
         alpha = 1.0 + 0.05 * jnp.cos(self.X + self.Y)
         K = 0.02 * jnp.sin(self.X + self.Z)
-        params = self.params._replace(gauge=1, f=1.5)
+        params = self.params._replace(gauge=1)
         vars = self.flat_vars(shift=beta, lapse=alpha, trace_K=K)
 
         dt_alpha = evolve_lapse(vars, params)

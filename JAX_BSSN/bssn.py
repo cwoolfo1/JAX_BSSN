@@ -47,7 +47,6 @@ class BSSNParameters(NamedTuple):
     eta: float = 2.0          # Damping parameter for Γ^i evolution
     kappa: float = 0.0        # Constraint damping parameter
     nu: float = 0.25          # Kreiss-Oliger dissipation coefficient
-    f: float = 1.0            # Multiple of 1+log slicing
     g: float = 0.75           # Gamma driver shift parameter
     dx: float = 0.1           # Grid spacing
     dt: float = 0.001         # Time step
@@ -735,10 +734,9 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
         Time derivative of lapse
     """
     dx = params.dx
-    f = params.f
 
     def harmonic_slicing(_):
-        return -f * jnp.power(vars.lapse, 2) * vars.trace_K
+        return -jnp.power(vars.lapse, 2) * vars.trace_K
 
     def one_plus_log_slicing(_):
         return -2.0 * vars.lapse * vars.trace_K

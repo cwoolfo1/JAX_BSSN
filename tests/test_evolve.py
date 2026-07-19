@@ -44,7 +44,7 @@ class TestRK4Evolution(unittest.TestCase):
         
         # BSSN parameters
         self.params = BSSNParameters(
-            eta=2.0, f=2.0, g=0.75, dx=self.dx, dt=self.dt
+            eta=2.0, g=0.75, dx=self.dx, dt=self.dt
         )
     
     def create_manufactured_bssn_variables(self, t=0.0):
@@ -177,7 +177,7 @@ class TestRK4Evolution(unittest.TestCase):
         
         # Use small time step
         params_small = BSSNParameters(
-            eta=self.params.eta, f=self.params.f, g=self.params.g,
+            eta=self.params.eta, g=self.params.g,
             dx=self.params.dx, dt=0.001
         )
         
@@ -235,7 +235,7 @@ class TestRK4Evolution(unittest.TestCase):
         
         # Use RK4 to evolve forward by small dt
         params_small_dt = BSSNParameters(
-            eta=self.params.eta, f=self.params.f, g=self.params.g, 
+            eta=self.params.eta, g=self.params.g,
             dx=self.params.dx, dt=dt_small
         )
         vars_t_plus_dt_rk4 = rk4_step(vars_t, params_small_dt)
@@ -297,7 +297,7 @@ class TestRK4Evolution(unittest.TestCase):
         for dt in dt_values:
             # Create parameters for this dt
             params = BSSNParameters(
-                eta=self.params.eta, f=self.params.f, g=self.params.g,
+                eta=self.params.eta, g=self.params.g,
                 dx=self.params.dx, dt=dt
             )
             
@@ -344,7 +344,7 @@ class TestRK4Evolution(unittest.TestCase):
         
         # Use small time step for stability
         params_stable = BSSNParameters(
-            eta=self.params.eta, f=self.params.f, g=self.params.g,
+            eta=self.params.eta, g=self.params.g,
             dx=self.params.dx, dt=0.0001
         )
         
