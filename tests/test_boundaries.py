@@ -14,7 +14,11 @@ from JAX_BSSN.boundaries import (
 )
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolve import rk4_step
-from JAX_BSSN.tensor_algebra import invert_3x3_metric, trace_tensor
+from JAX_BSSN.tensor_algebra import (
+    determinant_3x3_metric,
+    invert_3x3_metric,
+    trace_tensor,
+)
 
 
 class TestSuperGaussianBoundaries(unittest.TestCase):
@@ -126,6 +130,9 @@ class TestSuperGaussianBoundaries(unittest.TestCase):
             evolved.traceless_K, invert_3x3_metric(evolved.conformal_metric)
         )
         np.testing.assert_allclose(trace_A, jnp.zeros_like(trace_A), atol=1.0e-10)
+
+        det_gamma = determinant_3x3_metric(evolved.conformal_metric)
+        np.testing.assert_allclose(det_gamma, jnp.ones_like(det_gamma), atol=1.0e-10)
 
 
 if __name__ == "__main__":

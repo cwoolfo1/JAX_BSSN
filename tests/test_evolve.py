@@ -17,7 +17,7 @@ import os
 # Add the project root to the Python path
 sys.path.append('/home/christopherwoolford/Documents/Research/Numerical_Relativity/JAX_BSSN')
 
-from JAX_BSSN.evolve import rk4_step
+from JAX_BSSN.evolve import enforce_boundaries_and_trace_free_A, rk4_step
 from JAX_BSSN.bssn import (
     BSSNVariables, BSSNParameters,
     evolve_conformal_metric, evolve_conformal_factor,
@@ -233,11 +233,16 @@ class TestRK4Evolution(unittest.TestCase):
         # Get analytical time derivatives
         dt_vars_analytical = self.analytical_time_derivatives(t)
         
-        # Use RK4 to evolve forward by small dt
         params_small_dt = BSSNParameters(
             eta=self.params.eta, g=self.params.g,
             dx=self.params.dx, dt=dt_small
         )
+        vars_t = enforce_boundaries_and_trace_free_A(vars_t, params_small_dt)
+        # RK4 now enforces the BSSN algebraic constraints before the first RHS.
+        # Measure the time derivative from that projected state, not from the
+        # unconstrained manufactured metric.
+
+        # Use RK4 to evolve forward by small dt
         vars_t_plus_dt_rk4 = rk4_step(vars_t, params_small_dt)
         
         # Compute numerical time derivatives from RK4 step

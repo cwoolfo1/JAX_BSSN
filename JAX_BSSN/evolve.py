@@ -4,7 +4,11 @@ from JAX_BSSN.bssn import (
     evolve_traceless_extrinsic_curvature, evolve_trace_extrinsic_curvature,
     evolve_conformal_connection, evolve_lapse, evolve_shift
 )
-from JAX_BSSN.tensor_algebra import invert_3x3_metric, traceless_part
+from JAX_BSSN.tensor_algebra import (
+    determinant_3x3_metric,
+    invert_3x3_metric,
+    traceless_part,
+)
 from JAX_BSSN.boundaries import apply_supergaussian_boundaries
 from jax import jit
 import jax
@@ -21,6 +25,26 @@ def evolve_shift_or_freeze(vars: BSSNVariables, params: BSSNParameters):
         lambda _: evolve_shift(vars, params),
         lambda _: 0.0 * vars.shift,
         operand=None,
+    )
+
+
+@jit
+def enforce_unit_determinant_conformal_metric(
+    vars: BSSNVariables,
+) -> BSSNVariables:
+    """Rescale the conformal metric so det(gamma_tilde) is one."""
+
+    det_gamma = determinant_3x3_metric(vars.conformal_metric)
+    conformal_metric = vars.conformal_metric * det_gamma ** (-1.0 / 3.0)
+
+    return BSSNVariables(
+        conformal_metric=conformal_metric,
+        conformal_factor=vars.conformal_factor,
+        traceless_K=vars.traceless_K,
+        trace_K=vars.trace_K,
+        conformal_connection=vars.conformal_connection,
+        lapse=vars.lapse,
+        shift=vars.shift,
     )
 
 
@@ -48,9 +72,10 @@ def eliminate_trace_A(vars: BSSNVariables) -> BSSNVariables:
 def enforce_boundaries_and_trace_free_A(
     vars: BSSNVariables, params: BSSNParameters
 ) -> BSSNVariables:
-    """Apply boundary filtering and then remove the trace of A_ij."""
+    """Apply boundary filtering and enforce BSSN algebraic constraints."""
 
     vars = apply_supergaussian_boundaries(vars, params)
+    vars = enforce_unit_determinant_conformal_metric(vars)
     vars = eliminate_trace_A(vars)
 
     return vars

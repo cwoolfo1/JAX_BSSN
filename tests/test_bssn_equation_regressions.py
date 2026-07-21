@@ -14,10 +14,11 @@ from JAX_BSSN.bssn import (
     evolve_traceless_extrinsic_curvature,
 )
 from JAX_BSSN.derivatives import diff1_field
-from JAX_BSSN.evolve import rk4_step
+from JAX_BSSN.evolve import enforce_unit_determinant_conformal_metric, rk4_step
 from JAX_BSSN.tensor_algebra import (
     christoffel_symbols_second_kind,
     invert_3x3_metric,
+    determinant_3x3_metric,
     trace_tensor,
     traceless_part,
 )
@@ -181,6 +182,75 @@ class TestBSSNEquationRegressions(unittest.TestCase):
             evolved.traceless_K, invert_3x3_metric(evolved.conformal_metric)
         )
         np.testing.assert_allclose(trace_A, jnp.zeros_like(trace_A), atol=1.0e-12)
+
+    def test_unit_determinant_projection_rescales_only_conformal_metric(self):
+        gamma = jnp.eye(3)[:, :, None, None, None] * jnp.ones(
+            (3, 3) + self.shape
+        )
+        gamma = gamma.at[0, 0].set(1.2 + 0.01 * jnp.sin(self.X))
+        gamma = gamma.at[1, 1].set(0.9 + 0.01 * jnp.cos(self.Y))
+        gamma = gamma.at[2, 2].set(1.1 + 0.01 * jnp.sin(self.Z))
+        gamma = gamma.at[0, 1].set(0.02 * jnp.sin(self.X + self.Y))
+        gamma = gamma.at[1, 0].set(gamma[0, 1])
+
+        traceless_K = jnp.zeros((3, 3) + self.shape)
+        traceless_K = traceless_K.at[0, 0].set(0.01 * jnp.sin(self.X))
+
+        vars = BSSNVariables(
+            conformal_metric=gamma,
+            conformal_factor=1.0 + 0.03 * jnp.cos(self.X),
+            traceless_K=traceless_K,
+            trace_K=0.02 * jnp.sin(self.Y),
+            conformal_connection=jnp.stack(
+                [
+                    0.01 * jnp.sin(self.X),
+                    0.02 * jnp.sin(self.Y),
+                    0.03 * jnp.sin(self.Z),
+                ],
+                axis=0,
+            ),
+            lapse=1.0 + 0.01 * jnp.cos(self.Z),
+            shift=jnp.zeros((3,) + self.shape),
+        )
+
+        projected = enforce_unit_determinant_conformal_metric(vars)
+
+        det_gamma = determinant_3x3_metric(projected.conformal_metric)
+        np.testing.assert_allclose(det_gamma, jnp.ones_like(det_gamma), atol=1.0e-12)
+        np.testing.assert_allclose(projected.conformal_factor, vars.conformal_factor, atol=0.0)
+        np.testing.assert_allclose(projected.traceless_K, vars.traceless_K, atol=0.0)
+        np.testing.assert_allclose(projected.trace_K, vars.trace_K, atol=0.0)
+        np.testing.assert_allclose(projected.conformal_connection, vars.conformal_connection, atol=0.0)
+        np.testing.assert_allclose(projected.lapse, vars.lapse, atol=0.0)
+        np.testing.assert_allclose(projected.shift, vars.shift, atol=0.0)
+
+    def test_rk4_enforces_unit_determinant_conformal_metric(self):
+        gamma = jnp.eye(3)[:, :, None, None, None] * jnp.ones(
+            (3, 3) + self.shape
+        )
+        gamma = gamma.at[0, 0].set(1.2 + 0.01 * jnp.sin(self.X))
+        gamma = gamma.at[1, 1].set(0.9 + 0.01 * jnp.cos(self.Y))
+        gamma = gamma.at[2, 2].set(1.1 + 0.01 * jnp.sin(self.Z))
+        W = 1.0 + 0.03 * jnp.cos(self.X)
+
+        vars = BSSNVariables(
+            conformal_metric=gamma,
+            conformal_factor=W,
+            traceless_K=jnp.zeros((3, 3) + self.shape),
+            trace_K=jnp.zeros(self.shape),
+            conformal_connection=jnp.zeros((3,) + self.shape),
+            lapse=jnp.ones(self.shape),
+            shift=jnp.zeros((3,) + self.shape),
+        )
+        params = BSSNParameters(
+            dx=self.dx, dt=0.01, nu=0.0, kappa=0.0, g=0.0, eta=0.0
+        )
+
+        evolved = rk4_step(vars, params)
+
+        det_gamma = determinant_3x3_metric(evolved.conformal_metric)
+        np.testing.assert_allclose(det_gamma, jnp.ones_like(det_gamma), atol=1.0e-12)
+        np.testing.assert_allclose(evolved.conformal_factor, W, atol=2.0e-4)
 
 
 if __name__ == "__main__":
