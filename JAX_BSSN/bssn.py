@@ -28,6 +28,10 @@ from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            raise_index, lower_index)
 
 
+# Keep inverse powers of W finite without clamping the evolved conformal factor.
+W_FLOOR_VALUE = 1.0e-12
+
+
 # NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
 
 
@@ -157,7 +161,9 @@ def compute_physical_metric(conformal_metric: jnp.ndarray,
         Physical metric with shape (3, 3, ni, nj, nk)
     """
 
-    physical_metric = conformal_metric / jnp.power(conformal_factor, 2)
+    W = jnp.maximum(conformal_factor, W_FLOOR_VALUE)
+
+    physical_metric = conformal_metric / jnp.power(W, 2)
     # compute physical metric by scaling conformal metric with W^-2
     
     return physical_metric
@@ -187,6 +193,7 @@ def compute_ricci(vars: BSSNVariables,
     K = vars.trace_K
     A_ij = vars.traceless_K
     W    = vars.conformal_factor
+    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     shape = conformal_metric.shape[2:]
 
     metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
@@ -243,13 +250,13 @@ def compute_ricci(vars: BSSNVariables,
     DiDj_W = dWdij  - jnp.einsum('kij...,k...->ij...', christoffel_second, dWdi)
 
 
-    first_term = DiDj_W / W
+    first_term = DiDj_W / W_floor
     # first term
 
-    second_term = jnp.einsum('ij...,mn...,nm...->ij...', conformal_metric, inv_conformal_metric, DiDj_W) / W
+    second_term = jnp.einsum('ij...,mn...,nm...->ij...', conformal_metric, inv_conformal_metric, DiDj_W) / W_floor
     # second term
 
-    third_term = -2 * jnp.einsum('ij...,mn...,m...,n...->ij...', conformal_metric, inv_conformal_metric, dWdi, dWdi) / jnp.power(W, 2)
+    third_term = -2 * jnp.einsum('ij...,mn...,m...,n...->ij...', conformal_metric, inv_conformal_metric, dWdi, dWdi) / jnp.power(W_floor, 2)
     # third term
 
     R_ij_W = first_term + second_term + third_term
@@ -383,6 +390,7 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     K = vars.trace_K
     A_ij = vars.traceless_K
     W    = vars.conformal_factor
+    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
@@ -403,9 +411,9 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     # Compute Christoffel symbols
 
     DiDj_alpha = dalphadij  - jnp.einsum('kij...,k...->ij...', christoffel_second, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha - 1/W * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha - 1/W_floor * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
     # full covariant second derivative of alpha
 
     first_term = -1 * W**2 * jnp.einsum('ij...,ij...->...', inv_gamma, DiDj_alpha)
@@ -460,6 +468,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
     K = vars.trace_K
     A_ij = vars.traceless_K
     W    = vars.conformal_factor
+    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
@@ -484,7 +493,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
     second_term = -0.5 * jnp.einsum('jk...,ijk...->i...', inv_gamma, dA_ij_dk)
     # second term
 
-    third_term = -3 * jnp.einsum('ij...,j...->i...', A_i_up_j, dWdi) / W
+    third_term = -3 * jnp.einsum('ij...,j...->i...', A_i_up_j, dWdi) / W_floor
     # third term
 
     fourth_term = -2.0/3.0 * dKdi
@@ -515,6 +524,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     K = vars.trace_K
     A_ij = vars.traceless_K
     W    = vars.conformal_factor
+    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
@@ -541,9 +551,9 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     # Compute Christoffel symbols
 
     DiDj_alpha = dalphadij  - jnp.einsum('kij...,k...->ij...', christoffel_second, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha - 1/W * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
+    DiDj_alpha = DiDj_alpha - 1/W_floor * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
     # full covariant second derivative of alpha
         
     # Compute full Ricci tensor
@@ -632,6 +642,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
     K = vars.trace_K
     A_ij = vars.traceless_K
     W    = vars.conformal_factor
+    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
@@ -667,7 +678,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
     second_term = 2 * alpha * jnp.einsum('ijk...,jk...->i...', christoffel_second, A_ij_raised)
     # second term
 
-    third_term = -6 * alpha / W * jnp.einsum('ij...,j...->i...', A_ij_raised, dWdi)
+    third_term = -6 * alpha / W_floor * jnp.einsum('ij...,j...->i...', A_ij_raised, dWdi)
     # third term
 
     fourth_term = -2 * jnp.einsum('ij...,j...->i...', A_ij_raised, dalphadi)
