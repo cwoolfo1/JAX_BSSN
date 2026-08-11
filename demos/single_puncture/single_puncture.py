@@ -205,6 +205,34 @@ def main():
 
     print(f"Final fields finite: {final_fields_finite}")
 
+    lapse_slice_1D = vars.lapse[center_x, center_y, :]
+    shift_slice_1D = vars.shift[center_x, center_y, :]
+    conformal_factor_slice_1D = vars.conformal_factor[center_x, center_y, :]
+    grid_z = jnp.linspace(-z_wind / 2.0, z_wind / 2.0, Nz)
+
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    plt.subplot(3, 1, 1)
+    plt.plot(grid_z, lapse_slice_1D, label="lapse")
+    plt.title("Final lapse along z-axis")
+    plt.xlabel("z")
+    plt.ylabel("lapse")
+    plt.grid()
+    plt.subplot(3, 1, 2)
+    plt.plot(grid_z, shift_slice_1D, label="shift")
+    plt.title("Final shift along z-axis")
+    plt.xlabel("z")
+    plt.ylabel("shift")
+    plt.grid()
+    plt.subplot(3, 1, 3)
+    plt.plot(grid_z, conformal_factor_slice_1D, label="conformal factor")
+    plt.title("Final conformal factor along z-axis")
+    plt.xlabel("z")
+    plt.ylabel("conformal factor")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig("single_puncture_final_fields.png")
+
 
 if __name__ == "__main__":
     main()
