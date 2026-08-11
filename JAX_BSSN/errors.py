@@ -11,7 +11,12 @@ from jax import jit
 from typing import Tuple, NamedTuple
 import numpy as np
 
-from JAX_BSSN.bssn import BSSNVariables, BSSNParameters, compute_ricci, compute_momentum_constraint
+from JAX_BSSN.bssn import (
+    BSSNVariables,
+    BSSNParameters,
+    compute_W2_ricci,
+    compute_momentum_constraint,
+)
 from JAX_BSSN.derivatives import diff1_field, divergence_3d, compute_all_derivatives
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, determinant_3x3_metric,
                            christoffel_symbols_second_kind, ricci_tensor,
@@ -46,19 +51,13 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     Returns:
         Hamiltonian constraint violation H
     """
-    dx = params.dx
     conformal_metric = vars.conformal_metric
-    conformal_connection = vars.conformal_connection
-    W = vars.conformal_factor
 
-    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
-
-    # Compute physical Ricci scalar (simplified calculation)
     inv_metric = invert_3x3_metric(conformal_metric)
-    
-    ricci_tensor = compute_ricci(vars, params)
-    ricci_scalar = trace_tensor(ricci_tensor, inv_metric)
-    # compute the ricci scalar from the conformal Ricci tensor
+
+    W2_ricci = compute_W2_ricci(vars, params)
+    ricci_scalar = trace_tensor(W2_ricci, inv_metric)
+    # R = gamma_tilde^ij (W**2 R_ij), evaluated without inverse powers of W.
 
     K_squared = vars.trace_K**2
     
@@ -67,7 +66,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
 
 
     # Hamiltonian constraint
-    hamiltonian = W**2 * ricci_scalar + 2/3 * K_squared - A_squared
+    hamiltonian = ricci_scalar + 2/3 * K_squared - A_squared
 
     return hamiltonian
 

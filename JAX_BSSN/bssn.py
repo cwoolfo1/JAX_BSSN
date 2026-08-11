@@ -169,50 +169,33 @@ def compute_physical_metric(conformal_metric: jnp.ndarray,
     return physical_metric
 
 @jit
-def compute_ricci(vars: BSSNVariables,
-                             params: BSSNParameters) -> jnp.ndarray:
-    """
-    Compute full Ricci tensor including conformal factor contributions.
-    
-    R_ij = R̃_ij + R_ij^φ
-    
-    where R_ij^φ contains terms from the conformal factor.
-    
-    Args:
-        conformal_ricci: Conformal Ricci tensor R̃_ij
-        conformal_metric: γ_ij  
-        conformal_factor: W
-        params: BSSN parameters
-    """
+def compute_W2_ricci(vars: BSSNVariables,
+                     params: BSSNParameters) -> jnp.ndarray:
+    """Compute the denominator-free scaled Ricci tensor ``W**2 R_ij``."""
 
     dx = params.dx
-    alpha = vars.lapse
     conformal_metric = vars.conformal_metric
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
     conformal_connection = vars.conformal_connection
-    K = vars.trace_K
-    A_ij = vars.traceless_K
-    W    = vars.conformal_factor
-    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
+    W = vars.conformal_factor
     shape = conformal_metric.shape[2:]
 
     metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
     # shape (3, 3, 3, ni, nj, nk)
 
-    # Compute inverse conformal metric
-    inv_metric = invert_3x3_metric(conformal_metric)
-
     # Compute Christoffel symbols
     christoffel_first  = christoffel_symbols_first_kind(metric_derivs)
-    christoffel_second = christoffel_symbols_second_kind(inv_metric, metric_derivs)
+    christoffel_second = christoffel_symbols_second_kind(inv_conformal_metric, metric_derivs)
 
-    mixed_derivatives = jnp.zeros((3, 3, 3, 3) + shape)
+    mixed_derivatives = jnp.zeros(
+        (3, 3, 3, 3) + shape, dtype=conformal_metric.dtype
+    )
     for m in range(3):
         for n in range(3):
             mixed_derivatives = mixed_derivatives.at[m, n, ...].set(
             diff1_field( metric_derivs[m, ...], n+2, dx))
         
-    term_1 = -0.5 * jnp.einsum('mn...,mnij...->ij...', inv_metric, mixed_derivatives)
+    term_1 = -0.5 * jnp.einsum('mn...,mnij...->ij...', inv_conformal_metric, mixed_derivatives)
     # compute first term of Ricci tensor
 
     connection_derivs = jnp.stack( [diff1_field(conformal_connection, d+1, dx) for d in range(3)], axis=0)
@@ -224,11 +207,11 @@ def compute_ricci(vars: BSSNVariables,
     term_3 = ( jnp.einsum('m...,ijm...->ij...', conformal_connection, christoffel_first) + jnp.einsum('m...,jim...->ij...', conformal_connection, christoffel_first) ) / 2.0
     # compute third term of Ricci tensor
 
-    term_4 = jnp.einsum('mn...,kmi...,jkn...->ij...', inv_metric, christoffel_second, christoffel_first) + \
-    jnp.einsum('mn...,kmj...,ikn...->ij...', inv_metric, christoffel_second, christoffel_first)
+    term_4 = jnp.einsum('mn...,kmi...,jkn...->ij...', inv_conformal_metric, christoffel_second, christoffel_first) + \
+    jnp.einsum('mn...,kmj...,ikn...->ij...', inv_conformal_metric, christoffel_second, christoffel_first)
     # compute fourth term of Ricci tensor
 
-    term_5 = jnp.einsum('mn...,kim...,kjn...->ij...', inv_metric, christoffel_second, christoffel_first)
+    term_5 = jnp.einsum('mn...,kim...,kjn...->ij...', inv_conformal_metric, christoffel_second, christoffel_first)
     # compute fifth term of Ricci tensor
 
     conformal_ricci = term_1 + term_2 + term_3 + term_4 + term_5
@@ -236,36 +219,84 @@ def compute_ricci(vars: BSSNVariables,
 
     dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
 
-    dWdij = jnp.zeros((3,3) + W.shape)
+    dWdij = jnp.zeros((3, 3) + W.shape, dtype=W.dtype)
     for i in range(3):
         for j in range(3):
             dWdij = dWdij.at[i,j].set( diff1_field( dWdi[i], j, dx) )
     # second derivatives of W
 
 
-    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
-    # shape (3, 3, 3, ni, nj, nk)
-    christoffel_second = christoffel_symbols_second_kind(inv_conformal_metric, metric_derivs)
-    # Compute Christoffel symbols
     DiDj_W = dWdij  - jnp.einsum('kij...,k...->ij...', christoffel_second, dWdi)
 
+    conformal_laplacian_W = jnp.einsum(
+        'mn...,mn...->...', inv_conformal_metric, DiDj_W
+    )
+    gradient_W_squared = jnp.einsum(
+        'mn...,m...,n...->...', inv_conformal_metric, dWdi, dWdi
+    )
 
-    first_term = DiDj_W / W_floor
-    # first term
+    W2_R_ij_W = W * (
+        DiDj_W + conformal_metric * conformal_laplacian_W
+    ) - 2.0 * conformal_metric * gradient_W_squared
+    # Compute W**2 R^W_ij directly so no inverse power of W is formed.
 
-    second_term = jnp.einsum('ij...,mn...,nm...->ij...', conformal_metric, inv_conformal_metric, DiDj_W) / W_floor
-    # second term
+    W2_R_ij = W**2 * conformal_ricci + W2_R_ij_W
 
-    third_term = -2 * jnp.einsum('ij...,mn...,m...,n...->ij...', conformal_metric, inv_conformal_metric, dWdi, dWdi) / jnp.power(W_floor, 2)
-    # third term
+    return W2_R_ij
 
-    R_ij_W = first_term + second_term + third_term
-    # conformal factor contribution to Ricci tensor
 
-    R_ij = conformal_ricci + R_ij_W
-    # full Ricci tensor
+@jit
+def compute_W2_covariant_lapse_hessian(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+) -> jnp.ndarray:
+    """Compute the denominator-free tensor ``W**2 D_i D_j alpha``."""
 
-    return R_ij
+    dx = params.dx
+    alpha = vars.lapse
+    W = vars.conformal_factor
+    conformal_metric = vars.conformal_metric
+    inv_conformal_metric = invert_3x3_metric(conformal_metric)
+
+    dalphadi = jnp.stack(
+        [diff1_field(alpha, d, dx) for d in range(3)], axis=0
+    )
+    dalphadij = jnp.zeros((3, 3) + alpha.shape, dtype=alpha.dtype)
+    for i in range(3):
+        for j in range(3):
+            dalphadij = dalphadij.at[i, j].set(
+                diff1_field(dalphadi[i], j, dx)
+            )
+
+    dWdi = jnp.stack(
+        [diff1_field(W, d, dx) for d in range(3)], axis=0
+    )
+
+    metric_derivs = jnp.stack(
+        [diff1_field(conformal_metric, d + 2, dx) for d in range(3)], axis=0
+    )
+    christoffel_second = christoffel_symbols_second_kind(
+        inv_conformal_metric, metric_derivs
+    )
+
+    conformal_hessian_alpha = dalphadij - jnp.einsum(
+        'kij...,k...->ij...', christoffel_second, dalphadi
+    )
+    gradient_terms = (
+        jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
+        + jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
+        - jnp.einsum(
+            'ij...,mn...,m...,n...->ij...',
+            conformal_metric,
+            inv_conformal_metric,
+            dWdi,
+            dalphadi,
+        )
+    )
+
+    W2_DiDj_alpha = W**2 * conformal_hessian_alpha + W * gradient_terms
+
+    return W2_DiDj_alpha
 
 
 @jit
@@ -385,39 +416,18 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
         Time derivative of trace K
     """
 
-    dx = params.dx
     alpha = vars.lapse
     K = vars.trace_K
     A_ij = vars.traceless_K
-    W    = vars.conformal_factor
-    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
+    W2_DiDj_alpha = compute_W2_covariant_lapse_hessian(vars, params)
 
-    dalphadi = jnp.stack( [diff1_field(alpha, d, dx) for d in range(3)], axis=0)
-    dalphadij = jnp.zeros((3,3) + alpha.shape)
-    for i in range(3):
-        for j in range(3):
-            dalphadij = dalphadij.at[i,j].set( diff1_field( dalphadi[i], j, dx) )
-    # second derivatives of alpha
-
-    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
-    # first derivatives of W
-
-    metric_derivs = jnp.stack( [diff1_field(gamma, d+2, dx) for d in range(3)], axis=0) 
-    # shape (3, 3, 3, ni, nj, nk)
-    christoffel_second = christoffel_symbols_second_kind(inv_gamma, metric_derivs)
-    # Compute Christoffel symbols
-
-    DiDj_alpha = dalphadij  - jnp.einsum('kij...,k...->ij...', christoffel_second, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha - 1/W_floor * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
-    # full covariant second derivative of alpha
-
-    first_term = -1 * W**2 * jnp.einsum('ij...,ij...->...', inv_gamma, DiDj_alpha)
-    # first term
+    first_term = -jnp.einsum(
+        'ij...,ij...->...', inv_gamma, W2_DiDj_alpha
+    )
+    # -W**2 gamma_tilde^ij D_i D_j alpha
 
     second_term = alpha * jnp.einsum('ij...,kl...,ik...,jl...->...', inv_gamma, inv_gamma, A_ij, A_ij)
     # second term
@@ -523,10 +533,15 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     alpha = vars.lapse
     K = vars.trace_K
     A_ij = vars.traceless_K
-    W    = vars.conformal_factor
-    W_floor = jnp.maximum(W, W_FLOOR_VALUE)
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
+
+    metric_derivs = jnp.stack(
+        [diff1_field(gamma, d + 2, dx) for d in range(3)], axis=0
+    )
+    christoffel_second = christoffel_symbols_second_kind(
+        inv_gamma, metric_derivs
+    )
 
 
     first_term = alpha * K * A_ij
@@ -535,34 +550,12 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     second_term = -2 * alpha * jnp.einsum('ik...,kl...,lj...->ij...', A_ij, inv_gamma, A_ij)
     # second term
 
-    dalphadi = jnp.stack( [diff1_field(alpha, d, dx) for d in range(3)], axis=0)
-    dalphadij = jnp.zeros((3,3) + alpha.shape)
-    for i in range(3):
-        for j in range(3):
-            dalphadij = dalphadij.at[i,j].set( diff1_field( dalphadi[i], j, dx) )
-    # second derivatives of alpha
+    W2_DiDj_alpha = compute_W2_covariant_lapse_hessian(vars, params)
+    W2_ricci = compute_W2_ricci(vars, params)
 
-    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
-    # first derivatives of W
-
-    metric_derivs = jnp.stack( [diff1_field(gamma, d+2, dx) for d in range(3)], axis=0) 
-    # shape (3, 3, 3, ni, nj, nk)
-    christoffel_second = christoffel_symbols_second_kind(inv_gamma, metric_derivs)
-    # Compute Christoffel symbols
-
-    DiDj_alpha = dalphadij  - jnp.einsum('kij...,k...->ij...', christoffel_second, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('i...,j...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha + 1/W_floor * jnp.einsum('j...,i...->ij...', dWdi, dalphadi)
-    DiDj_alpha = DiDj_alpha - 1/W_floor * jnp.einsum('ij...,mn...,m...,n...->ij...', gamma, inv_gamma, dWdi, dalphadi)
-    # full covariant second derivative of alpha
-        
-    # Compute full Ricci tensor
-    ricci = compute_ricci(vars, params)
-
-
-    third_term = jnp.power(W, 2) * (alpha * ricci - DiDj_alpha)
+    third_term = alpha * W2_ricci - W2_DiDj_alpha
     third_term = traceless_part(third_term, vars.conformal_metric, inv_gamma)
-    # third term
+    # [alpha W**2 R_ij - W**2 D_i D_j alpha]^TF
 
     shift = vars.shift
     # unpack the shift vector
@@ -604,7 +597,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     kappa = params.kappa
     # constraint damping parameter
 
-    dMidj = jnp.zeros((3,) + M.shape)
+    dMidj = jnp.zeros((3,) + M.shape, dtype=M.dtype)
 
     for i in range(3):
         for j in range(3):
