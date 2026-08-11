@@ -48,9 +48,9 @@ class BSSNVariables(NamedTuple):
 
 class BSSNParameters(NamedTuple):
     """Parameters for BSSN evolution."""
-    eta: float = 2.0          # Damping parameter for Γ^i evolution
+    eta: float = 2.0          # Damping parameter for shift evolution
     kappa: float = 0.0        # Constraint damping parameter
-    nu: float = 0.25          # Kreiss-Oliger dissipation coefficient
+    nu: float = 0.002          # Kreiss-Oliger dissipation coefficient
     g: float = 0.75           # Gamma driver shift parameter
     dx: float = 0.1           # Grid spacing
     dt: float = 0.001         # Time step
