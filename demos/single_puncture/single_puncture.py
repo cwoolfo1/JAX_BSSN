@@ -70,14 +70,14 @@ def main():
     """Run a short moving-puncture-style evolution on a Cartesian grid."""
 
     mass = 1.0
-    x_wind = 32.0 * mass
-    y_wind = 32.0 * mass
-    z_wind = 32.0 * mass
-    Nx = 64
-    Ny = 64
-    Nz = 64
-    cfl = 0.1
-    num_steps = 5
+    x_wind = 20.0 * mass
+    y_wind = 20.0 * mass
+    z_wind = 20.0 * mass
+    Nx = 250
+    Ny = 250
+    Nz = 250
+    cfl = 0.2
+    num_steps = 10
 
     dx = x_wind / Nx
     dy = y_wind / Ny
@@ -100,8 +100,8 @@ def main():
     # The finite-difference stencils and boundary conditions remain periodic.
     params = BSSNParameters(
         eta=2.0,
-        kappa=0.0,
-        nu=0.02,
+        kappa=0.002,
+        nu=0.002,
         g=0.75,
         dx=dx,
         dt=dt,
