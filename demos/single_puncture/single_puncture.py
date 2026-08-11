@@ -7,6 +7,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
+from tqdm import tqdm
 
 from JAX_BSSN.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
@@ -73,9 +74,9 @@ def main():
     x_wind = 20.0 * mass
     y_wind = 20.0 * mass
     z_wind = 20.0 * mass
-    Nx = 250
-    Ny = 250
-    Nz = 250
+    Nx = 160
+    Ny = 160
+    Nz = 160
     cfl = 0.2
     num_steps = 10
 
@@ -171,14 +172,24 @@ def main():
             f"lapse={float(initial_vars.lapse[index]):.12f}"
         )
 
-    for step in range(1, num_steps + 1):
+    del R, initial_vars
+
+    progress_bar = tqdm(
+        range(1, num_steps + 1),
+        desc="Evolving single puncture",
+        unit="step",
+    )
+    for step in progress_bar:
         vars = rk4_step(vars, params)
         jax.block_until_ready(vars)
-        print(
-            f"Step {step:2d}: "
-            f"min(W)={float(jnp.min(vars.conformal_factor)):.12f}, "
-            f"min(lapse)={float(jnp.min(vars.lapse)):.12f}, "
-            f"max(|shift|)={float(jnp.max(jnp.abs(vars.shift))):.12e}"
+
+        minimum_W = float(jnp.min(vars.conformal_factor))
+        minimum_lapse = float(jnp.min(vars.lapse))
+        maximum_shift = float(jnp.max(jnp.abs(vars.shift)))
+        progress_bar.set_postfix(
+            min_W=f"{minimum_W:.6e}",
+            min_lapse=f"{minimum_lapse:.6e}",
+            max_shift=f"{maximum_shift:.6e}",
         )
 
     final_fields_finite = all(
