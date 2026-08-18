@@ -10,10 +10,15 @@ import numpy as np
 from JAX_BSSN.bssn import (
     BSSNParameters,
     BSSNVariables,
+    W_FLOOR_VALUE,
+    compute_W2_covariant_lapse_hessian,
+    compute_W2_ricci,
     compute_momentum_constraint,
+    evolve_trace_extrinsic_curvature,
     evolve_traceless_extrinsic_curvature,
 )
 from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.errors import compute_hamiltonian_constraint
 from JAX_BSSN.evolve import enforce_unit_determinant_conformal_metric, rk4_step
 from JAX_BSSN.tensor_algebra import (
     christoffel_symbols_second_kind,
@@ -73,6 +78,302 @@ class TestBSSNEquationRegressions(unittest.TestCase):
             lapse=jnp.ones(self.shape),
             shift=jnp.zeros((3,) + self.shape),
         )
+
+    def flat_vars(self, W, lapse):
+        dtype = W.dtype
+        gamma = jnp.eye(3, dtype=dtype)[:, :, None, None, None] * jnp.ones(
+            (3, 3) + self.shape, dtype=dtype
+        )
+
+        return BSSNVariables(
+            conformal_metric=gamma,
+            conformal_factor=W,
+            traceless_K=jnp.zeros((3, 3) + self.shape, dtype=dtype),
+            trace_K=jnp.zeros(self.shape, dtype=dtype),
+            conformal_connection=jnp.zeros((3,) + self.shape, dtype=dtype),
+            lapse=lapse,
+            shift=jnp.zeros((3,) + self.shape, dtype=dtype),
+        )
+
+    def denominator_free_W2_ricci_flat(self, W):
+        dx = jnp.asarray(self.dx, dtype=W.dtype)
+        dWdi = jnp.stack(
+            [diff1_field(W, d, dx) for d in range(3)], axis=0
+        )
+        dWdij = jnp.stack(
+            [
+                jnp.stack(
+                    [diff1_field(dWdi[i], j, dx) for j in range(3)],
+                    axis=0,
+                )
+                for i in range(3)
+            ],
+            axis=0,
+        )
+
+        laplacian_W = jnp.einsum("ii...->...", dWdij)
+        gradient_W_squared = jnp.einsum("i...,i...->...", dWdi, dWdi)
+        gamma = jnp.eye(3, dtype=W.dtype)[:, :, None, None, None]
+
+        return (
+            W * dWdij
+            + gamma * W * laplacian_W
+            - 2.0 * gamma * gradient_W_squared
+        )
+
+    def denominator_free_W2_lapse_hessian_flat(self, W, lapse):
+        dx = jnp.asarray(self.dx, dtype=W.dtype)
+        dWdi = jnp.stack(
+            [diff1_field(W, d, dx) for d in range(3)], axis=0
+        )
+        dalphadi = jnp.stack(
+            [diff1_field(lapse, d, dx) for d in range(3)], axis=0
+        )
+        dalphadij = jnp.stack(
+            [
+                jnp.stack(
+                    [diff1_field(dalphadi[i], j, dx) for j in range(3)],
+                    axis=0,
+                )
+                for i in range(3)
+            ],
+            axis=0,
+        )
+
+        gradient_terms = (
+            jnp.einsum("i...,j...->ij...", dWdi, dalphadi)
+            + jnp.einsum("j...,i...->ij...", dWdi, dalphadi)
+        )
+        gradient_W_alpha = jnp.einsum("i...,i...->...", dWdi, dalphadi)
+        gamma = jnp.eye(3, dtype=W.dtype)[:, :, None, None, None]
+
+        return W**2 * dalphadij + W * (
+            gradient_terms - gamma * gradient_W_alpha
+        )
+
+    def canonical_divided_W2_sources_flat(self, W, lapse):
+        """Return the former divided expressions, only for strictly positive W."""
+
+        dx = jnp.asarray(self.dx, dtype=W.dtype)
+        dWdi = jnp.stack(
+            [diff1_field(W, d, dx) for d in range(3)], axis=0
+        )
+        dalphadi = jnp.stack(
+            [diff1_field(lapse, d, dx) for d in range(3)], axis=0
+        )
+        dWdij = jnp.stack(
+            [
+                jnp.stack(
+                    [diff1_field(dWdi[i], j, dx) for j in range(3)], axis=0
+                )
+                for i in range(3)
+            ],
+            axis=0,
+        )
+        dalphadij = jnp.stack(
+            [
+                jnp.stack(
+                    [diff1_field(dalphadi[i], j, dx) for j in range(3)],
+                    axis=0,
+                )
+                for i in range(3)
+            ],
+            axis=0,
+        )
+
+        gamma = jnp.eye(3, dtype=W.dtype)[:, :, None, None, None]
+        laplacian_W = jnp.einsum("ii...->...", dWdij)
+        gradient_W_squared = jnp.einsum("i...,i...->...", dWdi, dWdi)
+        gradient_terms = (
+            jnp.einsum("i...,j...->ij...", dWdi, dalphadi)
+            + jnp.einsum("j...,i...->ij...", dWdi, dalphadi)
+            - gamma * jnp.einsum("i...,i...->...", dWdi, dalphadi)
+        )
+
+        ricci = (
+            dWdij / W
+            + gamma * laplacian_W / W
+            - 2.0 * gamma * gradient_W_squared / W**2
+        )
+        lapse_hessian = dalphadij + gradient_terms / W
+
+        return W**2 * ricci, W**2 * lapse_hessian
+
+    def assert_normalized_allclose(self, actual, expected, rtol, atol):
+        expected_array = np.asarray(expected)
+        expected_magnitude = float(np.max(np.abs(expected_array)))
+        self.assertGreater(
+            expected_magnitude / W_FLOOR_VALUE**2,
+            1.0e-3,
+            "The scaled reference must be nontrivial relative to W_FLOOR_VALUE**2.",
+        )
+        scale = max(
+            expected_magnitude,
+            np.finfo(expected_array.dtype).tiny,
+        )
+        np.testing.assert_allclose(
+            np.asarray(actual) / scale,
+            expected_array / scale,
+            rtol=rtol,
+            atol=atol,
+        )
+
+    def test_scaled_tensors_match_denominator_free_formulas_across_W_floor(self):
+        cases = {
+            "above": 4.0,
+            "touching": 2.0,
+            "straddling": 1.5,
+            "below": 0.25,
+        }
+
+        for dtype, rtol, atol in (
+            (jnp.float64, 1.0e-10, 1.0e-12),
+            (jnp.float32, 2.0e-5, 2.0e-6),
+        ):
+            X = self.X.astype(dtype)
+            Y = self.Y.astype(dtype)
+            Z = self.Z.astype(dtype)
+            lapse = (
+                1.0
+                + 0.10 * jnp.sin(X)
+                + 0.07 * jnp.cos(Y)
+                + 0.03 * jnp.sin(X + Z)
+            ).astype(dtype)
+
+            for label, amplitude in cases.items():
+                with self.subTest(dtype=str(dtype), case=label):
+                    dx = jnp.asarray(self.dx, dtype=dtype)
+                    scale = jnp.asarray(
+                        amplitude * W_FLOOR_VALUE, dtype=dtype
+                    )
+                    W = scale * (0.75 + 0.25 * jnp.cos(X))
+                    vars = self.flat_vars(W, lapse)
+                    params = BSSNParameters(
+                        dx=dx, dt=0.01, nu=0.0, kappa=0.0
+                    )
+
+                    actual_ricci = compute_W2_ricci(vars, params)
+                    actual_hessian = compute_W2_covariant_lapse_hessian(
+                        vars, params
+                    )
+                    expected_ricci = self.denominator_free_W2_ricci_flat(W)
+                    expected_hessian = (
+                        self.denominator_free_W2_lapse_hessian_flat(W, lapse)
+                    )
+
+                    self.assertEqual(actual_ricci.dtype, dtype)
+                    self.assertEqual(actual_hessian.dtype, dtype)
+                    self.assertTrue(bool(jnp.all(jnp.isfinite(actual_ricci))))
+                    self.assertTrue(bool(jnp.all(jnp.isfinite(actual_hessian))))
+                    self.assert_normalized_allclose(
+                        actual_ricci, expected_ricci, rtol, atol
+                    )
+                    self.assert_normalized_allclose(
+                        actual_hessian, expected_hessian, rtol, atol
+                    )
+
+                    if label == "above":
+                        divided_ricci, divided_hessian = (
+                            self.canonical_divided_W2_sources_flat(W, lapse)
+                        )
+                        self.assert_normalized_allclose(
+                            actual_ricci, divided_ricci, rtol, atol
+                        )
+                        self.assert_normalized_allclose(
+                            actual_hessian, divided_hessian, rtol, atol
+                        )
+
+                    self.assert_normalized_allclose(
+                        actual_ricci,
+                        jnp.swapaxes(actual_ricci, 0, 1),
+                        rtol,
+                        max(atol, 5.0e-5 if dtype == jnp.float32 else atol),
+                    )
+                    self.assert_normalized_allclose(
+                        actual_hessian,
+                        jnp.swapaxes(actual_hessian, 0, 1),
+                        rtol,
+                        max(atol, 5.0e-5 if dtype == jnp.float32 else atol),
+                    )
+
+    def test_K_A_and_hamiltonian_use_scaled_sources_at_smooth_puncture(self):
+        for dtype, rtol, atol in (
+            (jnp.float64, 1.0e-10, 1.0e-12),
+            (jnp.float32, 2.0e-5, 2.0e-6),
+        ):
+            with self.subTest(dtype=str(dtype)):
+                dx = jnp.asarray(self.dx, dtype=dtype)
+                x = (jnp.arange(self.n, dtype=dtype) - self.n // 2) * dx
+                X, Y, Z = jnp.meshgrid(x, x, x, indexing="ij")
+                W = jnp.asarray(4.0 * W_FLOOR_VALUE, dtype=dtype) * (
+                    jnp.sin(X / 2.0) ** 2
+                    + jnp.sin(Y / 2.0) ** 2
+                    + jnp.sin(Z / 2.0) ** 2
+                )
+                lapse = (
+                    1.0
+                    + 0.10 * jnp.sin(X)
+                    + 0.07 * jnp.cos(Y)
+                    + 0.03 * jnp.sin(X + Z)
+                ).astype(dtype)
+                vars = self.flat_vars(W, lapse)
+                zero = jnp.asarray(0.0, dtype=dtype)
+                params = BSSNParameters(
+                    dx=dx,
+                    dt=jnp.asarray(0.01, dtype=dtype),
+                    nu=zero,
+                    kappa=zero,
+                    g=zero,
+                    eta=zero,
+                )
+
+                self.assertTrue(bool(jnp.any(W == 0.0)))
+                self.assertTrue(
+                    bool(jnp.any((W > 0.0) & (W < W_FLOOR_VALUE)))
+                )
+                self.assertTrue(bool(jnp.any(W > W_FLOOR_VALUE)))
+
+                W2_ricci = self.denominator_free_W2_ricci_flat(W)
+                W2_hessian = self.denominator_free_W2_lapse_hessian_flat(
+                    W, lapse
+                )
+                expected_K = -jnp.einsum("ii...->...", W2_hessian)
+                A_source = lapse * W2_ricci - W2_hessian
+                A_source_trace = jnp.einsum("ii...->...", A_source)
+                expected_A = (
+                    A_source
+                    - vars.conformal_metric * A_source_trace / 3.0
+                )
+                expected_hamiltonian = jnp.einsum("ii...->...", W2_ricci)
+
+                actual_K = evolve_trace_extrinsic_curvature(vars, params)
+                actual_A = evolve_traceless_extrinsic_curvature(vars, params)
+                actual_hamiltonian = compute_hamiltonian_constraint(vars, params)
+
+                self.assertTrue(bool(jnp.all(jnp.isfinite(actual_K))))
+                self.assertTrue(bool(jnp.all(jnp.isfinite(actual_A))))
+                self.assertTrue(bool(jnp.all(jnp.isfinite(actual_hamiltonian))))
+                self.assert_normalized_allclose(actual_K, expected_K, rtol, atol)
+                self.assert_normalized_allclose(actual_A, expected_A, rtol, atol)
+                self.assert_normalized_allclose(
+                    actual_hamiltonian, expected_hamiltonian, rtol, atol
+                )
+                self.assert_normalized_allclose(
+                    actual_A,
+                    jnp.swapaxes(actual_A, 0, 1),
+                    rtol,
+                    max(atol, 5.0e-5 if dtype == jnp.float32 else atol),
+                )
+
+                trace_A = trace_tensor(
+                    actual_A, invert_3x3_metric(vars.conformal_metric)
+                )
+                source_scale = float(jnp.max(jnp.abs(expected_A)))
+                normalized_trace = float(jnp.max(jnp.abs(trace_A))) / source_scale
+                trace_tolerance = max(
+                    rtol, 5.0e-5 if dtype == jnp.float32 else rtol
+                )
+                self.assertLessEqual(normalized_trace, trace_tolerance)
 
     def test_momentum_constraint_matches_notes_formula(self):
         vars = self.nontrivial_vars()

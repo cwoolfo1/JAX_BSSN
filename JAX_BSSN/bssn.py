@@ -56,19 +56,37 @@ class BSSNParameters(NamedTuple):
     dt: float = 0.001         # Time step
     zero_shift: int = 0       # If 1, hold the shift fixed during RK stages
     gauge: int = 0            # 0 = harmonic slicing, 1 = 1+log slicing
-    xl_bc: int = 0            # x-left boundary code: 0 periodic, 1 super-Gaussian
-    xr_bc: int = 0            # x-right boundary code: 0 periodic, 1 super-Gaussian
-    yl_bc: int = 0            # y-left boundary code: 0 periodic, 1 super-Gaussian
-    yr_bc: int = 0            # y-right boundary code: 0 periodic, 1 super-Gaussian
-    zl_bc: int = 0            # z-left boundary code: 0 periodic, 1 super-Gaussian
-    zr_bc: int = 0            # z-right boundary code: 0 periodic, 1 super-Gaussian
+    xl_bc: int = 0            # x-left boundary code: 0 periodic, 1 filter, 2 Sommerfeld
+    xr_bc: int = 0            # x-right boundary code: 0 periodic, 1 filter, 2 Sommerfeld
+    yl_bc: int = 0            # y-left boundary code: 0 periodic, 1 filter, 2 Sommerfeld
+    yr_bc: int = 0            # y-right boundary code: 0 periodic, 1 filter, 2 Sommerfeld
+    zl_bc: int = 0            # z-left boundary code: 0 periodic, 1 filter, 2 Sommerfeld
+    zr_bc: int = 0            # z-right boundary code: 0 periodic, 1 filter, 2 Sommerfeld
     bc_width: float = 8.0     # Super-Gaussian layer width in grid cells
     bc_order: float = 4.0     # Super-Gaussian exponent
     bc_strength: float = 1.0  # Boundary blend strength
+    x_min: float = 0.0        # Coordinate at the first x grid point
+    y_min: float = 0.0        # Coordinate at the first y grid point
+    z_min: float = 0.0        # Coordinate at the first z grid point
+
+
+def get_boundary_codes(
+    params: BSSNParameters, spatial_direction: int
+) -> Tuple[int, int]:
+    """Return the left and right face codes for one physical direction."""
+
+    if spatial_direction == 0:
+        return params.xl_bc, params.xr_bc
+    elif spatial_direction == 1:
+        return params.yl_bc, params.yr_bc
+    else:
+        return params.zl_bc, params.zr_bc
 
 
 @jit
-def compute_shift_derivatives(shift: jnp.ndarray, dx: float) -> jnp.ndarray:
+def compute_shift_derivatives(
+    shift: jnp.ndarray, params: BSSNParameters
+) -> jnp.ndarray:
     """
     Compute spatial derivatives of the shift vector.
 
@@ -80,7 +98,15 @@ def compute_shift_derivatives(shift: jnp.ndarray, dx: float) -> jnp.ndarray:
     d_beta = jnp.stack(
         [
             jnp.stack(
-                [diff1_field(shift[i, ...], j, dx) for j in range(3)],
+                [
+                    diff1_field(
+                        shift[i, ...],
+                        j,
+                        params.dx,
+                        *get_boundary_codes(params, j),
+                    )
+                    for j in range(3)
+                ],
                 axis=0,
             )
             for i in range(3)
@@ -179,7 +205,18 @@ def compute_W2_ricci(vars: BSSNVariables,
     conformal_connection = vars.conformal_connection
     W = vars.conformal_factor
 
-    metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
+    metric_derivs = jnp.stack(
+        [
+            diff1_field(
+                conformal_metric,
+                d + 2,
+                dx,
+                *get_boundary_codes(params, d),
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # shape (3, 3, 3, ni, nj, nk)
 
     # Compute Christoffel symbols
@@ -192,14 +229,28 @@ def compute_W2_ricci(vars: BSSNVariables,
     for m in range(3):
         for n in range(3):
             metric_second_derivative = diff1_field(
-                metric_derivs[m, ...], n + 2, dx
+                metric_derivs[m, ...],
+                n + 2,
+                dx,
+                *get_boundary_codes(params, n),
             )
             term_1 = term_1 - 0.5 * (
                 inv_conformal_metric[m, n] * metric_second_derivative
             )
     # compute first term of Ricci tensor
 
-    connection_derivs = jnp.stack( [diff1_field(conformal_connection, d+1, dx) for d in range(3)], axis=0)
+    connection_derivs = jnp.stack(
+        [
+            diff1_field(
+                conformal_connection,
+                d + 1,
+                dx,
+                *get_boundary_codes(params, d),
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # shape (3, 3, ni, nj, nk)
 
     term_2 = (jnp.einsum('mi...,jm...->ij...', conformal_metric, connection_derivs) + jnp.einsum('mj...,im...->ij...', conformal_metric, connection_derivs)) / 2.0
@@ -218,12 +269,22 @@ def compute_W2_ricci(vars: BSSNVariables,
     conformal_ricci = term_1 + term_2 + term_3 + term_4 + term_5
     # conformal Ricci tensor without conformal factor terms
 
-    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    dWdi = jnp.stack(
+        [
+            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
 
     dWdij = jnp.zeros((3, 3) + W.shape, dtype=W.dtype)
     for i in range(3):
         for j in range(3):
-            dWdij = dWdij.at[i,j].set( diff1_field( dWdi[i], j, dx) )
+            dWdij = dWdij.at[i, j].set(
+                diff1_field(
+                    dWdi[i], j, dx, *get_boundary_codes(params, j)
+                )
+            )
     # second derivatives of W
 
 
@@ -260,21 +321,40 @@ def compute_W2_covariant_lapse_hessian(
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
 
     dalphadi = jnp.stack(
-        [diff1_field(alpha, d, dx) for d in range(3)], axis=0
+        [
+            diff1_field(alpha, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
     )
     dalphadij = jnp.zeros((3, 3) + alpha.shape, dtype=alpha.dtype)
     for i in range(3):
         for j in range(3):
             dalphadij = dalphadij.at[i, j].set(
-                diff1_field(dalphadi[i], j, dx)
+                diff1_field(
+                    dalphadi[i], j, dx, *get_boundary_codes(params, j)
+                )
             )
 
     dWdi = jnp.stack(
-        [diff1_field(W, d, dx) for d in range(3)], axis=0
+        [
+            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
     )
 
     metric_derivs = jnp.stack(
-        [diff1_field(conformal_metric, d + 2, dx) for d in range(3)], axis=0
+        [
+            diff1_field(
+                conformal_metric,
+                d + 2,
+                dx,
+                *get_boundary_codes(params, d),
+            )
+            for d in range(3)
+        ],
+        axis=0,
     )
     christoffel_second = christoffel_symbols_second_kind(
         inv_conformal_metric, metric_derivs
@@ -313,13 +393,24 @@ def evolve_conformal_metric(vars: BSSNVariables,
     Returns:
         Time derivative of conformal metric
     """
-    grad_gamma = jnp.stack( [diff1_field(vars.conformal_metric, d+2, params.dx) for d in range(3)], axis=0)
+    grad_gamma = jnp.stack(
+        [
+            diff1_field(
+                vars.conformal_metric,
+                d + 2,
+                params.dx,
+                *get_boundary_codes(params, d),
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # compute the gradient of the conformal metric
 
     shift = vars.shift
     # unpack the shift vector
 
-    grad_shift = compute_shift_derivatives(shift, params.dx)
+    grad_shift = compute_shift_derivatives(shift, params)
     # grad_shift[i, j] = partial_j beta^i
 
     first_term = jnp.einsum("m...,mij...->ij...", shift, grad_gamma)
@@ -344,9 +435,15 @@ def evolve_conformal_metric(vars: BSSNVariables,
     # compute dt_gamma
 
     # Kreiss-Oliger dissipation can be added here if desired
-    dgamma_dx1 = diff6_field(vars.conformal_metric, 2, params.dx)
-    dgamma_dx2 = diff6_field(vars.conformal_metric, 3, params.dx)
-    dgamma_dx3 = diff6_field(vars.conformal_metric, 4, params.dx)
+    dgamma_dx1 = diff6_field(
+        vars.conformal_metric, 2, params.dx, *get_boundary_codes(params, 0)
+    )
+    dgamma_dx2 = diff6_field(
+        vars.conformal_metric, 3, params.dx, *get_boundary_codes(params, 1)
+    )
+    dgamma_dx3 = diff6_field(
+        vars.conformal_metric, 4, params.dx, *get_boundary_codes(params, 2)
+    )
     # gamma is shape (3, 3, ni, nj, nk)
     # compute the 6th derivative in each direction
 
@@ -373,7 +470,18 @@ def evolve_conformal_factor(vars: BSSNVariables,
     shift = vars.shift
     # unpack the shift vector
 
-    grad_W = jnp.stack( [diff1_field(vars.conformal_factor, d, params.dx) for d in range(3)], axis=0)
+    grad_W = jnp.stack(
+        [
+            diff1_field(
+                vars.conformal_factor,
+                d,
+                params.dx,
+                *get_boundary_codes(params, d),
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # compute the gradient of the conformal factor
 
     # First term: advection due to shift: beta^i ∂_i W
@@ -383,7 +491,7 @@ def evolve_conformal_factor(vars: BSSNVariables,
     # Second term: (1/3) α W K
     second_term = (1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K
 
-    grad_shift = compute_shift_derivatives(shift, params.dx)
+    grad_shift = compute_shift_derivatives(shift, params)
     # grad_shift[i, j] = partial_j beta^i
 
     div_shift = jnp.einsum("ii...->...", grad_shift)
@@ -392,9 +500,15 @@ def evolve_conformal_factor(vars: BSSNVariables,
     third_term = -(1.0/3.0) * vars.conformal_factor * div_shift
     # compute the term due to divergence of shift
 
-    dW_dx1 = diff6_field(vars.conformal_factor, 0, params.dx)
-    dW_dx2 = diff6_field(vars.conformal_factor, 1, params.dx)
-    dW_dx3 = diff6_field(vars.conformal_factor, 2, params.dx)
+    dW_dx1 = diff6_field(
+        vars.conformal_factor, 0, params.dx, *get_boundary_codes(params, 0)
+    )
+    dW_dx2 = diff6_field(
+        vars.conformal_factor, 1, params.dx, *get_boundary_codes(params, 1)
+    )
+    dW_dx3 = diff6_field(
+        vars.conformal_factor, 2, params.dx, *get_boundary_codes(params, 2)
+    )
     # compute the 6th derivative in each direction
 
     dissipation_term = params.nu / 64 * params.dx**5 * (dW_dx1 + dW_dx2 + dW_dx3)
@@ -440,7 +554,13 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     shift = vars.shift
     # unpack the shift vector
 
-    grad_K = jnp.stack( [diff1_field(K, d, params.dx) for d in range(3)], axis=0)
+    grad_K = jnp.stack(
+        [
+            diff1_field(K, d, params.dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # compute the gradient of K
 
     fourth_term = jnp.einsum('i...,i...->...', shift, grad_K)
@@ -450,9 +570,15 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     dt_K = first_term + second_term + third_term + fourth_term
     # compute dt_K
 
-    dK_dx1 = diff6_field(vars.trace_K, 0, params.dx)
-    dK_dx2 = diff6_field(vars.trace_K, 1, params.dx)
-    dK_dx3 = diff6_field(vars.trace_K, 2, params.dx)
+    dK_dx1 = diff6_field(
+        vars.trace_K, 0, params.dx, *get_boundary_codes(params, 0)
+    )
+    dK_dx2 = diff6_field(
+        vars.trace_K, 1, params.dx, *get_boundary_codes(params, 1)
+    )
+    dK_dx3 = diff6_field(
+        vars.trace_K, 2, params.dx, *get_boundary_codes(params, 2)
+    )
     # compute the 6th derivative in each direction
 
     dissipation_term = params.nu / 64 * params.dx**5 * (dK_dx1 + dK_dx2 + dK_dx3)
@@ -483,19 +609,45 @@ def compute_momentum_constraint(vars: BSSNVariables,
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
-    dKdi = jnp.stack( [diff1_field(K, d, dx) for d in range(3)], axis=0)
+    dKdi = jnp.stack(
+        [
+            diff1_field(K, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # first derivatives of K
 
-    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    dWdi = jnp.stack(
+        [
+            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # first derivatives of W
 
     A_i_up_j = jnp.einsum('jk...,ik...->ij...', inv_gamma, A_ij)
     # raise the second index in A_i^j
 
-    dA_i_up_j_dk = jnp.stack( [diff1_field(A_i_up_j, d+2, dx) for d in range(3)], axis=0)
+    dA_i_up_j_dk = jnp.stack(
+        [
+            diff1_field(
+                A_i_up_j, d + 2, dx, *get_boundary_codes(params, d)
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # derivatives of A_i^j
 
-    dA_ij_dk = jnp.stack( [diff1_field(A_ij, d+2, dx) for d in range(3)], axis=0)
+    dA_ij_dk = jnp.stack(
+        [
+            diff1_field(A_ij, d + 2, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # derivatives of A_ij
 
     first_term = jnp.einsum('jij...->i...', dA_i_up_j_dk)
@@ -538,7 +690,13 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     inv_gamma = invert_3x3_metric(gamma)
 
     metric_derivs = jnp.stack(
-        [diff1_field(gamma, d + 2, dx) for d in range(3)], axis=0
+        [
+            diff1_field(
+                gamma, d + 2, dx, *get_boundary_codes(params, d)
+            )
+            for d in range(3)
+        ],
+        axis=0,
     )
     christoffel_second = christoffel_symbols_second_kind(
         inv_gamma, metric_derivs
@@ -561,10 +719,21 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     shift = vars.shift
     # unpack the shift vector
 
-    grad_shift = compute_shift_derivatives(shift, params.dx)
+    grad_shift = compute_shift_derivatives(shift, params)
     # compute the gradient of the shift vector
 
-    grad_A = jnp.stack( [diff1_field(A_ij, d+2, params.dx) for d in range(3)], axis=0)
+    grad_A = jnp.stack(
+        [
+            diff1_field(
+                A_ij,
+                d + 2,
+                params.dx,
+                *get_boundary_codes(params, d),
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # compute the gradient of A_ij
 
     fourth_term = jnp.einsum('m...,mij...->ij...', shift, grad_A)
@@ -586,9 +755,15 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     dt_A = first_term + second_term + third_term + fourth_term + fifth_term + sixth_term
     # compute dt_A
 
-    dA_dx1 = diff6_field(vars.traceless_K, 2, params.dx)
-    dA_dx2 = diff6_field(vars.traceless_K, 3, params.dx)
-    dA_dx3 = diff6_field(vars.traceless_K, 4, params.dx)
+    dA_dx1 = diff6_field(
+        vars.traceless_K, 2, params.dx, *get_boundary_codes(params, 0)
+    )
+    dA_dx2 = diff6_field(
+        vars.traceless_K, 3, params.dx, *get_boundary_codes(params, 1)
+    )
+    dA_dx3 = diff6_field(
+        vars.traceless_K, 4, params.dx, *get_boundary_codes(params, 2)
+    )
     # A_ij is shape (3, 3, ni, nj, nk)
     # compute the 6th derivative in each direction
 
@@ -602,7 +777,9 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
 
     for i in range(3):
         for j in range(3):
-            dMidj = dMidj.at[i,j].set( diff1_field( M[i,...], j, dx) ) 
+            dMidj = dMidj.at[i, j].set(
+                diff1_field(M[i, ...], j, dx, *get_boundary_codes(params, j))
+            )
         
     DjMi = dMidj - jnp.einsum('kij...,k...->ij...', christoffel_second, M)
     DiMj = jnp.swapaxes(DjMi, 0, 1)
@@ -640,19 +817,37 @@ def evolve_conformal_connection(vars: BSSNVariables,
     gamma = vars.conformal_metric
     inv_gamma = invert_3x3_metric(gamma)
 
-    dWdi = jnp.stack( [diff1_field(W, d, dx) for d in range(3)], axis=0)
+    dWdi = jnp.stack(
+        [
+            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # first derivatives of W
 
-    dalphadi = jnp.stack( [diff1_field(alpha, d, dx) for d in range(3)], axis=0)
+    dalphadi = jnp.stack(
+        [
+            diff1_field(alpha, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # first derivatives of alpha
 
-    dKdi = jnp.stack( [diff1_field(K, d, dx) for d in range(3)], axis=0)
+    dKdi = jnp.stack(
+        [
+            diff1_field(K, d, dx, *get_boundary_codes(params, d))
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # first derivatives of K
 
     shift = vars.shift
     # unpack the shift vector
 
-    d_shift = compute_shift_derivatives(shift, dx)
+    d_shift = compute_shift_derivatives(shift, params)
     # d_shift[i, j] = partial_j beta^i
 
     div_shift = jnp.einsum("ii...->...", d_shift)
@@ -662,7 +857,15 @@ def evolve_conformal_connection(vars: BSSNVariables,
     # first term
 
 
-    metric_derivs = jnp.stack( [diff1_field(gamma, d+2, dx) for d in range(3)], axis=0) 
+    metric_derivs = jnp.stack(
+        [
+            diff1_field(
+                gamma, d + 2, dx, *get_boundary_codes(params, d)
+            )
+            for d in range(3)
+        ],
+        axis=0,
+    )
     # shape (3, 3, 3, ni, nj, nk)
     christoffel_second = christoffel_symbols_second_kind(inv_gamma, metric_derivs)
     # compute Christoffel symbols of the second kind
@@ -679,7 +882,15 @@ def evolve_conformal_connection(vars: BSSNVariables,
     # fourth term
 
     grad_Gamma = jnp.stack(
-        [diff1_field(vars.conformal_connection, m + 1, dx) for m in range(3)],
+        [
+            diff1_field(
+                vars.conformal_connection,
+                m + 1,
+                dx,
+                *get_boundary_codes(params, m),
+            )
+            for m in range(3)
+        ],
         axis=0,
     )
     # grad_Gamma[m, i] = partial_m Gamma^i
@@ -698,7 +909,12 @@ def evolve_conformal_connection(vars: BSSNVariables,
         for m in range(3):
             for n in range(3):
                 d2_shift = d2_shift.at[i, m, n].set(
-                    diff1_field(d_shift[i, n], m, dx)
+                    diff1_field(
+                        d_shift[i, n],
+                        m,
+                        dx,
+                        *get_boundary_codes(params, m),
+                    )
                 )
     # d2_shift[i, m, n] = partial_m partial_n beta^i
 
@@ -706,7 +922,12 @@ def evolve_conformal_connection(vars: BSSNVariables,
     # gamma^mn partial_m partial_n beta^i
 
     div_shift_deriv = jnp.stack(
-        [diff1_field(div_shift, m, dx) for m in range(3)],
+        [
+            diff1_field(
+                div_shift, m, dx, *get_boundary_codes(params, m)
+            )
+            for m in range(3)
+        ],
         axis=0,
     )
     # partial_m partial_n beta^n = partial_m div(beta)
@@ -729,9 +950,15 @@ def evolve_conformal_connection(vars: BSSNVariables,
     )
     # compute dt_Gamma
 
-    dGamma_dx1 = diff6_field(vars.conformal_connection, 1, params.dx)
-    dGamma_dx2 = diff6_field(vars.conformal_connection, 2, params.dx)
-    dGamma_dx3 = diff6_field(vars.conformal_connection, 3, params.dx)
+    dGamma_dx1 = diff6_field(
+        vars.conformal_connection, 1, params.dx, *get_boundary_codes(params, 0)
+    )
+    dGamma_dx2 = diff6_field(
+        vars.conformal_connection, 2, params.dx, *get_boundary_codes(params, 1)
+    )
+    dGamma_dx3 = diff6_field(
+        vars.conformal_connection, 3, params.dx, *get_boundary_codes(params, 2)
+    )
     # Gamma is shape (3, ni, nj, nk)
     # compute the 6th derivative in each direction
 
@@ -770,7 +997,12 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     # choose the lapse source term without leaving JIT-compatible control flow
 
     grad_alpha = jnp.stack(
-        [diff1_field(vars.lapse, d, dx) for d in range(3)],
+        [
+            diff1_field(
+                vars.lapse, d, dx, *get_boundary_codes(params, d)
+            )
+            for d in range(3)
+        ],
         axis=0,
     )
     # first derivatives of the lapse
@@ -778,9 +1010,15 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     advection_term = jnp.einsum('m...,m...->...', vars.shift, grad_alpha)
     # advect the lapse with the shift
 
-    dalpha_dx1 = diff6_field(vars.lapse, 0, params.dx)
-    dalpha_dx2 = diff6_field(vars.lapse, 1, params.dx)
-    dalpha_dx3 = diff6_field(vars.lapse, 2, params.dx)
+    dalpha_dx1 = diff6_field(
+        vars.lapse, 0, params.dx, *get_boundary_codes(params, 0)
+    )
+    dalpha_dx2 = diff6_field(
+        vars.lapse, 1, params.dx, *get_boundary_codes(params, 1)
+    )
+    dalpha_dx3 = diff6_field(
+        vars.lapse, 2, params.dx, *get_boundary_codes(params, 2)
+    )
     # compute the 6th derivative in each direction
 
     dissipation_term = params.nu / 64 * params.dx**5 * (dalpha_dx1 + dalpha_dx2 + dalpha_dx3)
@@ -805,7 +1043,7 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     shift = vars.shift
     # unpack the shift vector
 
-    grad_shift = compute_shift_derivatives(shift, params.dx)
+    grad_shift = compute_shift_derivatives(shift, params)
     # grad_shift[i, j] = partial_j beta^i
 
     advection_term = jnp.einsum('j...,ij...->i...', shift, grad_shift)
@@ -819,9 +1057,15 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
 
     dt_beta = gamma_driver_term + advection_term + damping_term
 
-    dbeta_dx1 = diff6_field(shift, 1, params.dx)
-    dbeta_dx2 = diff6_field(shift, 2, params.dx)
-    dbeta_dx3 = diff6_field(shift, 3, params.dx)
+    dbeta_dx1 = diff6_field(
+        shift, 1, params.dx, *get_boundary_codes(params, 0)
+    )
+    dbeta_dx2 = diff6_field(
+        shift, 2, params.dx, *get_boundary_codes(params, 1)
+    )
+    dbeta_dx3 = diff6_field(
+        shift, 3, params.dx, *get_boundary_codes(params, 2)
+    )
     # beta is shape (3, ni, nj, nk)
     # compute the 6th derivative in each direction
 

@@ -9,7 +9,10 @@ from JAX_BSSN.tensor_algebra import (
     invert_3x3_metric,
     traceless_part,
 )
-from JAX_BSSN.boundaries import apply_supergaussian_boundaries
+from JAX_BSSN.boundaries import (
+    apply_sommerfeld_boundaries,
+    apply_supergaussian_boundaries,
+)
 from jax import jit
 import jax
 
@@ -26,6 +29,25 @@ def evolve_shift_or_freeze(vars: BSSNVariables, params: BSSNParameters):
         lambda _: 0.0 * vars.shift,
         operand=None,
     )
+
+
+@jit
+def compute_bssn_rhs(
+    vars: BSSNVariables, params: BSSNParameters
+) -> BSSNVariables:
+    """Assemble the bulk BSSN RHS and apply active Sommerfeld faces once."""
+
+    rhs = BSSNVariables(
+        conformal_metric=evolve_conformal_metric(vars, params),
+        conformal_factor=evolve_conformal_factor(vars, params),
+        traceless_K=evolve_traceless_extrinsic_curvature(vars, params),
+        trace_K=evolve_trace_extrinsic_curvature(vars, params),
+        conformal_connection=evolve_conformal_connection(vars, params),
+        lapse=evolve_lapse(vars, params),
+        shift=evolve_shift_or_freeze(vars, params),
+    )
+
+    return apply_sommerfeld_boundaries(vars, rhs, params)
 
 
 @jit
@@ -98,15 +120,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     vars = enforce_boundaries_and_trace_free_A(vars, params)
     
     # k1 time derivatives
-    dt_gamma = evolve_conformal_metric(vars, params)
-    dt_W = evolve_conformal_factor(vars, params)
-    dt_A = evolve_traceless_extrinsic_curvature(vars, params)
-    dt_K = evolve_trace_extrinsic_curvature(vars, params)
-    dt_Gamma = evolve_conformal_connection(vars, params)
-    dt_alpha = evolve_lapse(vars, params)
-    dt_beta = evolve_shift_or_freeze(vars, params)
-
-    k1 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
+    k1 = compute_bssn_rhs(vars, params)
 
     # k2 - midpoint with k1
     mid_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
@@ -120,15 +134,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     ), params)
 
     # k2 time derivatives
-    dt_gamma = evolve_conformal_metric(mid_vars, params)
-    dt_W = evolve_conformal_factor(mid_vars, params)
-    dt_A = evolve_traceless_extrinsic_curvature(mid_vars, params)
-    dt_K = evolve_trace_extrinsic_curvature(mid_vars, params)
-    dt_Gamma = evolve_conformal_connection(mid_vars, params)
-    dt_alpha = evolve_lapse(mid_vars, params)
-    dt_beta = evolve_shift_or_freeze(mid_vars, params)
-
-    k2 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
+    k2 = compute_bssn_rhs(mid_vars, params)
 
     # k3 - midpoint with k2
     mid_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
@@ -142,15 +148,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     ), params)
 
     # k3 time derivatives
-    dt_gamma = evolve_conformal_metric(mid_vars, params)
-    dt_W = evolve_conformal_factor(mid_vars, params)
-    dt_A = evolve_traceless_extrinsic_curvature(mid_vars, params)
-    dt_K = evolve_trace_extrinsic_curvature(mid_vars, params)
-    dt_Gamma = evolve_conformal_connection(mid_vars, params)
-    dt_alpha = evolve_lapse(mid_vars, params)
-    dt_beta = evolve_shift_or_freeze(mid_vars, params)
-
-    k3 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
+    k3 = compute_bssn_rhs(mid_vars, params)
 
     # k4 - endpoint with k3
     end_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
@@ -164,15 +162,7 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     ), params)
 
     # k4 time derivatives
-    dt_gamma = evolve_conformal_metric(end_vars, params)
-    dt_W = evolve_conformal_factor(end_vars, params)
-    dt_A = evolve_traceless_extrinsic_curvature(end_vars, params)
-    dt_K = evolve_trace_extrinsic_curvature(end_vars, params)
-    dt_Gamma = evolve_conformal_connection(end_vars, params)
-    dt_alpha = evolve_lapse(end_vars, params)
-    dt_beta = evolve_shift_or_freeze(end_vars, params)
-
-    k4 = [dt_gamma, dt_W, dt_A, dt_K, dt_Gamma, dt_alpha, dt_beta]
+    k4 = compute_bssn_rhs(end_vars, params)
 
     # Final RK4 update
     new_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(

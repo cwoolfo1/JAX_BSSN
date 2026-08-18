@@ -71,7 +71,7 @@ class TestShiftEvolution(unittest.TestCase):
             axis=0,
         )
 
-        d_beta = compute_shift_derivatives(beta, self.dx)
+        d_beta = compute_shift_derivatives(beta, self.params)
 
         self.assertEqual(d_beta.shape, (3, 3) + self.shape)
         np.testing.assert_allclose(d_beta[0, 0], jnp.cos(self.X), atol=6.0e-5)
@@ -101,7 +101,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_gamma = evolve_conformal_metric(vars, self.params)
 
-        d_beta = compute_shift_derivatives(beta, self.dx)
+        d_beta = compute_shift_derivatives(beta, self.params)
         div_beta = d_beta[0, 0] + d_beta[1, 1] + d_beta[2, 2]
         expected = jnp.zeros((3, 3) + self.shape)
         for i in range(3):
@@ -126,7 +126,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_Gamma = evolve_conformal_connection(vars, self.params)
 
-        d_beta = compute_shift_derivatives(beta, self.dx)
+        d_beta = compute_shift_derivatives(beta, self.params)
         div_beta = d_beta[0, 0] + d_beta[1, 1] + d_beta[2, 2]
         expected = jnp.zeros((3,) + self.shape)
         for i in range(3):
@@ -234,7 +234,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_beta = evolve_shift(vars, self.params)
 
-        d_beta = compute_shift_derivatives(beta, self.dx)
+        d_beta = compute_shift_derivatives(beta, self.params)
         advection = jnp.einsum("j...,ij...->i...", beta, d_beta)
         expected = (
             self.params.g * Gamma
