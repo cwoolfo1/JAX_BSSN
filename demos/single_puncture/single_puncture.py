@@ -1,17 +1,38 @@
 """Build and briefly evolve a single Schwarzschild puncture."""
 
 import math
+from pathlib import Path
 
 import jax
 
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
+import numpy as np
 from tqdm import tqdm
 
 from JAX_BSSN.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolve import rk4_step
+
+
+def save_snapshot(
+    vars: BSSNVariables,
+    time: float,
+    step: int,
+    output_dir: Path,
+) -> None:
+    """Save one synchronized BSSN state as NumPy arrays."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    jax.block_until_ready(vars)
+
+    np.save(output_dir / f"time_step_{step:06d}.npy", np.asarray(time))
+    for field_name, field in zip(BSSNVariables._fields, vars):
+        np.save(
+            output_dir / f"{field_name}_step_{step:06d}.npy",
+            np.asarray(field),
+        )
 
 
 def single_puncture_data(
@@ -25,9 +46,6 @@ def single_puncture_data(
 ) -> tuple[jnp.ndarray, BSSNVariables]:
     """Return the radius and time-symmetric BSSN data for one puncture."""
 
-    if Nx % 2 != 0 or Ny % 2 != 0 or Nz % 2 != 0:
-        raise ValueError("Nx, Ny, and Nz must be even so R=0 lies between grid cells")
-
     dx = x_wind / Nx
     dy = y_wind / Ny
     dz = z_wind / Nz
@@ -35,14 +53,22 @@ def single_puncture_data(
     if not (math.isclose(dx, dy) and math.isclose(dx, dz)):
         raise ValueError("x_wind/Nx, y_wind/Ny, and z_wind/Nz must be equal")
 
-    # With an even cell count the origin is the shared vertex between eight
-    # cell centers. The coordinate endpoints are half a grid cell inside the
-    # specified cell-face domain.
+    # The coordinate endpoints are half a grid cell inside the specified
+    # cell-face domain. For an odd cell count, offset the puncture by half a
+    # cell so it remains at a vertex shared by eight cells.
     x = (jnp.arange(Nx, dtype=jnp.float64) - (Nx - 1) / 2.0) * dx
     y = (jnp.arange(Ny, dtype=jnp.float64) - (Ny - 1) / 2.0) * dy
     z = (jnp.arange(Nz, dtype=jnp.float64) - (Nz - 1) / 2.0) * dz
     X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
-    R = jnp.sqrt(X**2 + Y**2 + Z**2)
+
+    puncture_x = 0.5 * dx if Nx % 2 else 0.0
+    puncture_y = 0.5 * dy if Ny % 2 else 0.0
+    puncture_z = 0.5 * dz if Nz % 2 else 0.0
+    R = jnp.sqrt(
+        (X - puncture_x) ** 2
+        + (Y - puncture_y) ** 2
+        + (Z - puncture_z) ** 2
+    )
 
     # Time-symmetric Schwarzschild data with W = psi**(-2). The conformal
     # metric is Cartesian and the physical metric is gamma_ij = W**(-2) delta_ij.
@@ -71,19 +97,22 @@ def main():
     """Run a short moving-puncture-style evolution on a Cartesian grid."""
 
     mass = 1.0
-    x_wind = 20.0 * mass
-    y_wind = 20.0 * mass
-    z_wind = 20.0 * mass
-    Nx = 160
-    Ny = 160
-    Nz = 160
-    cfl = 0.2
-    num_steps = 10
+    x_wind = 16.0 * mass
+    y_wind = 16.0 * mass
+    z_wind = 16.0 * mass
+    Nx = 129
+    Ny = 129
+    Nz = 129
+    cfl = 0.25
+    final_time = 5.0 * mass
+    snapshot_interval = 10
+    output_dir = Path("output")
 
     dx = x_wind / Nx
     dy = y_wind / Ny
     dz = z_wind / Nz
-    dt = cfl * dx
+    num_steps = math.ceil(final_time / (cfl * dx))
+    dt = final_time / num_steps
 
     R, vars = single_puncture_data(
         mass=mass,
@@ -102,7 +131,7 @@ def main():
     params = BSSNParameters(
         eta=2.0,
         kappa=0.002,
-        nu=0.002,
+        nu=0.05,
         g=0.75,
         dx=dx,
         dt=dt,
@@ -117,6 +146,9 @@ def main():
     )
 
     minimum_radius = float(jnp.min(R))
+    puncture_x = 0.5 * dx if Nx % 2 else 0.0
+    puncture_y = 0.5 * dy if Ny % 2 else 0.0
+    puncture_z = 0.5 * dz if Nz % 2 else 0.0
     expected_minimum_radius = math.sqrt(dx**2 + dy**2 + dz**2) / 2.0
     samples_origin = bool(jnp.any(R == 0.0))
     initial_fields_finite = all(
@@ -135,7 +167,18 @@ def main():
         f"Grid = ({Nx}, {Ny}, {Nz}), "
         f"spacing = ({dx:.6f}, {dy:.6f}, {dz:.6f})"
     )
-    print(f"CFL = {cfl:.6f}, dt = {dt:.6f}")
+    print(
+        "Puncture location = "
+        f"({puncture_x:.12f}, {puncture_y:.12f}, {puncture_z:.12f})"
+    )
+    print(
+        f"CFL <= {cfl:.6f}, dt = {dt:.6f}, "
+        f"steps = {num_steps}, final time = {final_time:.6f}"
+    )
+    print(
+        f"Snapshots = {output_dir}/ every {snapshot_interval} steps "
+        "plus the initial and final states"
+    )
     print(
         f"Minimum R = {minimum_radius:.12f} "
         f"(expected {expected_minimum_radius:.12f})"
@@ -172,6 +215,7 @@ def main():
             f"lapse={float(initial_vars.lapse[index]):.12f}"
         )
 
+    save_snapshot(vars, time=0.0, step=0, output_dir=output_dir)
     del R, initial_vars
 
     progress_bar = tqdm(
@@ -192,6 +236,9 @@ def main():
             max_shift=f"{maximum_shift:.6e}",
         )
 
+        if step % snapshot_interval == 0 or step == num_steps:
+            save_snapshot(vars, time=step * dt, step=step, output_dir=output_dir)
+
     final_fields_finite = all(
         bool(jnp.all(jnp.isfinite(field))) for field in vars
     )
@@ -208,7 +255,7 @@ def main():
     lapse_slice_1D = vars.lapse[center_x, center_y, :]
     shift_slice_1D = vars.shift[center_x, center_y, :]
     conformal_factor_slice_1D = vars.conformal_factor[center_x, center_y, :]
-    grid_z = jnp.linspace(-z_wind / 2.0, z_wind / 2.0, Nz)
+    grid_z = (jnp.arange(Nz, dtype=jnp.float64) - (Nz - 1) / 2.0) * dz
 
     import matplotlib.pyplot as plt
     plt.figure(figsize=(10, 6))
