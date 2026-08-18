@@ -178,7 +178,6 @@ def compute_W2_ricci(vars: BSSNVariables,
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
     conformal_connection = vars.conformal_connection
     W = vars.conformal_factor
-    shape = conformal_metric.shape[2:]
 
     metric_derivs = jnp.stack( [diff1_field(conformal_metric, d+2, dx) for d in range(3)], axis=0) 
     # shape (3, 3, 3, ni, nj, nk)
@@ -187,15 +186,17 @@ def compute_W2_ricci(vars: BSSNVariables,
     christoffel_first  = christoffel_symbols_first_kind(metric_derivs)
     christoffel_second = christoffel_symbols_second_kind(inv_conformal_metric, metric_derivs)
 
-    mixed_derivatives = jnp.zeros(
-        (3, 3, 3, 3) + shape, dtype=conformal_metric.dtype
-    )
+    # Contract each mixed derivative as it is formed. This preserves the
+    # composed first-derivative stencil without materializing the full tensor.
+    term_1 = jnp.zeros_like(conformal_metric)
     for m in range(3):
         for n in range(3):
-            mixed_derivatives = mixed_derivatives.at[m, n, ...].set(
-            diff1_field( metric_derivs[m, ...], n+2, dx))
-        
-    term_1 = -0.5 * jnp.einsum('mn...,mnij...->ij...', inv_conformal_metric, mixed_derivatives)
+            metric_second_derivative = diff1_field(
+                metric_derivs[m, ...], n + 2, dx
+            )
+            term_1 = term_1 - 0.5 * (
+                inv_conformal_metric[m, n] * metric_second_derivative
+            )
     # compute first term of Ricci tensor
 
     connection_derivs = jnp.stack( [diff1_field(conformal_connection, d+1, dx) for d in range(3)], axis=0)
