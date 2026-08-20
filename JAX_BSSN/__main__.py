@@ -7,14 +7,17 @@ BSSN formulation with JAX for high-performance computation.
 
 import argparse
 import time
+from contextlib import nullcontext
 
 import jax
 from tqdm import tqdm
 
-from JAX_BSSN.bssn import BSSNParameters
+from JAX_BSSN.bssn import BSSNParameters, compute_momentum_constraint
+from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
 from JAX_BSSN.errors import (
     compute_all_constraints,
     compute_constraint_norms,
+    compute_hamiltonian_constraint,
     print_constraint_summary,
     monitor_simulation_health,
 )
@@ -34,6 +37,7 @@ def run_simulation(
     final_time: float = 1.0,
     plot_interval: float = 0.1,
     save_interval: float = 0.05,
+    openpmd_output=None,
     verbose: bool = True,
 ):
     """
@@ -44,7 +48,8 @@ def run_simulation(
         grid_size: Grid size (cubic grid)
         final_time: Final simulation time
         plot_interval: Time interval for plotting
-        save_interval: Time interval for saving data
+        save_interval: Time interval between openPMD output iterations
+        openpmd_output: Optional openPMD series filename
         verbose: Whether to print progress
     """
     if verbose:
@@ -105,21 +110,83 @@ def run_simulation(
 
     constraint_history = []
 
+    output_every = max(1, int(round(save_interval / dt)))
+    first_grid_point = -(grid_size - 1) * dx / 2.0
+    writer_context = nullcontext()
+    if openpmd_output is not None:
+        writer_context = OpenPMDWriter(
+            openpmd_output,
+            grid_spacing=(dx, dx, dx),
+            grid_global_offset=(first_grid_point,) * 3,
+            grid_position=(0.0, 0.0, 0.0),
+            dt=dt,
+            ghost_cells=0,
+        )
+
     if verbose:
         print("Starting evolution...")
+        if openpmd_output is not None:
+            print(
+                f"openPMD output: {writer_context.filename} "
+                f"every {output_every} step(s)"
+            )
 
     start_wall_time = time.time()
 
-    for t in tqdm(range(Nt)):
-        vars = rk4_step(vars, bssn_params)
+    with writer_context as writer:
+        if writer is not None:
+            hamiltonian = compute_hamiltonian_constraint(vars, bssn_params)
+            momentum = compute_momentum_constraint(vars, bssn_params)
+            writer.write(
+                {
+                    "lapse": vars.lapse,
+                    "shift": tuple(vars.shift[i] for i in range(3)),
+                    "K": vars.trace_K,
+                    "W": vars.conformal_factor,
+                    "hamiltonian_constraint": hamiltonian,
+                    "momentum_constraint": tuple(momentum[i] for i in range(3)),
+                },
+                step=0,
+                time=0.0,
+            )
 
-        step += 1
+        for t in tqdm(range(Nt)):
+            vars = rk4_step(vars, bssn_params)
 
-        if step % 20 == 0:
+            step += 1
             current_time = step * dt
-            violations = compute_all_constraints(vars, bssn_params)
-            norms = compute_constraint_norms(violations)
-            constraint_history.append((current_time, norms))
+            save_openpmd = writer is not None and (
+                step % output_every == 0 or step == Nt
+            )
+
+            violations = None
+            if step % 20 == 0:
+                violations = compute_all_constraints(vars, bssn_params)
+                norms = compute_constraint_norms(violations)
+                constraint_history.append((current_time, norms))
+
+            if save_openpmd:
+                if violations is None:
+                    hamiltonian = compute_hamiltonian_constraint(vars, bssn_params)
+                    momentum = compute_momentum_constraint(vars, bssn_params)
+                else:
+                    hamiltonian = violations.hamiltonian
+                    momentum = violations.momentum
+
+                writer.write(
+                    {
+                        "lapse": vars.lapse,
+                        "shift": tuple(vars.shift[i] for i in range(3)),
+                        "K": vars.trace_K,
+                        "W": vars.conformal_factor,
+                        "hamiltonian_constraint": hamiltonian,
+                        "momentum_constraint": tuple(
+                            momentum[i] for i in range(3)
+                        ),
+                    },
+                    step=step,
+                    time=current_time,
+                )
 
     wall_time = time.time() - start_wall_time
 
@@ -157,6 +224,14 @@ def main():
     parser.add_argument(
         "--save-interval", type=float, default=0.05, help="Time interval for saving data"
     )
+    parser.add_argument(
+        "--openpmd-output",
+        default=None,
+        help=(
+            "Write a synchronous openPMD series to this filename using "
+            "--save-interval as the cadence"
+        ),
+    )
     parser.add_argument("--quiet", action="store_true", help="Suppress verbose output")
 
     args = parser.parse_args()
@@ -167,6 +242,7 @@ def main():
         final_time=args.final_time,
         plot_interval=args.plot_interval,
         save_interval=args.save_interval,
+        openpmd_output=args.openpmd_output,
         verbose=not args.quiet,
     )
 

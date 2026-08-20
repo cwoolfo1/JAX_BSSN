@@ -17,10 +17,11 @@ dependencies = [
     "numpy",
     "scipy",
     "matplotlib",
+    "openPMD-api",
 ]
 
 [tool.setuptools]
-packages = ["JAX_BSSN"]
+packages = ["JAX_BSSN", "JAX_BSSN.diagnostics"]
 
 [project.scripts]
 JAX_BSSN = "JAX_BSSN.__main__:main"

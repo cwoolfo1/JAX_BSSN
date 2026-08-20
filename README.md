@@ -51,6 +51,19 @@ The code simulates gravitational wave evolution using the BSSN formulation. Key 
 - Initial data type (gravitational waves, black holes, etc.)
 - Boundary conditions
 
+To write synchronous Cartesian mesh diagnostics as one HDF5 openPMD series:
+
+```bash
+python -m JAX_BSSN \
+    --initial-data gauge_wave \
+    --save-interval 0.1 \
+    --openpmd-output output/bssn.h5
+```
+
+The series contains lapse, shift, K, W, and the spatially resolved Hamiltonian
+and momentum constraints. The existing `--save-interval` option controls the
+openPMD cadence.
+
 ## Performance
 
 All computationally intensive operations are JIT-compiled with JAX for near-C++ performance while maintaining Python's readability and ease of use.
