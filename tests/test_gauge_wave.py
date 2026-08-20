@@ -1,14 +1,11 @@
 import jax.numpy as jnp
 import unittest
-from scipy import stats
 
 from JAX_BSSN.evolve import rk4_step
 from JAX_BSSN.bssn import (BSSNVariables, BSSNParameters)
 from JAX_BSSN.tensor_algebra import (invert_3x3_metric, christoffel_symbols_second_kind)
 from JAX_BSSN.derivatives import (diff1_field)
 from JAX_BSSN.errors import (compute_hamiltonian_constraint)
-from JAX_BSSN.derivatives import (diff1_field)
-from JAX_BSSN.tensor_algebra import (invert_3x3_metric, christoffel_symbols_second_kind)
 
 class TestGaugeWave(unittest.TestCase):
 
@@ -28,7 +25,6 @@ class TestGaugeWave(unittest.TestCase):
 
         X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
         H = 0.1 * jnp.sin(2 * jnp.pi * X )
-        dHdt = -2 * jnp.pi * 0.1 * jnp.sin(2 * jnp.pi * X / x_wind)
         g_00 = -1 * (1 - H)
         g_11 = 1 - H
         g_22 = 1.0 * jnp.ones_like(H)
@@ -71,19 +67,19 @@ class TestGaugeWave(unittest.TestCase):
         initial_shift = jnp.zeros(shape=(3,nx,nx,nx) )
 
         derivs = jnp.stack( [diff1_field(initial_conformal_metric, d+2, dx) for d in range(3)], axis=0)
-        inv_metric = invert_3x3_metric(initial_conformal_metric)
-        christoffel_2 = christoffel_symbols_second_kind(inv_metric, derivs)
+        inv_conformal_metric = invert_3x3_metric(initial_conformal_metric)
+        christoffel_2 = christoffel_symbols_second_kind(inv_conformal_metric, derivs)
         # compute Christoffel symbols for initial conformal metric
 
-        inv_conformal_metric = invert_3x3_metric(initial_conformal_metric)
         initial_conformal_connection = jnp.einsum('mn..., imn... -> i...', inv_conformal_metric, christoffel_2)
         # compute initial conformal connection functions
 
         extrinsic_curvature = jnp.zeros_like(induced_metric)
         extrinsic_curvature = extrinsic_curvature.at[0,0].set( -0.1*jnp.pi*jnp.cos(2*jnp.pi*X) / initial_lapse )
-        trace_extrinsic_curvature = jnp.einsum('mn..., mn... -> ...', inv_metric, extrinsic_curvature)
-        traceless_extrinsic_curvature = conformal_factor**2 * ( extrinsic_curvature - initial_conformal_metric * trace_extrinsic_curvature / 3 )
-        # intitial extrinsic curvature
+        inv_induced_metric = invert_3x3_metric(induced_metric)
+        trace_extrinsic_curvature = jnp.einsum('mn..., mn... -> ...', inv_induced_metric, extrinsic_curvature)
+        traceless_extrinsic_curvature = conformal_factor**2 * ( extrinsic_curvature - induced_metric * trace_extrinsic_curvature / 3 )
+        # compute K and conformal A_ij using the physical spatial metric
 
         vars = BSSNVariables(
             conformal_metric=initial_conformal_metric,
@@ -152,7 +148,6 @@ class TestGaugeWave(unittest.TestCase):
 
             X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
             H = 0.1 * jnp.sin(2 * jnp.pi * X )
-            dHdt = -2 * jnp.pi * 0.1 * jnp.sin(2 * jnp.pi * X / x_wind)
             g_00 = -1 * (1 - H)
             g_11 = 1 - H
             g_22 = 1.0 * jnp.ones_like(H)
@@ -195,19 +190,19 @@ class TestGaugeWave(unittest.TestCase):
             initial_shift = jnp.zeros(shape=(3,nx,nx,nx) )
 
             derivs = jnp.stack( [diff1_field(initial_conformal_metric, d+2, dx) for d in range(3)], axis=0)
-            inv_metric = invert_3x3_metric(initial_conformal_metric)
-            christoffel_2 = christoffel_symbols_second_kind(inv_metric, derivs)
+            inv_conformal_metric = invert_3x3_metric(initial_conformal_metric)
+            christoffel_2 = christoffel_symbols_second_kind(inv_conformal_metric, derivs)
             # compute Christoffel symbols for initial conformal metric
 
-            inv_conformal_metric = invert_3x3_metric(initial_conformal_metric)
             initial_conformal_connection = jnp.einsum('mn..., imn... -> i...', inv_conformal_metric, christoffel_2)
             # compute initial conformal connection functions
 
             extrinsic_curvature = jnp.zeros_like(induced_metric)
             extrinsic_curvature = extrinsic_curvature.at[0,0].set( -0.1*jnp.pi*jnp.cos(2*jnp.pi*X) / initial_lapse )
-            trace_extrinsic_curvature = jnp.einsum('mn..., mn... -> ...', inv_metric, extrinsic_curvature)
-            traceless_extrinsic_curvature = conformal_factor**2 * ( extrinsic_curvature - initial_conformal_metric * trace_extrinsic_curvature / 3 )
-            # intitial extrinsic curvature
+            inv_induced_metric = invert_3x3_metric(induced_metric)
+            trace_extrinsic_curvature = jnp.einsum('mn..., mn... -> ...', inv_induced_metric, extrinsic_curvature)
+            traceless_extrinsic_curvature = conformal_factor**2 * ( extrinsic_curvature - induced_metric * trace_extrinsic_curvature / 3 )
+            # compute K and conformal A_ij using the physical spatial metric
 
             vars = BSSNVariables(
                 conformal_metric=initial_conformal_metric,
@@ -261,41 +256,30 @@ class TestGaugeWave(unittest.TestCase):
             
             return g00_error, g11_error, g22_error, cf_error
             
-        nx_values = [30, 50, 70]
-        dxs       = jnp.asarray([1.0/nx for nx in nx_values])
-        # define resolutions to test
+        coarse_errors = run_simulation(16)
+        fine_errors = run_simulation(32)
+        orders = jnp.log2(
+            jnp.asarray(coarse_errors) / jnp.asarray(fine_errors)
+        )
+        # The fine mesh doubles the resolution in every direction.
 
-        g00_errors = []
-        g11_errors = []
-        g22_errors = []
-        cf_errors  = []
-
-        for nx in nx_values:
-            g00_, g11_, g22_, cf_ = run_simulation(nx)
-            g00_errors.append( g00_ )
-            g11_errors.append( g11_ )
-            g22_errors.append( g22_ )
-            cf_errors.append(  cf_  )
-        g00_errors = jnp.asarray(g00_errors)
-        g11_errors = jnp.asarray(g11_errors)
-        g22_errors = jnp.asarray(g22_errors)
-        cf_errors  = jnp.asarray(cf_errors)
-        # run simulations and collect errors
-
-        res_00 = stats.linregress(jnp.log(dxs), jnp.log(g00_errors))
-        slope_00 = jnp.abs( res_00.slope )
-
-        res_11 = stats.linregress(jnp.log(dxs), jnp.log(g11_errors))
-        slope_11 = jnp.abs( res_11.slope )
-
-        res_22 = stats.linregress(jnp.log(dxs), jnp.log(g22_errors))
-        slope_22 = jnp.abs( res_22.slope )
-
-        res_cf = stats.linregress(jnp.log(dxs), jnp.log(cf_errors))
-        slope_cf = jnp.abs( res_cf.slope )
-
-        self.assertGreater(slope_00, 3.5)
-        self.assertGreater(slope_11, 3.5)
-        self.assertGreater(slope_22, 3.5)
-        self.assertGreater(slope_cf, 3.5)
+        field_names = (
+            "conformal metric 00",
+            "conformal metric 11",
+            "conformal metric 22",
+            "conformal factor",
+        )
+        for field_name, coarse_error, fine_error, order in zip(
+            field_names, coarse_errors, fine_errors, orders
+        ):
+            with self.subTest(field=field_name):
+                self.assertGreater(
+                    order,
+                    3.8,
+                    msg=(
+                        f"{field_name} convergence order {float(order):.6f}; "
+                        f"coarse error {float(coarse_error):.6e}, "
+                        f"fine error {float(fine_error):.6e}"
+                    ),
+                )
         # Allow finite-resolution scatter around the fourth-order asymptote.
