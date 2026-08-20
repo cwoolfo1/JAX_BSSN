@@ -46,6 +46,7 @@ def diff1_field(
     dx: float,
     left_bc: int = 0,
     right_bc: int = 0,
+    mad_q: float = 1.0,
 ) -> jnp.ndarray:
     """
     Compute first derivative of entire field in given direction.
@@ -61,16 +62,29 @@ def diff1_field(
         3D array containing the derivative
     """
 
-    # Uses the stencil: (-f[i+2] + 8*f[i+1] - 8*f[i-1] + f[i-2]) / (12*dx)
+    # Blend D4 with the centered, sixth-order-accurate first derivative.  The
+    # default q=1 is exactly the historical D4 operator.
 
     field_forward1 = jnp.roll(field, -1, axis=direction)
     field_forward2 = jnp.roll(field, -2, axis=direction)
     field_backward1 = jnp.roll(field, 1, axis=direction)
     field_backward2 = jnp.roll(field, 2, axis=direction)
+    field_forward3 = jnp.roll(field, -3, axis=direction)
+    field_backward3 = jnp.roll(field, 3, axis=direction)
 
-    dfdx = 2/3 * (field_forward1 - field_backward1) / dx + \
+    d4fdx = 2/3 * (field_forward1 - field_backward1) / dx + \
             -1/12 * (field_forward2 - field_backward2) / dx
-    # Combine 2nd-order and 4th-order central differences for 4th-order accuracy
+    d6fdx = (
+        3/4 * (field_forward1 - field_backward1)
+        - 3/20 * (field_forward2 - field_backward2)
+        + 1/60 * (field_forward3 - field_backward3)
+    ) / dx
+    dfdx = jax.lax.cond(
+        mad_q == 1.0,
+        lambda _: d4fdx,
+        lambda _: mad_q * d4fdx + (1.0 - mad_q) * d6fdx,
+        operand=None,
+    )
 
     field_axis_last = jnp.moveaxis(field, direction, -1)
     derivative_axis_last = jnp.moveaxis(dfdx, direction, -1)
@@ -95,6 +109,15 @@ def diff1_field(
         derivative = derivative.at[..., 1].set(left_1)
         return derivative
 
+    # MAD's +/-3 stencil needs additional nonperiodic closures.  Until such
+    # closures are supplied, deliberately retain D4 on physical Sommerfeld
+    # axes; FMR currently uses periodic physical boundaries.
+    derivative_axis_last = jax.lax.cond(
+        (left_bc == SOMMERFELD_BC) | (right_bc == SOMMERFELD_BC),
+        lambda _: jnp.moveaxis(d4fdx, direction, -1),
+        lambda _: derivative_axis_last,
+        operand=None,
+    )
     derivative_axis_last = jax.lax.cond(
         left_bc == SOMMERFELD_BC,
         replace_left_boundary,

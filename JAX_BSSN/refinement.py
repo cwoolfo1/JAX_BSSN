@@ -4,8 +4,8 @@ This module implements one vertex-centred 2:1 patch with four guard cells.
 Six-point (degree-five) spatial prolongation supplies every RK stage, and
 coincident fine nodes are injected back after a complete step.  Both levels use
 the same fine-CFL timestep: Berger--Oliger subcycling is intentionally deferred.
-The ordinary BSSN finite differences and KO operator are used unchanged; no
-mesh-adapted stencil is introduced.
+The coarse level uses mesh-adapted first differencing while the fine level
+retains the ordinary fourth-order operator.  The KO operator is unchanged.
 """
 
 from functools import lru_cache
@@ -25,6 +25,7 @@ class FMRPatchSpec(NamedTuple):
     coarse_hi: tuple[int, int, int]
     refinement_ratio: int = 2
     ghost_width: int = 4
+    use_mad: bool = True
 
 
 
@@ -199,6 +200,13 @@ def fmr_rk4_step(coarse, fine, coarse_params: BSSNParameters,
         raise ValueError("stage-synchronous FMR requires identical timesteps")
     if fine_params.dx * 2 != coarse_params.dx:
         raise ValueError("fine dx must be coarse dx / 2")
+    # For a fourth-order leading error, q_n=(h_fine/h_n)^4.  Selecting it here
+    # keeps unigrid/default callers unchanged and makes the refinement ratio the
+    # single source of truth.
+    coarse_params = coarse_params._replace(mad_q=jnp.where(
+        spec.use_mad, (fine_params.dx / coarse_params.dx) ** 4, 1.0
+    ))
+    fine_params = fine_params._replace(mad_q=1.0)
     dt = coarse_params.dt
     matrices = _interpolation_matrices(coarse[0], spec)
     c0, f0, k1c, k1f = _stage(

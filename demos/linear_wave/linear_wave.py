@@ -80,6 +80,7 @@ def wave_error_diagnostics(
     time,
     amplitude,
     wavelength,
+    region_masks=None,
 ):
     """Measure the numerical wave against the analytic traveling wave."""
 
@@ -107,7 +108,7 @@ def wave_error_diagnostics(
         patch_spec,
     )
 
-    return {
+    diagnostics = {
         "coarse_rms": float(_rms(coarse_error, coarse_uncovered)),
         "coarse_max": float(
             _maximum_absolute(coarse_error, coarse_uncovered)
@@ -125,6 +126,25 @@ def wave_error_diagnostics(
             _rms(jnp.sqrt(jnp.sum(momentum_fine**2, axis=0)))
         ),
     }
+    if region_masks is not None:
+        fine_bulk, coarse_bulk, fine_interface, coarse_interface = region_masks
+        interface_sum = (
+            jnp.sum(jnp.where(fine_interface, fine_error**2, 0.0))
+            + jnp.sum(jnp.where(coarse_interface, coarse_error**2, 0.0))
+        )
+        interface_count = jnp.sum(fine_interface) + jnp.sum(coarse_interface)
+        diagnostics.update({
+            "fine_region_rms": float(_rms(fine_error, fine_bulk)),
+            "coarse_region_rms": float(_rms(coarse_error, coarse_bulk)),
+            "interface_region_rms": float(jnp.sqrt(interface_sum / interface_count)),
+            "fine_region_max": float(_maximum_absolute(fine_error, fine_bulk)),
+            "coarse_region_max": float(_maximum_absolute(coarse_error, coarse_bulk)),
+            "interface_region_max": float(jnp.maximum(
+                _maximum_absolute(fine_error, fine_interface),
+                _maximum_absolute(coarse_error, coarse_interface),
+            )),
+        })
+    return diagnostics
 
 
 def _print_diagnostics(step, time, diagnostics, amplitude):
@@ -154,6 +174,7 @@ def run_linear_wave(
     output_iterations=17,
     output_path=None,
     show_progress=True,
+    use_mad=True,
 ):
     """Run the stage-synchronous two-level linear-wave FMR demonstration."""
 
@@ -186,7 +207,7 @@ def run_linear_wave(
 
     patch_lo = (grid_size // 4,) * 3
     patch_hi = (3 * grid_size // 4 - 1,) * 3
-    patch_spec = FMRPatchSpec(patch_lo, patch_hi)
+    patch_spec = FMRPatchSpec(patch_lo, patch_hi, use_mad=use_mad)
     fine_X, fine_Y, fine_Z = fine_coordinates(
         patch_spec, dx_coarse, coarse_origin
     )
@@ -202,6 +223,7 @@ def run_linear_wave(
         dx_coarse,
         amplitude=amplitude,
         wavelength=wavelength,
+        mad_q=(dx_fine / dx_coarse) ** 4,
     )
     fine_variables = linear_wave_data(
         *fine_shape,
@@ -261,6 +283,32 @@ def run_linear_wave(
     coarse_uncovered[covered] = False
     coarse_uncovered = jnp.asarray(coarse_uncovered)
 
+    # Non-overlapping convergence regions.  The interface contains three active
+    # fine cells inside every patch face and two coarse cells immediately
+    # outside it.  Bulk masks exclude those bands.  Periodic physical edges
+    # need no boundary-closure exclusion.
+    fine_bulk = np.ones(fine_active_shape(patch_spec), dtype=bool)
+    fine_interface = np.zeros_like(fine_bulk)
+    for axis in range(3):
+        sl = [slice(None)] * 3
+        sl[axis] = slice(0, 3)
+        fine_interface[tuple(sl)] = True
+        sl[axis] = slice(-3, None)
+        fine_interface[tuple(sl)] = True
+    fine_bulk[fine_interface] = False
+    coarse_interface = np.zeros((grid_size,) * 3, dtype=bool)
+    for axis in range(3):
+        for lo, hi in ((patch_lo[axis] - 2, patch_lo[axis]),
+                       (patch_hi[axis] + 1, patch_hi[axis] + 3)):
+            sl = [slice(patch_lo[d], patch_hi[d] + 1) for d in range(3)]
+            sl[axis] = slice(lo, hi)
+            coarse_interface[tuple(sl)] = True
+    coarse_interface &= np.asarray(coarse_uncovered)
+    coarse_bulk = np.asarray(coarse_uncovered).copy()
+    coarse_bulk[coarse_interface] = False
+    region_masks = tuple(jnp.asarray(mask) for mask in
+                         (fine_bulk, coarse_bulk, fine_interface, coarse_interface))
+
     output_steps = tuple(
         int(step)
         for step in np.rint(
@@ -294,6 +342,7 @@ def run_linear_wave(
             time,
             amplitude,
             wavelength,
+            region_masks,
         )
         writer.write_levels(
             {

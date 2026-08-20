@@ -42,6 +42,7 @@ def radial_derivative(field: jnp.ndarray, params: BSSNParameters) -> jnp.ndarray
         params.dx,
         params.xl_bc,
         params.xr_bc,
+        params.mad_q,
     )
     dfdy = diff1_field(
         field,
@@ -49,6 +50,7 @@ def radial_derivative(field: jnp.ndarray, params: BSSNParameters) -> jnp.ndarray
         params.dx,
         params.yl_bc,
         params.yr_bc,
+        params.mad_q,
     )
     dfdz = diff1_field(
         field,
@@ -56,6 +58,7 @@ def radial_derivative(field: jnp.ndarray, params: BSSNParameters) -> jnp.ndarray
         params.dx,
         params.zl_bc,
         params.zr_bc,
+        params.mad_q,
     )
 
     X, Y, Z, r = _radial_coordinates(field.shape[-3:], params, field.dtype)

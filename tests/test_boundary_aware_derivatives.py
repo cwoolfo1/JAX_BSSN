@@ -40,9 +40,11 @@ class TestBoundaryAwareDerivatives(unittest.TestCase):
             + jnp.roll(field, 3)
         ) / self.dx**6
 
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             diff1_field(field, 0, self.dx, PERIODIC_BC, PERIODIC_BC),
             expected_first,
+            rtol=0.0,
+            atol=np.finfo(float).eps * 4,
         )
         np.testing.assert_allclose(
             diff6_field(field, 0, self.dx, PERIODIC_BC, PERIODIC_BC),

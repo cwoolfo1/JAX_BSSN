@@ -68,6 +68,7 @@ class BSSNParameters(NamedTuple):
     x_min: float = 0.0        # Coordinate at the first x grid point
     y_min: float = 0.0        # Coordinate at the first y grid point
     z_min: float = 0.0        # Coordinate at the first z grid point
+    mad_q: float = 1.0        # D4 weight in the MAD first derivative
 
 
 def get_boundary_codes(
@@ -103,7 +104,7 @@ def compute_shift_derivatives(
                         shift[i, ...],
                         j,
                         params.dx,
-                        *get_boundary_codes(params, j),
+                        *get_boundary_codes(params, j), mad_q=params.mad_q,
                     )
                     for j in range(3)
                 ],
@@ -211,7 +212,7 @@ def compute_W2_ricci(vars: BSSNVariables,
                 conformal_metric,
                 d + 2,
                 dx,
-                *get_boundary_codes(params, d),
+                *get_boundary_codes(params, d), mad_q=params.mad_q,
             )
             for d in range(3)
         ],
@@ -232,7 +233,7 @@ def compute_W2_ricci(vars: BSSNVariables,
                 metric_derivs[m, ...],
                 n + 2,
                 dx,
-                *get_boundary_codes(params, n),
+                *get_boundary_codes(params, n), mad_q=params.mad_q,
             )
             term_1 = term_1 - 0.5 * (
                 inv_conformal_metric[m, n] * metric_second_derivative
@@ -245,7 +246,7 @@ def compute_W2_ricci(vars: BSSNVariables,
                 conformal_connection,
                 d + 1,
                 dx,
-                *get_boundary_codes(params, d),
+                *get_boundary_codes(params, d), mad_q=params.mad_q,
             )
             for d in range(3)
         ],
@@ -271,7 +272,7 @@ def compute_W2_ricci(vars: BSSNVariables,
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -282,7 +283,7 @@ def compute_W2_ricci(vars: BSSNVariables,
         for j in range(3):
             dWdij = dWdij.at[i, j].set(
                 diff1_field(
-                    dWdi[i], j, dx, *get_boundary_codes(params, j)
+                    dWdi[i], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
                 )
             )
     # second derivatives of W
@@ -322,7 +323,7 @@ def compute_W2_covariant_lapse_hessian(
 
     dalphadi = jnp.stack(
         [
-            diff1_field(alpha, d, dx, *get_boundary_codes(params, d))
+            diff1_field(alpha, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -332,13 +333,13 @@ def compute_W2_covariant_lapse_hessian(
         for j in range(3):
             dalphadij = dalphadij.at[i, j].set(
                 diff1_field(
-                    dalphadi[i], j, dx, *get_boundary_codes(params, j)
+                    dalphadi[i], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
                 )
             )
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -350,7 +351,7 @@ def compute_W2_covariant_lapse_hessian(
                 conformal_metric,
                 d + 2,
                 dx,
-                *get_boundary_codes(params, d),
+                *get_boundary_codes(params, d), mad_q=params.mad_q,
             )
             for d in range(3)
         ],
@@ -399,7 +400,7 @@ def evolve_conformal_metric(vars: BSSNVariables,
                 vars.conformal_metric,
                 d + 2,
                 params.dx,
-                *get_boundary_codes(params, d),
+                *get_boundary_codes(params, d), mad_q=params.mad_q,
             )
             for d in range(3)
         ],
@@ -476,7 +477,7 @@ def evolve_conformal_factor(vars: BSSNVariables,
                 vars.conformal_factor,
                 d,
                 params.dx,
-                *get_boundary_codes(params, d),
+                *get_boundary_codes(params, d), mad_q=params.mad_q,
             )
             for d in range(3)
         ],
@@ -556,7 +557,7 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
 
     grad_K = jnp.stack(
         [
-            diff1_field(K, d, params.dx, *get_boundary_codes(params, d))
+            diff1_field(K, d, params.dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -611,7 +612,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dKdi = jnp.stack(
         [
-            diff1_field(K, d, dx, *get_boundary_codes(params, d))
+            diff1_field(K, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -620,7 +621,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -633,7 +634,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
     dA_i_up_j_dk = jnp.stack(
         [
             diff1_field(
-                A_i_up_j, d + 2, dx, *get_boundary_codes(params, d)
+                A_i_up_j, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
             )
             for d in range(3)
         ],
@@ -643,7 +644,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dA_ij_dk = jnp.stack(
         [
-            diff1_field(A_ij, d + 2, dx, *get_boundary_codes(params, d))
+            diff1_field(A_ij, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -692,7 +693,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     metric_derivs = jnp.stack(
         [
             diff1_field(
-                gamma, d + 2, dx, *get_boundary_codes(params, d)
+                gamma, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
             )
             for d in range(3)
         ],
@@ -728,7 +729,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
                 A_ij,
                 d + 2,
                 params.dx,
-                *get_boundary_codes(params, d),
+                *get_boundary_codes(params, d), mad_q=params.mad_q,
             )
             for d in range(3)
         ],
@@ -778,7 +779,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     for i in range(3):
         for j in range(3):
             dMidj = dMidj.at[i, j].set(
-                diff1_field(M[i, ...], j, dx, *get_boundary_codes(params, j))
+                diff1_field(M[i, ...], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q)
             )
         
     DjMi = dMidj - jnp.einsum('kij...,k...->ij...', christoffel_second, M)
@@ -819,7 +820,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d))
+            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -828,7 +829,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     dalphadi = jnp.stack(
         [
-            diff1_field(alpha, d, dx, *get_boundary_codes(params, d))
+            diff1_field(alpha, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -837,7 +838,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     dKdi = jnp.stack(
         [
-            diff1_field(K, d, dx, *get_boundary_codes(params, d))
+            diff1_field(K, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
             for d in range(3)
         ],
         axis=0,
@@ -860,7 +861,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
     metric_derivs = jnp.stack(
         [
             diff1_field(
-                gamma, d + 2, dx, *get_boundary_codes(params, d)
+                gamma, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
             )
             for d in range(3)
         ],
@@ -887,7 +888,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
                 vars.conformal_connection,
                 m + 1,
                 dx,
-                *get_boundary_codes(params, m),
+                *get_boundary_codes(params, m), mad_q=params.mad_q,
             )
             for m in range(3)
         ],
@@ -913,7 +914,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
                         d_shift[i, n],
                         m,
                         dx,
-                        *get_boundary_codes(params, m),
+                        *get_boundary_codes(params, m), mad_q=params.mad_q,
                     )
                 )
     # d2_shift[i, m, n] = partial_m partial_n beta^i
@@ -924,7 +925,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
     div_shift_deriv = jnp.stack(
         [
             diff1_field(
-                div_shift, m, dx, *get_boundary_codes(params, m)
+                div_shift, m, dx, *get_boundary_codes(params, m), mad_q=params.mad_q
             )
             for m in range(3)
         ],
@@ -999,7 +1000,7 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     grad_alpha = jnp.stack(
         [
             diff1_field(
-                vars.lapse, d, dx, *get_boundary_codes(params, d)
+                vars.lapse, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
             )
             for d in range(3)
         ],

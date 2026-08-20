@@ -85,10 +85,12 @@ def create_coordinate_arrays(
     return X, Y, Z
 
 
-def _compute_conformal_connection(conformal_metric: jnp.ndarray, dx: float) -> jnp.ndarray:
+def _compute_conformal_connection(
+    conformal_metric: jnp.ndarray, dx: float, mad_q: float = 1.0
+) -> jnp.ndarray:
     """Compute conformal connection functions from a conformal metric."""
     derivs = jnp.stack(
-        [diff1_field(conformal_metric, d + 2, dx) for d in range(3)], axis=0
+        [diff1_field(conformal_metric, d + 2, dx, mad_q=mad_q) for d in range(3)], axis=0
     )
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
     christoffel_2 = christoffel_symbols_second_kind(inv_conformal_metric, derivs)
@@ -281,6 +283,7 @@ def linear_wave_data(
     dx: float,
     amplitude: float = 1.0e-8,
     wavelength: float = 1.0,
+    mad_q: float = 1.0,
 ) -> BSSNVariables:
     """
     Initialize linear-wave data in Gauss coordinates from the notebook test setup.
@@ -323,7 +326,7 @@ def linear_wave_data(
         extrinsic_curvature, conformal_metric, inv_conformal_metric
     )
     trace_K = conformal_factor**2 * trace_tensor(extrinsic_curvature, inv_conformal_metric)
-    conformal_connection = _compute_conformal_connection(conformal_metric, dx)
+    conformal_connection = _compute_conformal_connection(conformal_metric, dx, mad_q)
 
     lapse = jnp.ones(shape)
     shift = jnp.zeros((3,) + shape)
