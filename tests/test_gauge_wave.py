@@ -224,13 +224,18 @@ class TestGaugeWave(unittest.TestCase):
                 kappa = 0.0,      # no momentum damping in the analytic gauge-wave check
                 g=0.0,           # Gamma driver shift parameter
                 dx=dx,           # Grid spacing
-                dt=dt         # Time step
+                dt=dt,        # Time step
+                nu=0.0,
+                zero_shift=1,
+                gauge=0,
             )
 
             initial_hamiltonian_constraint = compute_hamiltonian_constraint(vars, params)
             # compute initial Hamiltonian constraint violation
 
-            for t in range(50):
+            t_final = 1.0
+            nsteps = round(t_final / float(dt))
+            for _ in range(nsteps):
                 vars = rk4_step(vars, params)
 
             final_hamiltonian_constraint = compute_hamiltonian_constraint(vars, params)
@@ -242,10 +247,10 @@ class TestGaugeWave(unittest.TestCase):
             numerical_conformal_factor = vars.conformal_factor
             # extract numerical solutions
 
-            analytical_conformal_metric_00 = conformal_metric_analytic_00(50*dt)
-            analytical_conformal_metric_11 = conformal_metric_analytic_11(50*dt)
-            analytical_conformal_metric_22 = conformal_metric_analytic_22(50*dt)
-            analytical_conformal_factor = conformal_factor_analytic(50*dt)
+            analytical_conformal_metric_00 = conformal_metric_analytic_00(t_final)
+            analytical_conformal_metric_11 = conformal_metric_analytic_11(t_final)
+            analytical_conformal_metric_22 = conformal_metric_analytic_22(t_final)
+            analytical_conformal_factor = conformal_factor_analytic(t_final)
             # compute analytical solutions at final time
 
             g00_error = jnp.sqrt( jnp.mean( (numerical_conformal_metric_00 - analytical_conformal_metric_00)**2 ) )
@@ -277,20 +282,20 @@ class TestGaugeWave(unittest.TestCase):
         cf_errors  = jnp.asarray(cf_errors)
         # run simulations and collect errors
 
-        res_00 = stats.linregress( jnp.log(dxs), jnp.log(g00_errors) + 3*jnp.log(dxs) )
+        res_00 = stats.linregress(jnp.log(dxs), jnp.log(g00_errors))
         slope_00 = jnp.abs( res_00.slope )
 
-        res_11 = stats.linregress( jnp.log(dxs), jnp.log(g11_errors) + 3*jnp.log(dxs) )
+        res_11 = stats.linregress(jnp.log(dxs), jnp.log(g11_errors))
         slope_11 = jnp.abs( res_11.slope )
 
-        res_22 = stats.linregress( jnp.log(dxs), jnp.log(g22_errors) + 3*jnp.log(dxs) )
+        res_22 = stats.linregress(jnp.log(dxs), jnp.log(g22_errors))
         slope_22 = jnp.abs( res_22.slope )
 
-        res_cf = stats.linregress( jnp.log(dxs), jnp.log(cf_errors) + 3*jnp.log(dxs) )
+        res_cf = stats.linregress(jnp.log(dxs), jnp.log(cf_errors))
         slope_cf = jnp.abs( res_cf.slope )
 
-        self.assertGreater(slope_00, 4.0)
-        self.assertGreater(slope_11, 4.0)
-        self.assertGreater(slope_22, 4.0)
-        self.assertGreater(slope_cf, 4.0)
-        # check for at least 4th order convergence
+        self.assertGreater(slope_00, 3.5)
+        self.assertGreater(slope_11, 3.5)
+        self.assertGreater(slope_22, 3.5)
+        self.assertGreater(slope_cf, 3.5)
+        # Allow finite-resolution scatter around the fourth-order asymptote.
