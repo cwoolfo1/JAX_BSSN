@@ -7,3 +7,6 @@ tests/__pycache__/
 *.pyc
 *.ipynb
 *.gif
+*.tar.gz
+*.txt
+PKG-INFO
