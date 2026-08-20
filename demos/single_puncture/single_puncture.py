@@ -12,7 +12,12 @@ import numpy as np
 from tqdm import tqdm
 
 from JAX_BSSN.boundaries import PERIODIC_BC
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from JAX_BSSN.bssn import (
+    BSSNParameters,
+    BSSNVariables,
+    compute_momentum_constraint,
+)
+from JAX_BSSN.errors import compute_hamiltonian_constraint
 from JAX_BSSN.evolve import rk4_step
 
 
@@ -33,6 +38,26 @@ def save_snapshot(
             output_dir / f"{field_name}_step_{step:06d}.npy",
             np.asarray(field),
         )
+
+
+def write_constraint_l2(
+    constraint_file,
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    time: float,
+) -> None:
+    """Append the Hamiltonian and momentum constraint L2 norms."""
+
+    hamiltonian = compute_hamiltonian_constraint(vars, params)
+    hamiltonian_l2 = float(jnp.sqrt(jnp.mean(hamiltonian**2)))
+
+    momentum = compute_momentum_constraint(vars, params)
+    momentum_l2 = float(jnp.sqrt(jnp.mean(momentum**2)))
+
+    constraint_file.write(
+        f"{time:.16e} {hamiltonian_l2:.16e} {momentum_l2:.16e}\n"
+    )
+    constraint_file.flush()
 
 
 def single_puncture_data(
@@ -100,13 +125,14 @@ def main():
     x_wind = 16.0 * mass
     y_wind = 16.0 * mass
     z_wind = 16.0 * mass
-    Nx = 129
-    Ny = 129
-    Nz = 129
+    Nx = 64
+    Ny = 64
+    Nz = 64
     cfl = 0.25
     final_time = 5.0 * mass
     snapshot_interval = 10
     output_dir = Path("output")
+    constraint_path = output_dir / "constraint_l2.txt"
 
     dx = x_wind / Nx
     dy = y_wind / Ny
@@ -179,6 +205,7 @@ def main():
         f"Snapshots = {output_dir}/ every {snapshot_interval} steps "
         "plus the initial and final states"
     )
+    print(f"Constraint history = {constraint_path} every step")
     print(
         f"Minimum R = {minimum_radius:.12f} "
         f"(expected {expected_minimum_radius:.12f})"
@@ -215,29 +242,38 @@ def main():
             f"lapse={float(initial_vars.lapse[index]):.12f}"
         )
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     save_snapshot(vars, time=0.0, step=0, output_dir=output_dir)
-    del R, initial_vars
 
-    progress_bar = tqdm(
-        range(1, num_steps + 1),
-        desc="Evolving single puncture",
-        unit="step",
-    )
-    for step in progress_bar:
-        vars = rk4_step(vars, params)
-        jax.block_until_ready(vars)
+    with constraint_path.open("w", encoding="utf-8") as constraint_file:
+        constraint_file.write("# time hamiltonian_l2 momentum_l2\n")
+        write_constraint_l2(constraint_file, vars, params, time=0.0)
 
-        minimum_W = float(jnp.min(vars.conformal_factor))
-        minimum_lapse = float(jnp.min(vars.lapse))
-        maximum_shift = float(jnp.max(jnp.abs(vars.shift)))
-        progress_bar.set_postfix(
-            min_W=f"{minimum_W:.6e}",
-            min_lapse=f"{minimum_lapse:.6e}",
-            max_shift=f"{maximum_shift:.6e}",
+        del R, initial_vars
+
+        progress_bar = tqdm(
+            range(1, num_steps + 1),
+            desc="Evolving single puncture",
+            unit="step",
         )
+        for step in progress_bar:
+            vars = rk4_step(vars, params)
+            jax.block_until_ready(vars)
 
-        if step % snapshot_interval == 0 or step == num_steps:
-            save_snapshot(vars, time=step * dt, step=step, output_dir=output_dir)
+            time = step * dt
+            write_constraint_l2(constraint_file, vars, params, time=time)
+
+            minimum_W = float(jnp.min(vars.conformal_factor))
+            minimum_lapse = float(jnp.min(vars.lapse))
+            maximum_shift = float(jnp.max(jnp.abs(vars.shift)))
+            progress_bar.set_postfix(
+                min_W=f"{minimum_W:.6e}",
+                min_lapse=f"{minimum_lapse:.6e}",
+                max_shift=f"{maximum_shift:.6e}",
+            )
+
+            if step % snapshot_interval == 0 or step == num_steps:
+                save_snapshot(vars, time=time, step=step, output_dir=output_dir)
 
     final_fields_finite = all(
         bool(jnp.all(jnp.isfinite(field))) for field in vars
