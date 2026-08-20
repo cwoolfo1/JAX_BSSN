@@ -103,15 +103,30 @@ def gauge_wave_data(
     Returns:
         BSSN variables for the gauge wave.
     """
-    shape = (ni, nj, nk)
-    X, _, _ = create_coordinate_arrays(ni, nj, nk, dx)
+    X, Y, Z = create_coordinate_arrays(ni, nj, nk, dx)
+    return gauge_wave_analytic_state(X, Y, Z, 0.0, amplitude, wavelength)
 
+
+def gauge_wave_analytic_state(
+    X: jnp.ndarray,
+    Y: jnp.ndarray,
+    Z: jnp.ndarray,
+    t: float = 0.0,
+    amplitude: float = 0.1,
+    wavelength: float = 1.0,
+) -> BSSNVariables:
+    """Evaluate the exact harmonic gauge wave on arbitrary coordinate arrays.
+
+    This coordinate-based entry point is shared by uniform and refined grids, so
+    fine initial data are analytic rather than an interpolation of coarse data.
+    The wave propagates in the positive x direction; ``Y`` and ``Z`` determine
+    only the output shape.
+    """
+    del Y, Z
+    shape = X.shape
     d = wavelength
-
-    def H(x_: jnp.ndarray, t_: float) -> jnp.ndarray:
-        return 1.0 - amplitude * jnp.sin((2.0 * jnp.pi * (x_ - t_)) / d)
-
-    H0 = H(X, 0.0)
+    phase = (2.0 * jnp.pi * (X - t)) / d
+    H0 = 1.0 - amplitude * jnp.sin(phase)
 
     lapse = jnp.sqrt(H0)
     shift = jnp.zeros((3,) + shape)
@@ -124,7 +139,7 @@ def gauge_wave_data(
     conformal_metric = conformal_metric.at[2, 2].set(conformal_factor**2)
 
     extrinsic_curvature = jnp.zeros_like(conformal_metric)
-    K_xx = -(jnp.pi * amplitude / d) * jnp.cos((2.0 * jnp.pi * X) / d) / jnp.sqrt(H0)
+    K_xx = -(jnp.pi * amplitude / d) * jnp.cos(phase) / jnp.sqrt(H0)
     extrinsic_curvature = extrinsic_curvature.at[0, 0].set(K_xx)
 
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
@@ -135,12 +150,11 @@ def gauge_wave_data(
         conformal_factor**2 * trace_tensor(extrinsic_curvature, inv_conformal_metric)
     )
 
-    derivs = jnp.stack(
-        [diff1_field(conformal_metric, d_ + 2, dx) for d_ in range(3)], axis=0
-    )
-    christoffel_2 = christoffel_symbols_second_kind(inv_conformal_metric, derivs)
-    conformal_connection = jnp.einsum(
-        "mn..., imn... -> i...", inv_conformal_metric, christoffel_2
+    # det(gamma_tilde)=1 implies Gamma^i=-partial_j gamma_tilde^{ij}.
+    dHdx = -(2.0 * jnp.pi * amplitude / d) * jnp.cos(phase)
+    conformal_connection = jnp.zeros((3,) + shape)
+    conformal_connection = conformal_connection.at[0].set(
+        (2.0 / 3.0) * H0 ** (-5.0 / 3.0) * dHdx
     )
 
     return BSSNVariables(
