@@ -246,6 +246,12 @@ def run_linear_wave(
             patch_spec,
         )
     )
+    compute_output_fields = jax.jit(
+        lambda coarse, fine: (
+            diagnostic_fields(coarse, coarse_parameters),
+            diagnostic_fields(fine, fine_parameters),
+        )
+    )
 
     coarse_uncovered = np.ones((grid_size,) * 3, dtype=bool)
     covered = tuple(
@@ -274,9 +280,10 @@ def run_linear_wave(
     )
 
     def write_iteration(step, time):
-        jax.block_until_ready((coarse_variables, fine_variables))
-        coarse_fields = diagnostic_fields(coarse_variables, coarse_parameters)
-        fine_fields = diagnostic_fields(fine_variables, fine_parameters)
+        coarse_fields, fine_fields = compute_output_fields(
+            coarse_variables, fine_variables
+        )
+        jax.block_until_ready((coarse_fields, fine_fields))
         diagnostics = wave_error_diagnostics(
             coarse_fields,
             fine_fields,

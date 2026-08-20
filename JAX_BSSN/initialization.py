@@ -64,9 +64,21 @@ def create_coordinate_arrays(
     Returns:
         Tuple of (x, y, z) coordinate arrays
     """
-    x = jnp.arange(ni) * dx - (ni - 1) * dx / 2
-    y = jnp.arange(nj) * dx - (nj - 1) * dx / 2
-    z = jnp.arange(nk) * dx - (nk - 1) * dx / 2
+    dtype = jnp.result_type(dx, 1.0)
+    spacing = jnp.asarray(dx, dtype=dtype)
+    half = jnp.asarray(2.0, dtype=dtype)
+    x = (
+        jnp.arange(ni, dtype=dtype)
+        - jnp.asarray(ni - 1, dtype=dtype) / half
+    ) * spacing
+    y = (
+        jnp.arange(nj, dtype=dtype)
+        - jnp.asarray(nj - 1, dtype=dtype) / half
+    ) * spacing
+    z = (
+        jnp.arange(nk, dtype=dtype)
+        - jnp.asarray(nk - 1, dtype=dtype) / half
+    ) * spacing
 
     X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
 

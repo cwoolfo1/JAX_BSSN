@@ -3,7 +3,11 @@ import jax.numpy as jnp
 import numpy as np
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
-from JAX_BSSN.initialization import gauge_wave_analytic_state
+from JAX_BSSN.initialization import (
+    create_coordinate_arrays,
+    gauge_wave_analytic_state,
+    linear_wave_data,
+)
 from JAX_BSSN.refinement import (FMRPatchSpec, fill_fine_ghosts,
     fine_active_shape, fine_active_slice, fine_active_view, fine_coordinates,
     fmr_rk4_step, prolongate_to_fine, restrict_to_coarse)
@@ -14,6 +18,42 @@ jax.config.update("jax_enable_x64", True)
 SPEC = FMRPatchSpec((4, 4, 4), (9, 9, 9))
 
 
+def _reference_interpolate_axis(array, targets, axis):
+    """Original six-node gather formulation used as a regression reference."""
+    base = np.floor(targets).astype(np.int32)
+    offsets = np.arange(-2, 4, dtype=np.int32)
+    nodes = base[:, None] + offsets[None, :]
+    weights = np.ones(nodes.shape, dtype=array.dtype)
+    for k in range(6):
+        for m in range(6):
+            if k != m:
+                weights[:, k] *= (
+                    (targets - nodes[:, m])
+                    / (nodes[:, k] - nodes[:, m])
+                )
+
+    gathered = np.take(array, nodes % array.shape[axis], axis=axis)
+    shape = [1] * gathered.ndim
+    shape[axis], shape[axis + 1] = targets.size, 6
+    return np.sum(gathered * weights.reshape(shape), axis=axis + 1)
+
+
+def _reference_prolongate(array, spec):
+    result = np.asarray(array)
+    for direction in range(3):
+        target_count = (
+            fine_active_shape(spec)[direction] + 2 * spec.ghost_width
+        )
+        targets = (
+            spec.coarse_lo[direction]
+            + (np.arange(target_count) - spec.ghost_width) / 2.0
+        )
+        result = _reference_interpolate_axis(
+            result, targets, result.ndim - 3 + direction
+        )
+    return result
+
+
 def test_geometry_is_vertex_centered_with_four_guards():
     assert fine_active_shape(SPEC) == (11, 11, 11)
     X, Y, Z = fine_coordinates(SPEC, 0.1, (-0.5, -0.5, -0.5))
@@ -21,6 +61,25 @@ def test_geometry_is_vertex_centered_with_four_guards():
     np.testing.assert_allclose(X[active][:, 0, 0], -0.1 + np.arange(11) * 0.05)
     np.testing.assert_allclose(Y[active][0, :, 0], -0.1 + np.arange(11) * 0.05)
     np.testing.assert_allclose(Z[active][0, 0, :], -0.1 + np.arange(11) * 0.05)
+
+
+def test_coordinate_and_linear_wave_arrays_are_strongly_typed():
+    coarse_coordinates = create_coordinate_arrays(8, 8, 8, 0.125)
+    fine_grid = fine_coordinates(
+        FMRPatchSpec((2, 2, 2), (5, 5, 5)),
+        0.125,
+        (-0.4375,) * 3,
+    )
+    variables = linear_wave_data(8, 8, 8, 0.125)
+    float32_coordinates = create_coordinate_arrays(
+        8, 8, 8, np.float32(0.125)
+    )
+
+    assert all(not coordinate.weak_type for coordinate in coarse_coordinates)
+    assert all(not coordinate.weak_type for coordinate in fine_grid)
+    assert all(not field.weak_type for field in variables)
+    assert all(coordinate.dtype == jnp.float32
+               for coordinate in float32_coordinates)
 
 
 def test_quintic_prolongation_polynomials_and_leading_axes():
@@ -38,6 +97,29 @@ def test_quintic_prolongation_polynomials_and_leading_axes():
     np.testing.assert_allclose(prolongate_to_fine(jnp.stack([scalar, 2*scalar]), spec)[1], 2*expected)
     tensor = jnp.stack([jnp.stack([scalar, 3*scalar])])
     assert prolongate_to_fine(tensor, spec).shape == (1, 2) + expected.shape
+
+
+def test_dense_prolongation_matches_periodic_gather_reference():
+    spec = FMRPatchSpec((0, 1, 2), (2, 3, 4))
+    rng = np.random.default_rng(8147)
+
+    for dtype, tolerance in ((np.float32, 2e-6), (np.float64, 2e-13)):
+        scalar = rng.standard_normal((5, 6, 7)).astype(dtype)
+        tensor = rng.standard_normal((2, 3, 5, 6, 7)).astype(dtype)
+        interpolate = jax.jit(lambda array: prolongate_to_fine(array, spec))
+
+        np.testing.assert_allclose(
+            interpolate(jnp.asarray(scalar)),
+            _reference_prolongate(scalar, spec),
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        np.testing.assert_allclose(
+            interpolate(jnp.asarray(tensor)),
+            _reference_prolongate(tensor, spec),
+            rtol=tolerance,
+            atol=tolerance,
+        )
 
 
 def _variables(field):
