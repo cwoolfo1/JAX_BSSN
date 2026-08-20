@@ -1,4 +1,4 @@
-"""Synchronous openPMD output for global Cartesian mesh fields."""
+"""Synchronous openPMD output for Cartesian mesh fields."""
 
 from pathlib import Path
 
@@ -45,7 +45,13 @@ def _strip_ghost_cells(field_map, ghost_cells):
     return interior_fields
 
 
-def _configure_mesh(mesh, grid_spacing, grid_global_offset):
+def _configure_mesh(
+    mesh,
+    grid_spacing,
+    grid_global_offset,
+    refinement_level=None,
+    field_name=None,
+):
     mesh.geometry = io.Geometry.cartesian
     mesh.data_order = io.Data_Order.C if hasattr(io, "Data_Order") else "C"
     mesh.axis_labels = ["x", "y", "z"]
@@ -53,6 +59,9 @@ def _configure_mesh(mesh, grid_spacing, grid_global_offset):
     mesh.grid_global_offset = list(grid_global_offset)
     mesh.grid_unit_SI = 1.0
     mesh.unit_SI = 1.0
+    if refinement_level is not None:
+        mesh.set_attribute("refinementLevel", str(refinement_level))
+        mesh.set_attribute("fieldName", str(field_name))
 
 
 def _write_scalar_mesh(
@@ -62,9 +71,17 @@ def _write_scalar_mesh(
     grid_spacing,
     grid_global_offset,
     grid_position,
+    refinement_level=None,
+    field_name=None,
 ):
     mesh = iteration.meshes[name]
-    _configure_mesh(mesh, grid_spacing, grid_global_offset)
+    _configure_mesh(
+        mesh,
+        grid_spacing,
+        grid_global_offset,
+        refinement_level,
+        field_name,
+    )
 
     array = _ensure_openpmd_array(data)
     component = mesh[io.Mesh_Record_Component.SCALAR]
@@ -81,9 +98,17 @@ def _write_vector_mesh(
     grid_spacing,
     grid_global_offset,
     grid_position,
+    refinement_level=None,
+    field_name=None,
 ):
     mesh = iteration.meshes[name]
-    _configure_mesh(mesh, grid_spacing, grid_global_offset)
+    _configure_mesh(
+        mesh,
+        grid_spacing,
+        grid_global_offset,
+        refinement_level,
+        field_name,
+    )
 
     for component_name, data in zip(("x", "y", "z"), components):
         array = _ensure_openpmd_array(data)
@@ -125,36 +150,101 @@ class OpenPMDWriter:
         self.series = io.Series(str(output_path), io.Access.create)
         self.series.set_attribute("software", "JAX_BSSN")
 
-    def write(self, field_map, step, time):
-        """Write one iteration after removing ghost cells from each field."""
+    def _write_field_map(
+        self,
+        iteration,
+        field_map,
+        grid_spacing,
+        grid_global_offset,
+        grid_position,
+        ghost_cells,
+        prefix="",
+        refinement_level=None,
+    ):
+        interior_fields = _strip_ghost_cells(field_map, ghost_cells)
 
-        interior_fields = _strip_ghost_cells(field_map, self.ghost_cells)
-
-        iteration = self.series.iterations[int(step)]
-        iteration.time = float(time)
-        iteration.dt = self.dt
-        iteration.time_unit_SI = 1.0
-
-        for name, field in interior_fields.items():
+        for field_name, field in interior_fields.items():
+            name = f"{prefix}{field_name}"
             is_vector = isinstance(field, (tuple, list)) and len(field) == 3
             if is_vector:
                 _write_vector_mesh(
                     iteration,
                     name,
                     field,
-                    self.grid_spacing,
-                    self.grid_global_offset,
-                    self.grid_position,
+                    grid_spacing,
+                    grid_global_offset,
+                    grid_position,
+                    refinement_level,
+                    field_name,
                 )
             else:
                 _write_scalar_mesh(
                     iteration,
                     name,
                     field,
-                    self.grid_spacing,
-                    self.grid_global_offset,
-                    self.grid_position,
+                    grid_spacing,
+                    grid_global_offset,
+                    grid_position,
+                    refinement_level,
+                    field_name,
                 )
+
+    def _iteration(self, step, time):
+        iteration = self.series.iterations[int(step)]
+        iteration.time = float(time)
+        iteration.dt = self.dt
+        iteration.time_unit_SI = 1.0
+        return iteration
+
+    def write(self, field_map, step, time):
+        """Write one iteration after removing ghost cells from each field."""
+
+        iteration = self._iteration(step, time)
+        self._write_field_map(
+            iteration,
+            field_map,
+            self.grid_spacing,
+            self.grid_global_offset,
+            self.grid_position,
+            self.ghost_cells,
+        )
+
+        self.series.flush()
+        iteration.close()
+
+    def write_levels(self, levels, step, time):
+        """Write named Cartesian refinement levels into one iteration.
+
+        Each value in ``levels`` is a dictionary containing ``fields``,
+        ``grid_spacing``, and ``grid_global_offset``. ``ghost_cells`` and
+        ``grid_position`` are optional. Mesh records are prefixed by the level
+        name so levels with different spacing can coexist in one openPMD series.
+        """
+
+        iteration = self._iteration(step, time)
+        for level_name, level in levels.items():
+            grid_spacing = tuple(
+                float(value) for value in _as_3tuple(level["grid_spacing"])
+            )
+            grid_global_offset = tuple(
+                float(value)
+                for value in _as_3tuple(level["grid_global_offset"])
+            )
+            grid_position = tuple(
+                float(value)
+                for value in _as_3tuple(level.get("grid_position", (0.0, 0.0, 0.0)))
+            )
+
+            self._write_field_map(
+                iteration,
+                level["fields"],
+                grid_spacing,
+                grid_global_offset,
+                grid_position,
+                level.get("ghost_cells", 0),
+                prefix=f"{level_name}_",
+                refinement_level=level_name,
+            )
 
         self.series.flush()
         iteration.close()

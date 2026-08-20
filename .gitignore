@@ -9,4 +9,5 @@ tests/__pycache__/
 *.gif
 *.tar.gz
 *.txt
+demos/linear_wave/output/
 PKG-INFO
