@@ -2,9 +2,8 @@ Demos
 =====
 
 The supported physical examples are exactly gauge wave, linear wave, and
-single puncture. Each demo owns its coordinates, initial data, parameters, and
-run loop. Run commands from an editable checkout; there is no generic JAX BSSN
-CLI or initial-data dispatcher.
+single puncture. Each demo contains its own coordinates, initial data, 
+parameters, and run loop.
 
 Install demo support first:
 
@@ -23,18 +22,6 @@ RMS errors against the analytic solution at the final time.
 
    python demos/gauge_wave/gauge_wave.py
 
-For a shorter exploratory run, call its run function explicitly:
-
-.. code-block:: python
-
-   from demos.gauge_wave.gauge_wave import run_gauge_wave
-
-   state, run = run_gauge_wave(
-       grid_size=32,
-       final_time=0.1,
-       show_progress=True,
-   )
-
 The default configuration uses ``grid_size=60``, amplitude ``0.1``, wavelength
 ``1``, CFL ``1``, and one wavelength of evolution.
 
@@ -42,7 +29,7 @@ Linear wave with FMR
 --------------------
 
 The linear-wave demo evolves a plus-polarized wave through one centered 2:1
-refinement patch. It uses stage-synchronous coarse/fine RK4, coarse MAD, and
+refinement patch. It uses RK4, coarse mesh adaptive differencing stencils, and
 ordinary fourth-order fine derivatives. Diagnostics split error into native
 fine, uncovered coarse, and interface regions.
 
@@ -57,23 +44,9 @@ overlapping blocks; it does not remove root cells covered by the fine patch or
 encode native AMR nesting.
 
 Each patch is also an independent file-based openPMD series, with per-patch
-``.pmd`` helpers for ParaView. Configure the run from Python:
-
-.. code-block:: python
-
-   from demos.linear_wave.linear_wave import run_linear_wave
-
-   coarse, fine, run = run_linear_wave(
-       grid_size=16,
-       final_time=0.02,
-       output_iterations=2,
-       output_path="output/linear_wave_smoke",
-       show_progress=False,
-   )
-
-``grid_size`` must be divisible by four so the centered inclusive patch bounds
-land on coarse vertices. The demo rejects a final normalized coarse or fine
-RMS wave error at or above five percent.
+``.pmd`` helpers for ParaView. ``grid_size`` must be divisible by four so 
+the centered inclusive patch bounds land on coarse vertices. The demo rejects 
+a final normalized coarse or fine RMS wave error at or above five percent.
 
 Single puncture
 ---------------
@@ -104,12 +77,3 @@ to Matplotlib:
 
 The renderer produces lapse, shift, and conformal-factor movies from the
 synchronized snapshots.
-
-Resource expectations
----------------------
-
-The default three-dimensional runs compile substantial JAX kernels and can
-use significant memory. Start with the shorter function calls above when
-checking a new environment. Enable ``jax_enable_x64`` before constructing
-state if a custom driver requires double precision; the provided demo modules
-do this at import time.

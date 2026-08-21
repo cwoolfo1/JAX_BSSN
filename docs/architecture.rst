@@ -1,11 +1,11 @@
 Architecture
 ============
 
-JAX BSSN separates mathematical ownership from timestep orchestration and
-diagnostic side effects. The solver state is an immutable ``NamedTuple`` of
-JAX arrays. Equation functions return right-hand-side arrays; the evolution
-package decides when those functions, boundary treatments, and algebraic
-projections run.
+The overall architecture of JAX BSSN keeps time derivative equations 
+as separate pure functions, and the evolution package decides when to call them. 
+This allows future experimentation with different timestepping algorithms and 
+boundary treatments without changing the equations themselves.
+
 
 Package map
 -----------
@@ -75,24 +75,3 @@ order:
 Sommerfeld is therefore an RHS boundary treatment. Super-Gaussian damping is
 a state filter. Moving either operation across the RHS/projection boundary
 would define a different numerical algorithm.
-
-JAX execution model
--------------------
-
-The production kernels are pure functions over ``BSSNVariables`` and
-``BSSNParameters``. JAX array updates use functional ``.at[...]`` operations,
-and runtime choices such as slicing gauge, zero shift, and active boundary
-families use ``jax.lax.cond`` inside compiled code.
-
-Derivative directions are static JIT arguments because they select an array
-axis and stencil. Parameters remain scalar leaves of ``BSSNParameters``. Field
-arrays retain strong floating-point dtypes; callers should enable 64-bit JAX
-before constructing production data when double precision is required.
-
-Current boundaries
-------------------
-
-The current architecture intentionally stops at one uniform grid or one
-refinement patch. There is no hierarchy manager, dynamic regridding, multiple
-patch ownership, mesh motion, matter source system, or Berger--Oliger
-subcycling. See :doc:`fmr` for the exact implemented refinement contract.

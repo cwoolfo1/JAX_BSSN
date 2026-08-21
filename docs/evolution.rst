@@ -2,8 +2,8 @@ Evolution and boundaries
 ========================
 
 The evolution package owns the discretization and the placement of boundary
-and projection operations around the BSSN equations. See :doc:`architecture`
-for the package-level dependency flow.
+and algebraic constraint operations for the BSSN equations.
+
 
 First derivatives and MAD
 -------------------------
@@ -29,8 +29,7 @@ centered sixth-order-accurate first derivative:
 
 FMR derives the coarse value of ``q`` from the spacing ratio and forces the
 fine value to one. On a physical Sommerfeld axis, first derivatives
-deliberately retain the fourth-order operator because nonperiodic closures for
-the wider MAD stencil are not implemented.
+deliberately retain the fourth-order operator.
 
 Kreiss--Oliger dissipation
 --------------------------
@@ -91,34 +90,12 @@ corner is replaced once, independent of face ordering.
 RHS assembly
 ------------
 
-``compute_bssn_rhs`` calls the seven equation owners in ``BSSNVariables``
-field order. It then applies active Sommerfeld face replacement to the complete
-RHS exactly once.
+``compute_bssn_rhs`` calls the seven time derivatives. It then applies 
+active Sommerfeld face replacement to the complete RHS exactly once.
 
-``enforce_boundaries_and_trace_free_A`` is the state-side operation. Its order
+``enforce_boundaries_and_trace_free_A`` enforces the algebraic constraint conditions. Its order
 is fixed:
 
 1. Super-Gaussian filtering.
 2. Determinant-one conformal-metric projection.
 3. Trace-free conformal extrinsic-curvature projection.
-
-RK4 placement
--------------
-
-Classical RK4 forms ``k1``, two midpoint states, and one endpoint state. Every
-stage state is passed through the state-side operation before its RHS is
-evaluated. The weighted final state is passed through it again. Kreiss--Oliger
-dissipation is already part of each field RHS, so it follows the same RK time
-centering as the physical source terms.
-
-API reference
--------------
-
-.. automodule:: JAX_BSSN.evolution.derivatives
-   :members:
-
-.. automodule:: JAX_BSSN.evolution.boundaries
-   :members:
-
-.. automodule:: JAX_BSSN.evolution.time_evolve
-   :members:

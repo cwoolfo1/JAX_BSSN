@@ -3,11 +3,8 @@ JAX BSSN
 
 .. container:: hero
 
-   JAX BSSN is a research-oriented implementation of the Cartesian
-   Baumgarte--Shapiro--Shibata--Nakamura evolution system in JAX. It keeps the
-   evolved fields, finite-difference operators, boundary treatment, algebraic
-   projections, and fixed mesh refinement transfers visible as direct array
-   operations.
+   JAX BSSN is a autodifferentiable and jit-compiled implementation of the Cartesian
+   Baumgarte--Shapiro--Shibata--Nakamura evolution system in JAX.
 
    .. container:: hero-actions
 
@@ -15,13 +12,6 @@ JAX BSSN
       :doc:`Understand one RK4 step <evolution>`
 
 .. container:: hero-callout
-
-   **Focused for numerical-relativity researchers**
-
-   The code favors explicit equations and immutable JAX state over a large
-   framework layer. This makes it practical to inspect numerical ownership,
-   prototype changes, and verify that refinement and boundary operations stay
-   at their intended locations in the timestep.
 
 Current scope
 -------------
@@ -88,8 +78,6 @@ Contents
    fmr
    diagnostics
    demos
-   development
-   contributing
 
 Indices
 -------

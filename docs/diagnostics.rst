@@ -1,10 +1,8 @@
 Constraints and diagnostics
 ===========================
 
-Diagnostics observe solver state. They do not participate in the RK4 call
-graph, with one deliberate ownership exception: raw mathematical constraints
-live in the BSSN package because the momentum constraint is used by an
-evolution equation.
+Diagnostics include hamiltonian and momentum constraint monitoring,
+as well as plotting and openPMD output.
 
 Raw constraint fields
 ---------------------
@@ -35,17 +33,7 @@ Raw constraint fields
      - ``(Nx, Ny, Nz)`` currently
      - Placeholder returned by the current Gamma-constraint implementation.
 
-The Gamma constraint is not yet implemented and currently returns a scalar
-zero field with the lapse shape. A reported zero Gamma norm must not be
-interpreted as a computed physical residual.
 
-Reduction and reporting
------------------------
-
-``JAX_BSSN.diagnostics.constraints`` reduces raw fields to L2 and infinity
-norms, prints summaries, and provides a basic finite-value/constraint-threshold
-health check. These Python-side decisions remain outside the evolution
-equations.
 
 Plotting and NumPy snapshots
 ----------------------------
@@ -76,18 +64,3 @@ and output are established.
 ``FMRPatchSeriesWriter`` writes synchronous meshes for all FMR patches. The writer 
 is automatically configured to structure outputs in a format that is compatible with 
 easy visualization in VisIt and ParaView.
-
-API reference
--------------
-
-.. automodule:: JAX_BSSN.bssn.constraints
-   :members:
-
-.. automodule:: JAX_BSSN.diagnostics.constraints
-   :members:
-
-.. automodule:: JAX_BSSN.diagnostics.openpmd
-   :members:
-
-.. automodule:: JAX_BSSN.diagnostics.plotting
-   :members:

@@ -85,7 +85,7 @@ Shared geometry
 
 ``bssn.geometry`` reconstructs the physical metric, packs and unpacks
 symmetric tensors, and computes the curvature and lapse-Hessian sources shared
-by the extrinsic-curvature equations.
+by the extrinsic curvature equations.
 
 The physical metric uses
 
@@ -97,16 +97,15 @@ Inverse powers used during physical-metric reconstruction and conformal-
 connection evolution apply ``W_FLOOR_VALUE = 1e-12``. This protects only the
 inverse operation: the evolved ``W`` array is not clamped or overwritten.
 
-The curvature source is assembled directly as the denominator-free scaled
-tensor :math:`W^2 R_{ij}`. The lapse source is likewise assembled as
-:math:`W^2 D_iD_j\alpha`. The traceless-curvature RHS consumes these scaled
-quantities without first forming a singular unscaled tensor near a puncture.
+The traceless-curvature RHS consumes scaled quantities :math:`W^2 D_iD_j\alpha` 
+and :math:`W^2 R_{ij}` to reduce unnecessary divisons by the conformal factor. 
+These objects are computed in ``bssn.geometry`` and passed to the extrinsic 
+curvature equations.
 
 Gauge choices
 -------------
 
-``BSSNParameters.gauge`` selects the lapse source inside JIT-compatible control
-flow:
+``BSSNParameters.gauge`` selects the lapse source inside if logic:
 
 * ``0``: harmonic slicing,
   :math:`\partial_t\alpha-\beta^i\partial_i\alpha=-\alpha^2K`.
@@ -128,31 +127,4 @@ The timestep enforces
    \qquad
    \tilde{\gamma}^{ij}\tilde{A}_{ij}=0
 
-before each RHS evaluation and after the final RK4 combination. These
-projections are distinct from the raw Hamiltonian, momentum, Gamma,
-determinant, and trace constraint fields described in :doc:`diagnostics`.
-
-API reference
--------------
-
-.. automodule:: JAX_BSSN.bssn.variables
-   :members:
-   :undoc-members:
-
-.. automodule:: JAX_BSSN.bssn.geometry
-   :members:
-
-.. automodule:: JAX_BSSN.bssn.spatial_metric
-   :members:
-
-.. automodule:: JAX_BSSN.bssn.extrinsic_curvature
-   :members:
-
-.. automodule:: JAX_BSSN.bssn.conformal_connection
-   :members:
-
-.. automodule:: JAX_BSSN.bssn.shift_and_lapse
-   :members:
-
-.. automodule:: JAX_BSSN.bssn.tensor_algebra
-   :members:
+before each RHS evaluation and after the final RK4 combination.

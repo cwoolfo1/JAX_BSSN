@@ -85,24 +85,3 @@ weight is derived inside the timestep as
 
 The fine level always uses ``mad_q = 1``, the ordinary fourth-order first
 derivative.
-
-Current limitations
--------------------
-
-The following capabilities are not implemented:
-
-* Berger--Oliger time subcycling.
-* Multiple patches or refinement levels.
-* Dynamic regridding or moving boxes.
-* Flux correction or conservative cell-average restriction.
-* Inter-patch ownership and communication.
-
-These are limitations, not hidden configuration options. Splitting the module
-into hierarchy and patch abstractions is deferred until one of those features
-creates a real conceptual boundary.
-
-API reference
--------------
-
-.. automodule:: JAX_BSSN.fmr.refinement
-   :members:

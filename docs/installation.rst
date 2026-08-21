@@ -30,16 +30,6 @@ Install the test-only dependencies, including pytest and SciPy, with:
 SciPy is not a runtime solver dependency. It is currently used only by the
 derivative regression tests.
 
-Verify the package
-------------------
-
-.. code-block:: bash
-
-   python -c "import JAX_BSSN; print(JAX_BSSN.__doc__)"
-
-JAX BSSN has no generic simulation command or initial-data dispatcher. Run one
-of the explicit demo scripts described in :doc:`demos`.
-
 Documentation dependencies
 --------------------------
 
