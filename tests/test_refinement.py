@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
-from JAX_BSSN.initialization import (
+from tests.initial_data import (
     create_coordinate_arrays,
     gauge_wave_analytic_state,
     linear_wave_data,

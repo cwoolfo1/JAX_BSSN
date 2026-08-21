@@ -8,7 +8,6 @@ import numpy as np
 
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn import BSSNParameters
-from JAX_BSSN.initialization import create_coordinate_arrays, linear_wave_data
 from JAX_BSSN.fmr.refinement import (
     FMRPatchSpec,
     fine_active_shape,
@@ -16,6 +15,7 @@ from JAX_BSSN.fmr.refinement import (
     fine_coordinates,
     fmr_rk4_step,
 )
+from tests.initial_data import create_coordinate_arrays, linear_wave_data
 
 
 jax.config.update("jax_enable_x64", True)

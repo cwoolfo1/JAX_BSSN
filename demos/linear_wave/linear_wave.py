@@ -16,9 +16,15 @@ from JAX_BSSN.bssn.constraints import (
     compute_hamiltonian_constraint,
     compute_momentum_constraint,
 )
-from JAX_BSSN.bssn.variables import BSSNParameters
+from JAX_BSSN.bssn.tensor_algebra import (
+    christoffel_symbols_second_kind,
+    invert_3x3_metric,
+    trace_tensor,
+    traceless_part,
+)
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.initialization import create_coordinate_arrays, linear_wave_data
+from JAX_BSSN.evolution.derivatives import diff1_field
 from JAX_BSSN.fmr.refinement import (
     FMRPatchSpec,
     fine_active_shape,
@@ -26,6 +32,101 @@ from JAX_BSSN.fmr.refinement import (
     fine_coordinates,
     fmr_rk4_step,
 )
+
+
+def create_coordinate_arrays(
+    ni: int, nj: int, nk: int, dx: float
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Create vertex-centered Cartesian coordinates for this demonstration."""
+
+    dtype = jnp.result_type(dx, 1.0)
+    spacing = jnp.asarray(dx, dtype=dtype)
+    half = jnp.asarray(2.0, dtype=dtype)
+    x = (
+        jnp.arange(ni, dtype=dtype)
+        - jnp.asarray(ni - 1, dtype=dtype) / half
+    ) * spacing
+    y = (
+        jnp.arange(nj, dtype=dtype)
+        - jnp.asarray(nj - 1, dtype=dtype) / half
+    ) * spacing
+    z = (
+        jnp.arange(nk, dtype=dtype)
+        - jnp.asarray(nk - 1, dtype=dtype) / half
+    ) * spacing
+
+    return jnp.meshgrid(x, y, z, indexing="ij")
+
+
+def _compute_conformal_connection(
+    conformal_metric: jnp.ndarray, dx: float, mad_q: float = 1.0
+) -> jnp.ndarray:
+    """Compute conformal connection functions for the initial slice."""
+
+    derivatives = jnp.stack(
+        [
+            diff1_field(conformal_metric, direction + 2, dx, mad_q=mad_q)
+            for direction in range(3)
+        ],
+        axis=0,
+    )
+    inverse_metric = invert_3x3_metric(conformal_metric)
+    christoffel = christoffel_symbols_second_kind(inverse_metric, derivatives)
+    return jnp.einsum("mn..., imn... -> i...", inverse_metric, christoffel)
+
+
+def linear_wave_data(
+    ni: int,
+    nj: int,
+    nk: int,
+    dx: float,
+    amplitude: float = 1.0e-8,
+    wavelength: float = 1.0,
+    mad_q: float = 1.0,
+) -> BSSNVariables:
+    """Initialize plus-polarized linear-wave data in Gauss coordinates."""
+
+    shape = (ni, nj, nk)
+    X, _, _ = create_coordinate_arrays(ni, nj, nk, dx)
+
+    b0 = amplitude * jnp.sin((2.0 * jnp.pi * X) / wavelength)
+    conformal_factor = jnp.power(1.0 - b0**2, -1.0 / 6.0)
+
+    conformal_metric = jnp.zeros((3, 3) + shape)
+    conformal_metric = conformal_metric.at[0, 0].set(conformal_factor**2)
+    conformal_metric = conformal_metric.at[1, 1].set(
+        (1.0 + b0) * conformal_factor**2
+    )
+    conformal_metric = conformal_metric.at[2, 2].set(
+        (1.0 - b0) * conformal_factor**2
+    )
+
+    dbdt0 = -(2.0 * jnp.pi * amplitude / wavelength) * jnp.cos(
+        (2.0 * jnp.pi * X) / wavelength
+    )
+    extrinsic_curvature = jnp.zeros_like(conformal_metric)
+    extrinsic_curvature = extrinsic_curvature.at[1, 1].set(-0.5 * dbdt0)
+    extrinsic_curvature = extrinsic_curvature.at[2, 2].set(0.5 * dbdt0)
+
+    inverse_metric = invert_3x3_metric(conformal_metric)
+    traceless_K = conformal_factor**2 * traceless_part(
+        extrinsic_curvature, conformal_metric, inverse_metric
+    )
+    trace_K = conformal_factor**2 * trace_tensor(
+        extrinsic_curvature, inverse_metric
+    )
+
+    return BSSNVariables(
+        conformal_metric=conformal_metric,
+        conformal_factor=conformal_factor,
+        traceless_K=traceless_K,
+        trace_K=trace_K,
+        conformal_connection=_compute_conformal_connection(
+            conformal_metric, dx, mad_q
+        ),
+        lapse=jnp.ones(shape),
+        shift=jnp.zeros((3,) + shape),
+    )
 
 
 def h_plus(variables):

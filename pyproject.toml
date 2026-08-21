@@ -15,9 +15,14 @@ dependencies = [
     "jax",
     "jaxlib",
     "numpy",
-    "scipy",
     "matplotlib",
     "openPMD-api",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "scipy",
 ]
 
 [tool.setuptools]
@@ -28,6 +33,3 @@ packages = [
     "JAX_BSSN.evolution",
     "JAX_BSSN.fmr",
 ]
-
-[project.scripts]
-JAX_BSSN = "JAX_BSSN.__main__:main"
