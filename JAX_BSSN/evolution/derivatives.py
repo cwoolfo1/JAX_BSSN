@@ -15,8 +15,8 @@ from functools import partial
 # NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
 
 # Keep this module independent of the BSSN parameter and boundary modules.
-# Boundary code 2 selects the nonperiodic Sommerfeld closures.
-SOMMERFELD_BC = 2
+# Boundary code 1 selects the nonperiodic Sommerfeld closures.
+SOMMERFELD_BC = 1
 
 @jit
 def periodic_indexing(idx: int, size: int) -> int:

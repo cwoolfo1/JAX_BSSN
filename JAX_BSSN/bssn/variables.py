@@ -26,15 +26,12 @@ class BSSNParameters(NamedTuple):
     dt: float = 0.001         # Time step
     zero_shift: int = 0       # If 1, hold the shift fixed during RK stages
     gauge: int = 0            # 0 = harmonic slicing, 1 = 1+log slicing
-    xl_bc: int = 0            # x-left boundary code: 0 periodic, 1 filter, 2 Sommerfeld
-    xr_bc: int = 0            # x-right boundary code: 0 periodic, 1 filter, 2 Sommerfeld
-    yl_bc: int = 0            # y-left boundary code: 0 periodic, 1 filter, 2 Sommerfeld
-    yr_bc: int = 0            # y-right boundary code: 0 periodic, 1 filter, 2 Sommerfeld
-    zl_bc: int = 0            # z-left boundary code: 0 periodic, 1 filter, 2 Sommerfeld
-    zr_bc: int = 0            # z-right boundary code: 0 periodic, 1 filter, 2 Sommerfeld
-    bc_width: float = 8.0     # Super-Gaussian layer width in grid cells
-    bc_order: float = 4.0     # Super-Gaussian exponent
-    bc_strength: float = 1.0  # Boundary blend strength
+    xl_bc: int = 0            # x-left boundary code: 0 periodic, 1 Sommerfeld
+    xr_bc: int = 0            # x-right boundary code: 0 periodic, 1 Sommerfeld
+    yl_bc: int = 0            # y-left boundary code: 0 periodic, 1 Sommerfeld
+    yr_bc: int = 0            # y-right boundary code: 0 periodic, 1 Sommerfeld
+    zl_bc: int = 0            # z-left boundary code: 0 periodic, 1 Sommerfeld
+    zr_bc: int = 0            # z-right boundary code: 0 periodic, 1 Sommerfeld
     x_min: float = 0.0        # Coordinate at the first x grid point
     y_min: float = 0.0        # Coordinate at the first y grid point
     z_min: float = 0.0        # Coordinate at the first z grid point

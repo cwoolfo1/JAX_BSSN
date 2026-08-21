@@ -12,7 +12,6 @@ import numpy as np
 from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SOMMERFELD_BC,
-    SUPERGAUSSIAN_BC,
 )
 from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 
@@ -52,21 +51,6 @@ class TestBoundaryAwareDerivatives(unittest.TestCase):
             rtol=1.0e-13,
             atol=1.0e-10,
         )
-        np.testing.assert_array_equal(
-            diff1_field(
-                field, 0, self.dx, SUPERGAUSSIAN_BC, SUPERGAUSSIAN_BC
-            ),
-            expected_first,
-        )
-        np.testing.assert_allclose(
-            diff6_field(
-                field, 0, self.dx, SUPERGAUSSIAN_BC, SUPERGAUSSIAN_BC
-            ),
-            expected_sixth,
-            rtol=1.0e-13,
-            atol=1.0e-10,
-        )
-
     def test_first_derivative_lopsided_coefficients_and_array_axes(self):
         field_1d = self.x**4
         exact_1d = 4.0 * self.x**3

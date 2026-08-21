@@ -64,18 +64,9 @@ Each low/high face has an integer code in ``BSSNParameters``:
      - Periodic
      - Centered derivative stencils wrap with ``jnp.roll``.
    * - ``1``
-     - Super-Gaussian
-     - Filter the state toward its flat-space value in a finite-width layer.
-   * - ``2``
      - Sommerfeld
      - Use nonperiodic derivative closures and replace the assembled RHS on
        the selected outer plane.
-
-The Super-Gaussian weight combines all active faces, including edges and
-corners, and uses ``bc_width``, ``bc_order``, and ``bc_strength``. Metric
-diagonal components approach one; off-diagonal metric components,
-extrinsic-curvature variables, connections, and shift approach zero; ``W`` and
-the lapse approach one.
 
 Sommerfeld uses the coordinate origin supplied through ``x_min``, ``y_min``,
 and ``z_min``. It evaluates
@@ -93,9 +84,8 @@ RHS assembly
 ``compute_bssn_rhs`` calls the seven time derivatives. It then applies 
 active Sommerfeld face replacement to the complete RHS exactly once.
 
-``enforce_boundaries_and_trace_free_A`` enforces the algebraic constraint conditions. Its order
-is fixed:
+``enforce_algebraic_constraints`` applies the two BSSN algebraic projections
+in this fixed order:
 
-1. Super-Gaussian filtering.
-2. Determinant-one conformal-metric projection.
-3. Trace-free conformal extrinsic-curvature projection.
+1. Determinant-one conformal-metric projection.
+2. Trace-free conformal extrinsic-curvature projection.

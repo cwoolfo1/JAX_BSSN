@@ -61,17 +61,15 @@ Unigrid execution flow
 ``JAX_BSSN.evolution.time_evolve.rk4_step`` performs one update in this exact
 order:
 
-1. Apply any active Super-Gaussian state filter.
-2. Rescale the conformal metric to determinant one.
-3. Project conformal extrinsic curvature to its trace-free part.
-4. Assemble ``k1`` from all seven equation functions and replace the RHS on
+1. Rescale the conformal metric to determinant one.
+2. Project conformal extrinsic curvature to its trace-free part.
+3. Assemble ``k1`` from all seven equation functions and replace the RHS on
    active Sommerfeld faces.
-5. Form the ``k2`` midpoint state, then repeat steps 1--4.
-6. Form the ``k3`` midpoint state, then repeat steps 1--4.
-7. Form the ``k4`` endpoint state, then repeat steps 1--4.
-8. Combine the classical RK4 stages and apply the state filter and both
-   algebraic projections once more.
+4. Form the ``k2`` midpoint state, then repeat steps 1--3.
+5. Form the ``k3`` midpoint state, then repeat steps 1--3.
+6. Form the ``k4`` endpoint state, then repeat steps 1--3.
+7. Combine the classical RK4 stages and apply both algebraic projections once
+   more.
 
-Sommerfeld is therefore an RHS boundary treatment. Super-Gaussian damping is
-a state filter. Moving either operation across the RHS/projection boundary
-would define a different numerical algorithm.
+Sommerfeld is an RHS boundary treatment. Moving it across the RHS/projection
+boundary would define a different numerical algorithm.

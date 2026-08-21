@@ -14,10 +14,7 @@ from JAX_BSSN.bssn.tensor_algebra import (
     traceless_part,
 )
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolution.boundaries import (
-    apply_sommerfeld_boundaries,
-    apply_supergaussian_boundaries,
-)
+from JAX_BSSN.evolution.boundaries import apply_sommerfeld_boundaries
 from jax import jit
 import jax
 
@@ -96,12 +93,9 @@ def eliminate_trace_A(vars: BSSNVariables) -> BSSNVariables:
 
 
 @jit
-def enforce_boundaries_and_trace_free_A(
-    vars: BSSNVariables, params: BSSNParameters
-) -> BSSNVariables:
-    """Apply boundary filtering and enforce BSSN algebraic constraints."""
+def enforce_algebraic_constraints(vars: BSSNVariables) -> BSSNVariables:
+    """Enforce the determinant-one and trace-free BSSN constraints."""
 
-    vars = apply_supergaussian_boundaries(vars, params)
     vars = enforce_unit_determinant_conformal_metric(vars)
     vars = eliminate_trace_A(vars)
 
@@ -122,13 +116,13 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         Updated BSSN variables
     """
     dt = params.dt
-    vars = enforce_boundaries_and_trace_free_A(vars, params)
+    vars = enforce_algebraic_constraints(vars)
     
     # k1 time derivatives
     k1 = compute_bssn_rhs(vars, params)
 
     # k2 - midpoint with k1
-    mid_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
+    mid_vars = enforce_algebraic_constraints(BSSNVariables(
         conformal_metric=vars.conformal_metric + 0.5 * dt * k1[0],
         conformal_factor=vars.conformal_factor + 0.5 * dt * k1[1],
         traceless_K=vars.traceless_K + 0.5 * dt * k1[2],
@@ -136,13 +130,13 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + 0.5 * dt * k1[4],
         lapse=vars.lapse + 0.5 * dt * k1[5],
         shift=vars.shift + 0.5 * dt * k1[6]
-    ), params)
+    ))
 
     # k2 time derivatives
     k2 = compute_bssn_rhs(mid_vars, params)
 
     # k3 - midpoint with k2
-    mid_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
+    mid_vars = enforce_algebraic_constraints(BSSNVariables(
         conformal_metric=vars.conformal_metric + 0.5 * dt * k2[0],
         conformal_factor=vars.conformal_factor + 0.5 * dt * k2[1],
         traceless_K=vars.traceless_K + 0.5 * dt * k2[2],
@@ -150,13 +144,13 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + 0.5 * dt * k2[4],
         lapse=vars.lapse + 0.5 * dt * k2[5],
         shift=vars.shift + 0.5 * dt * k2[6]
-    ), params)
+    ))
 
     # k3 time derivatives
     k3 = compute_bssn_rhs(mid_vars, params)
 
     # k4 - endpoint with k3
-    end_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
+    end_vars = enforce_algebraic_constraints(BSSNVariables(
         conformal_metric=vars.conformal_metric + dt * k3[0],
         conformal_factor=vars.conformal_factor + dt * k3[1],
         traceless_K=vars.traceless_K + dt * k3[2],
@@ -164,13 +158,13 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + dt * k3[4],
         lapse=vars.lapse + dt * k3[5],
         shift=vars.shift + dt * k3[6]
-    ), params)
+    ))
 
     # k4 time derivatives
     k4 = compute_bssn_rhs(end_vars, params)
 
     # Final RK4 update
-    new_vars = enforce_boundaries_and_trace_free_A(BSSNVariables(
+    new_vars = enforce_algebraic_constraints(BSSNVariables(
         conformal_metric=vars.conformal_metric + (dt / 6.0) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]),
         conformal_factor=vars.conformal_factor + (dt / 6.0) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]),
         traceless_K=vars.traceless_K + (dt / 6.0) * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]),
@@ -178,6 +172,6 @@ def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
         conformal_connection=vars.conformal_connection + (dt / 6.0) * (k1[4] + 2 * k2[4] + 2 * k3[4] + k4[4]),
         lapse=vars.lapse + (dt / 6.0) * (k1[5] + 2 * k2[5] + 2 * k3[5] + k4[5]),
         shift=vars.shift + (dt / 6.0) * (k1[6] + 2 * k2[6] + 2 * k3[6] + k4[6])
-    ), params)
+    ))
 
     return new_vars

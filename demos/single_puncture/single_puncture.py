@@ -148,8 +148,8 @@ def main():
         Ny=Ny,
         Nz=Nz,
     )
-    # JAX arrays are immutable, so this retains the exact unfiltered data while
-    # ``vars`` is rebound to the boundary-filtered RK4 states below.
+    # JAX arrays are immutable, so this retains the exact initial data while
+    # ``vars`` is rebound to the projected RK4 states below.
     initial_vars = vars
 
     # The finite-difference stencils and boundary conditions remain periodic.

@@ -12,7 +12,6 @@ import numpy as np
 from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SOMMERFELD_BC,
-    SUPERGAUSSIAN_BC,
     apply_sommerfeld_boundaries,
     radial_derivative,
     sommerfeld,
@@ -64,6 +63,10 @@ class TestSommerfeldBoundaries(unittest.TestCase):
         self.Z = z[None, None, :]
         self.r = jnp.sqrt(self.X**2 + self.Y**2 + self.Z**2)
 
+    def test_boundary_code_map(self):
+        self.assertEqual(PERIODIC_BC, 0)
+        self.assertEqual(SOMMERFELD_BC, 1)
+
     def test_radial_derivative_of_r_squared_at_faces_edges_and_corners(self):
         field = self.X**2 + self.Y**2 + self.Z**2
         expected = 2.0 * self.r
@@ -109,7 +112,7 @@ class TestSommerfeldBoundaries(unittest.TestCase):
             xr_bc=PERIODIC_BC,
             yl_bc=PERIODIC_BC,
             yr_bc=SOMMERFELD_BC,
-            zl_bc=SUPERGAUSSIAN_BC,
+            zl_bc=PERIODIC_BC,
             zr_bc=PERIODIC_BC,
         )
         mask = np.asarray(sommerfeld_boundary_mask(self.shape, params))
@@ -151,22 +154,21 @@ class TestSommerfeldBoundaries(unittest.TestCase):
                 np.asarray(result_field)[~field_mask], np.asarray(rhs_field)[~field_mask]
             )
 
-    def test_periodic_and_supergaussian_codes_do_not_replace_rhs(self):
+    def test_periodic_code_does_not_replace_rhs(self):
         vars = flat_bssn_variables(self.shape)
         rhs = BSSNVariables(*(jnp.full_like(field, 3.0) for field in vars))
 
-        for code in (PERIODIC_BC, SUPERGAUSSIAN_BC):
-            params = self.params._replace(
-                xl_bc=code,
-                xr_bc=code,
-                yl_bc=code,
-                yr_bc=code,
-                zl_bc=code,
-                zr_bc=code,
-            )
-            result = apply_sommerfeld_boundaries(vars, rhs, params)
-            for result_field, rhs_field in zip(result, rhs):
-                np.testing.assert_array_equal(result_field, rhs_field)
+        params = self.params._replace(
+            xl_bc=PERIODIC_BC,
+            xr_bc=PERIODIC_BC,
+            yl_bc=PERIODIC_BC,
+            yr_bc=PERIODIC_BC,
+            zl_bc=PERIODIC_BC,
+            zr_bc=PERIODIC_BC,
+        )
+        result = apply_sommerfeld_boundaries(vars, rhs, params)
+        for result_field, rhs_field in zip(result, rhs):
+            np.testing.assert_array_equal(result_field, rhs_field)
 
     def test_assembled_bssn_rhs_keeps_flat_space_stationary(self):
         vars = flat_bssn_variables(self.shape)

@@ -13,14 +13,13 @@ JAX BSSN
 
 .. container:: hero-callout
 
-Current scope
--------------
+   .. rubric:: Current scope
 
-The installed package provides the vacuum Cartesian BSSN equations, fourth-
-order finite differences, Kreiss--Oliger dissipation, periodic, Super-Gaussian,
-and Sommerfeld boundary treatments, synchronous openPMD diagnostics, and one
-stage-synchronous 2:1 refinement patch. The supported physical examples are
-exactly gauge wave, linear wave, and single puncture.
+   The installed package provides the vacuum Cartesian BSSN equations, fourth-
+   order finite differences, Kreiss--Oliger dissipation, periodic and Sommerfeld
+   boundary treatments, synchronous openPMD diagnostics, and one
+   stage-synchronous 2:1 refinement patch. The supported physical examples are
+   exactly gauge wave, linear wave, and single puncture.
 
 Quick navigation
 ----------------

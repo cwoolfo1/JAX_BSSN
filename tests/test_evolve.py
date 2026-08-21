@@ -17,7 +17,7 @@ import os
 # Add the project root to the Python path
 sys.path.append('/home/christopherwoolford/Documents/Research/Numerical_Relativity/JAX_BSSN')
 
-from JAX_BSSN.evolution.time_evolve import enforce_boundaries_and_trace_free_A, rk4_step
+from JAX_BSSN.evolution.time_evolve import enforce_algebraic_constraints, rk4_step
 from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
 from JAX_BSSN.bssn.extrinsic_curvature import (
     evolve_trace_extrinsic_curvature,
@@ -242,7 +242,7 @@ class TestRK4Evolution(unittest.TestCase):
             eta=self.params.eta, g=self.params.g,
             dx=self.params.dx, dt=dt_small
         )
-        vars_t = enforce_boundaries_and_trace_free_A(vars_t, params_small_dt)
+        vars_t = enforce_algebraic_constraints(vars_t)
         # RK4 now enforces the BSSN algebraic constraints before the first RHS.
         # Measure the time derivative from that projected state, not from the
         # unconstrained manufactured metric.
