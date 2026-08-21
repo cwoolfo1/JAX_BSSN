@@ -18,6 +18,10 @@ Package map
    Finite-difference operators, physical boundary treatments, complete RHS
    assembly, algebraic projections, and unigrid RK4.
 
+``JAX_BSSN.cartoon``
+   Compact half-cell radial storage, parity ghosts, spherical-to-Cartesian
+   support reconstruction, Cartoon RK4, and radial constraint diagnostics.
+
 ``JAX_BSSN.fmr``
    Geometry and transfers for one vertex-centered refinement patch, plus the
    stage-synchronous coarse/fine RK4 step.
@@ -47,6 +51,7 @@ The intended dependency flow is:
         +--> bssn tensor/geometry/equation modules
         +--> evolution.boundaries
         +--> evolution.time_evolve
+        +--> cartoon
         +--> fmr.refinement
         +--> diagnostics
 
@@ -73,3 +78,13 @@ order:
 
 Sommerfeld is an RHS boundary treatment. Moving it across the RHS/projection
 boundary would define a different numerical algorithm.
+
+Cartoon execution flow
+----------------------
+
+``JAX_BSSN.cartoon.cartoon_rk4_step`` owns a separate compact evolution path.
+At every RK stage it applies the algebraic projections, refreshes the four
+origin parity ghosts, reconstructs a temporary ``9 x 9`` transverse support,
+evaluates the ordinary Cartesian RHS, and projects the positive centerline
+back to radial storage. The final combined state is projected and parity-filled
+once more.

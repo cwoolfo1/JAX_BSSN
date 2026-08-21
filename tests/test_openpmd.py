@@ -6,6 +6,8 @@ import numpy as np
 import openpmd_api as io
 import pytest
 
+from JAX_BSSN.bssn.variables import BSSNVariables
+from JAX_BSSN.cartoon import cartoon_axis_output_fields, compact_cartoon_state
 from JAX_BSSN.diagnostics.openpmd import FMRPatchSeriesWriter, OpenPMDWriter
 from JAX_BSSN.fmr.refinement import FMRPatchSpec
 
@@ -228,6 +230,128 @@ def test_default_demo_patch_has_32_root_and_31_active_fine_vertices(tmp_path):
     np.testing.assert_array_equal(
         fine_patch["arrays"]["h_plus"][io.Mesh_Record_Component.SCALAR],
         np.asarray(native_fine),
+    )
+
+
+def test_cartoon_output_writes_complete_reflected_axis_with_parity(tmp_path):
+    num_radial_points = 6
+    full_nx = 2 * num_radial_points
+    shape = (full_nx, 1, 1)
+    positive = jnp.arange(num_radial_points, dtype=jnp.float64) + 1.0
+
+    scalar = jnp.zeros(shape).at[num_radial_points:, 0, 0].set(positive)
+    vector = jnp.zeros((3,) + shape)
+    tensor = jnp.zeros((3, 3) + shape)
+    for component in range(3):
+        vector = vector.at[component, num_radial_points:, 0, 0].set(
+            (component + 1.0) * positive
+        )
+    for i in range(3):
+        for j in range(3):
+            tensor = tensor.at[i, j, num_radial_points:, 0, 0].set(
+                (3.0 * i + j + 1.0) * positive
+            )
+
+    full_vars = BSSNVariables(
+        conformal_metric=tensor,
+        conformal_factor=scalar,
+        traceless_K=2.0 * tensor,
+        trace_K=2.0 * scalar,
+        conformal_connection=vector,
+        lapse=3.0 * scalar,
+        shift=2.0 * vector,
+    )
+    compact_vars = compact_cartoon_state(full_vars)
+    fields = cartoon_axis_output_fields(
+        compact_vars,
+        4.0 * compact_vars.conformal_factor,
+        5.0 * compact_vars.conformal_connection,
+    )
+
+    filename = tmp_path / "cartoon_axis.h5"
+    with OpenPMDWriter(
+        filename,
+        grid_spacing=(0.25, 0.25, 0.25),
+        grid_global_offset=(-1.375, 0.0, 0.0),
+        dt=0.01,
+    ) as writer:
+        writer.write(fields, step=0, time=0.0)
+
+    series = io.Series(str(filename), io.Access.read_only)
+    iteration = series.iterations[0]
+    pending = {}
+    metadata = {}
+    for mesh_name in iteration.meshes:
+        mesh = iteration.meshes[mesh_name]
+        pending[mesh_name] = {
+            component_name: mesh[component_name].load_chunk()
+            for component_name in mesh
+        }
+        metadata[mesh_name] = (
+            tuple(mesh.grid_spacing),
+            tuple(mesh.grid_global_offset),
+        )
+    series.flush()
+    meshes = {
+        mesh_name: {
+            component_name: np.array(array, copy=True)
+            for component_name, array in components.items()
+        }
+        for mesh_name, components in pending.items()
+    }
+    iteration.close()
+    series.close()
+
+    expected_names = {
+        "W",
+        "K",
+        "lapse",
+        "shift",
+        "conformal_connection",
+        "conformal_metric_xx",
+        "conformal_metric_xy",
+        "conformal_metric_xz",
+        "conformal_metric_yy",
+        "conformal_metric_yz",
+        "conformal_metric_zz",
+        "traceless_K_xx",
+        "traceless_K_xy",
+        "traceless_K_xz",
+        "traceless_K_yy",
+        "traceless_K_yz",
+        "traceless_K_zz",
+        "hamiltonian_constraint",
+        "momentum_constraint",
+    }
+    assert set(meshes) == expected_names
+
+    for name, components in meshes.items():
+        assert metadata[name] == ((0.25, 0.25, 0.25), (-1.375, 0.0, 0.0))
+        for array in components.values():
+            assert array.shape == (full_nx, 1, 1)
+
+    scalar_component = io.Mesh_Record_Component.SCALAR
+    W = meshes["W"][scalar_component][:, 0, 0]
+    np.testing.assert_array_equal(W[:num_radial_points], positive[::-1])
+    np.testing.assert_array_equal(W[num_radial_points:], positive)
+
+    shift = meshes["shift"]
+    np.testing.assert_array_equal(
+        shift["x"][:num_radial_points, 0, 0],
+        -2.0 * np.asarray(positive[::-1]),
+    )
+    np.testing.assert_array_equal(
+        shift["y"][:num_radial_points, 0, 0],
+        4.0 * np.asarray(positive[::-1]),
+    )
+
+    metric_xy = meshes["conformal_metric_xy"][scalar_component][:, 0, 0]
+    metric_yz = meshes["conformal_metric_yz"][scalar_component][:, 0, 0]
+    np.testing.assert_array_equal(
+        metric_xy[:num_radial_points], -2.0 * np.asarray(positive[::-1])
+    )
+    np.testing.assert_array_equal(
+        metric_yz[:num_radial_points], 6.0 * np.asarray(positive[::-1])
     )
 
 

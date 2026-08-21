@@ -32,6 +32,7 @@ test = [
 packages = [
     "JAX_BSSN",
     "JAX_BSSN.bssn",
+    "JAX_BSSN.cartoon",
     "JAX_BSSN.diagnostics",
     "JAX_BSSN.evolution",
     "JAX_BSSN.fmr",

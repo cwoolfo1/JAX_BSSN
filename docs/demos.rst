@@ -1,9 +1,9 @@
 Demos
 =====
 
-The supported physical examples are exactly gauge wave, linear wave, and
-single puncture. Each demo contains its own coordinates, initial data, 
-parameters, and run loop.
+The supported physical examples are gauge wave, linear wave, Cartesian single
+puncture, and spherical Cartoon puncture. Each demo contains its own
+coordinates, initial data, parameters, and run loop.
 
 Install demo support first:
 
@@ -77,3 +77,25 @@ to Matplotlib:
 
 The renderer produces lapse, shift, and conformal-factor movies from the
 synchronized snapshots.
+
+Spherical Cartoon puncture
+--------------------------
+
+The Cartoon puncture demo evolves the same time-symmetric Schwarzschild data
+on ``Nr`` positive half-cell radii with four parity ghosts. Each RK stage
+reconstructs a temporary Cartesian support grid, so the installed Cartesian
+BSSN equations remain the single equation implementation.
+
+.. code-block:: bash
+
+   python demos/cartoon_puncture/cartoon_puncture.py
+
+The production defaults reproduce the comparison configuration:
+``Nr=2000``, ``rmax=100M``, CFL ``0.2``, final time ``100M``, and 500 output
+intervals. ``run_cartoon_puncture`` accepts smaller values for smoke runs.
+
+Output is written under ``output/`` as ``cartoon_puncture.h5`` and
+``constraint_l2.txt``. The openPMD series contains the complete reflected
+``2*Nr x 1 x 1`` axis, including all BSSN tensor components and Hamiltonian and
+momentum constraints. Constraint norms use only independent positive radii and
+exclude the four outer stencil-affected samples.

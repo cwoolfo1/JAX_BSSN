@@ -24,11 +24,12 @@ default dependency does not match the target hardware.
 
 ## Supported demos
 
-The supported physical examples are exactly:
+The supported physical examples are:
 
 1. Gauge wave
 2. Linear wave
 3. Single puncture
+4. Spherical Cartoon puncture
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -55,6 +56,13 @@ python single_puncture.py
 python make_movies.py  # optional; requires ffmpeg
 ```
 
+Run the compact spherical Cartoon puncture and write its complete reflected
+axis to openPMD:
+
+```bash
+python demos/cartoon_puncture/cartoon_puncture.py
+```
+
 The default three-dimensional runs compile substantial JAX kernels. The
 [demo guide](docs/demos.rst) includes smaller smoke configurations.
 
@@ -63,6 +71,7 @@ The default three-dimensional runs compile substantial JAX kernels. The
 ```text
 JAX_BSSN/
 ├── bssn/          # state, tensor algebra, geometry, equations, raw constraints
+├── cartoon/       # spherical reconstruction, compact RK4, radial diagnostics
 ├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
 ├── fmr/           # one-patch geometry, transfers, stage-synchronous RK4
 └── diagnostics/   # reductions, reporting, plotting, openPMD
