@@ -14,7 +14,7 @@ from JAX_BSSN.boundaries import (
 )
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolve import rk4_step
-from JAX_BSSN.tensor_algebra import (
+from JAX_BSSN.bssn.tensor_algebra import (
     determinant_3x3_metric,
     invert_3x3_metric,
     trace_tensor,

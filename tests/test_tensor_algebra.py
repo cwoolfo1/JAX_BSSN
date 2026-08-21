@@ -11,7 +11,7 @@ import numpy as np
 from jax import jit
 import jax
 
-from JAX_BSSN.tensor_algebra import (
+from JAX_BSSN.bssn.tensor_algebra import (
     invert_3x3_metric,
     determinant_3x3_metric,
     raise_index,

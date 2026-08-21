@@ -7,20 +7,23 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.bssn import (
-    BSSNParameters,
-    BSSNVariables,
-    W_FLOOR_VALUE,
-    compute_W2_covariant_lapse_hessian,
-    compute_W2_ricci,
+from JAX_BSSN.bssn.constraints import (
+    compute_hamiltonian_constraint,
     compute_momentum_constraint,
+)
+from JAX_BSSN.bssn.extrinsic_curvature import (
     evolve_trace_extrinsic_curvature,
     evolve_traceless_extrinsic_curvature,
 )
+from JAX_BSSN.bssn.geometry import (
+    W_FLOOR_VALUE,
+    compute_W2_covariant_lapse_hessian,
+    compute_W2_ricci,
+)
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.derivatives import diff1_field
-from JAX_BSSN.errors import compute_hamiltonian_constraint
 from JAX_BSSN.evolve import enforce_unit_determinant_conformal_metric, rk4_step
-from JAX_BSSN.tensor_algebra import (
+from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_second_kind,
     invert_3x3_metric,
     determinant_3x3_metric,

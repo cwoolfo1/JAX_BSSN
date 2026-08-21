@@ -14,7 +14,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolve import (compute_bssn_rhs,
     eliminate_trace_A, enforce_unit_determinant_conformal_metric)
 

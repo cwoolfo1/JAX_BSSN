@@ -7,15 +7,14 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.bssn import (
-    BSSNParameters,
-    BSSNVariables,
+from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
+from JAX_BSSN.bssn.shift_and_lapse import (
     compute_shift_derivatives,
-    evolve_conformal_connection,
-    evolve_conformal_metric,
     evolve_lapse,
     evolve_shift,
 )
+from JAX_BSSN.bssn.spatial_metric import evolve_conformal_metric
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.derivatives import diff1_field
 from JAX_BSSN.evolve import rk4_step
 

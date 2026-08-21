@@ -1,14 +1,19 @@
-from JAX_BSSN.bssn import (
-    BSSNVariables, BSSNParameters, 
-    evolve_conformal_metric, evolve_conformal_factor,
-    evolve_traceless_extrinsic_curvature, evolve_trace_extrinsic_curvature,
-    evolve_conformal_connection, evolve_lapse, evolve_shift
+from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
+from JAX_BSSN.bssn.extrinsic_curvature import (
+    evolve_trace_extrinsic_curvature,
+    evolve_traceless_extrinsic_curvature,
 )
-from JAX_BSSN.tensor_algebra import (
+from JAX_BSSN.bssn.shift_and_lapse import evolve_lapse, evolve_shift
+from JAX_BSSN.bssn.spatial_metric import (
+    evolve_conformal_factor,
+    evolve_conformal_metric,
+)
+from JAX_BSSN.bssn.tensor_algebra import (
     determinant_3x3_metric,
     invert_3x3_metric,
     traceless_part,
 )
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.boundaries import (
     apply_sommerfeld_boundaries,
     apply_supergaussian_boundaries,

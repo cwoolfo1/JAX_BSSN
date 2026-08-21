@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax import jit
 from functools import partial
 
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.derivatives import diff1_field
 
 

@@ -3,9 +3,9 @@ import unittest
 
 from JAX_BSSN.evolve import rk4_step
 from JAX_BSSN.bssn import (BSSNVariables, BSSNParameters)
-from JAX_BSSN.tensor_algebra import (invert_3x3_metric, christoffel_symbols_second_kind)
+from JAX_BSSN.bssn.tensor_algebra import (invert_3x3_metric, christoffel_symbols_second_kind)
 from JAX_BSSN.derivatives import (diff1_field)
-from JAX_BSSN.errors import (compute_hamiltonian_constraint)
+from JAX_BSSN.bssn.constraints import (compute_hamiltonian_constraint)
 
 class TestGaugeWave(unittest.TestCase):
 

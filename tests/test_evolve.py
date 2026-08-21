@@ -18,12 +18,17 @@ import os
 sys.path.append('/home/christopherwoolford/Documents/Research/Numerical_Relativity/JAX_BSSN')
 
 from JAX_BSSN.evolve import enforce_boundaries_and_trace_free_A, rk4_step
-from JAX_BSSN.bssn import (
-    BSSNVariables, BSSNParameters,
-    evolve_conformal_metric, evolve_conformal_factor,
-    evolve_traceless_extrinsic_curvature, evolve_trace_extrinsic_curvature,
-    evolve_conformal_connection, evolve_lapse, evolve_shift
+from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
+from JAX_BSSN.bssn.extrinsic_curvature import (
+    evolve_trace_extrinsic_curvature,
+    evolve_traceless_extrinsic_curvature,
 )
+from JAX_BSSN.bssn.shift_and_lapse import evolve_lapse, evolve_shift
+from JAX_BSSN.bssn.spatial_metric import (
+    evolve_conformal_factor,
+    evolve_conformal_metric,
+)
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 
 
 class TestRK4Evolution(unittest.TestCase):

@@ -12,12 +12,15 @@ from contextlib import nullcontext
 import jax
 from tqdm import tqdm
 
-from JAX_BSSN.bssn import BSSNParameters, compute_momentum_constraint
+from JAX_BSSN.bssn.constraints import (
+    compute_all_constraints,
+    compute_hamiltonian_constraint,
+    compute_momentum_constraint,
+)
+from JAX_BSSN.bssn.variables import BSSNParameters
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
 from JAX_BSSN.errors import (
-    compute_all_constraints,
     compute_constraint_norms,
-    compute_hamiltonian_constraint,
     print_constraint_summary,
     monitor_simulation_health,
 )
