@@ -1,69 +1,83 @@
-# JAX-BSSN - Numerical Relativity in Python with JAX
+# JAX BSSN
 
-This is a Python/JAX implementation of the NR1 numerical relativity code forked from 20K on Github.
-This code uses the BSSN formulation of the ADM 3+1 decomposition of general relativity. The evolution
-equations support nonzero shift terms with a single-variable Gamma-driver shift gauge, while the included
-wave initial data still default to zero shift. Periodic finite-difference stencils are implemented, with
-optional super-Gaussian boundary filters that damp selected faces toward flat space.
+<p align="center">
+  <img src="docs/images/JAX_BSSN_logo.png" alt="JAX BSSN logo" width="720">
+</p>
 
-## Features
-
-- BSSN (Baumgarte-Shapiro-Shibata-Nakamura) formulation for 3+1 numerical relativity
-- JIT-compiled finite difference operators for performance
-- Clean, readable Python implementation
-- Modular design with separate components for:
-  - BSSN evolution equations
-  - Finite difference derivatives
-  - Initial data setup
-  - Kreiss-Oliger dissipation
-  - Error analysis
+JAX-BSSN is an autodifferentiable implementation of the BSSN evolution system 
+for numerical relativity. JAX-BSSN features kriess oliger dissipation, momentum 
+constraint damping, and fixed mesh refinement.
 
 ## Installation
 
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-2. Run the simulation:
-```bash
-python main.py
-```
-
-## Structure
-
-
-- `bssn.py` - BSSN evolution equations and field definitions (FULLY OPERATIONAL)
-- `derivatives.py` - Finite difference operators (FULLY OPERATIONAL)
-- `tensor_algebra.py` - Tensor operations (Christoffel symbols, etc.) (FULLY OPERATIONAL)
-- `errors.py` - Constraint violation analysis (HAMILTONIAN AND MOMENTUM ERRORS ARE FULLY OPERATIONAL)
-- `kreiss_oliger.py` - Kreiss-Oliger dissipation (NOT TESTED)
-- `main.py` - Main simulation loop and setup (NOT TESTED)
-- `init.py` - Initial data setup (gravitational waves, etc.) (NOT TESTED)
-- `tests/`  - Unit tests for tensor algebra, derivatives and MMS for BSSN evolution
-
-## Usage
-
-The code simulates gravitational wave evolution using the BSSN formulation. Key parameters can be modified in `main.py`:
-
-- Grid size and resolution
-- Evolution time and timestep
-- Initial data type (gravitational waves, black holes, etc.)
-- Boundary conditions
-
-To write synchronous Cartesian mesh diagnostics as one HDF5 openPMD series:
+From the repository root:
 
 ```bash
-python -m JAX_BSSN \
-    --initial-data gauge_wave \
-    --save-interval 0.1 \
-    --openpmd-output output/bssn.h5
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[demos,test]"
 ```
 
-The series contains lapse, shift, K, W, and the spatially resolved Hamiltonian
-and momentum constraints. The existing `--save-interval` option controls the
-openPMD cadence.
+Install a JAX build appropriate for the intended CPU or accelerator when the
+default dependency does not match the target hardware.
 
-## Performance
+## Supported demos
 
-All computationally intensive operations are JIT-compiled with JAX for near-C++ performance while maintaining Python's readability and ease of use.
+The supported physical examples are exactly:
+
+1. Gauge wave
+2. Linear wave
+3. Single puncture
+
+Each demo owns its initial data and run configuration. There is no generic
+simulation CLI or installed initial-data dispatcher.
+
+Run the periodic analytic gauge wave:
+
+```bash
+python demos/gauge_wave/gauge_wave.py
+```
+
+Run the linear wave through one fixed-refinement patch and write composite
+openPMD output:
+
+```bash
+python demos/linear_wave/linear_wave.py
+```
+
+Run the single Schwarzschild puncture from its demo directory so snapshots and
+the optional movie helper share one output path:
+
+```bash
+cd demos/single_puncture
+python single_puncture.py
+python make_movies.py  # optional; requires ffmpeg
+```
+
+The default three-dimensional runs compile substantial JAX kernels. The
+[demo guide](docs/demos.rst) includes smaller smoke configurations.
+
+## Package structure
+
+```text
+JAX_BSSN/
+├── bssn/          # state, tensor algebra, geometry, equations, raw constraints
+├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
+├── fmr/           # one-patch geometry, transfers, stage-synchronous RK4
+└── diagnostics/   # reductions, reporting, plotting, openPMD
+```
+
+Physical initial data lives under `demos/`, not in the installed source
+package. Gauge- and linear-wave tests use `tests/initial_data.py` and do not
+import executable demos.
+
+## Tests
+
+Install test dependencies and run the complete suite with:
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest
+```
+
