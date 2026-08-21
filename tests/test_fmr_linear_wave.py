@@ -1,10 +1,12 @@
 """Spatial convergence test for a linear wave crossing an FMR patch."""
 
 import math
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import openpmd_api as io
 
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn import BSSNParameters
@@ -168,3 +170,54 @@ def test_fmr_linear_wave_has_fourth_order_spatial_convergence():
         convergence_order,
     )
     assert convergence_order >= 4.0
+
+
+def test_small_production_fmr_run_writes_readable_visit_collection(tmp_path):
+    from demos.linear_wave.linear_wave import run_linear_wave
+
+    base = tmp_path / "linear_wave_fmr"
+    _, _, run = run_linear_wave(
+        grid_size=8,
+        final_time=0.02,
+        output_iterations=2,
+        output_path=base,
+        show_progress=False,
+    )
+
+    visit_path = Path(run["output_path"])
+    assert visit_path == base.with_suffix(".visit")
+    lines = visit_path.read_text().splitlines()
+    assert lines[0] == "!NBLOCKS 2"
+    assert len(lines) == 7
+    assert lines[2].startswith("linear_wave_fmr_level_00_patch_000_")
+    assert lines[3].startswith("linear_wave_fmr_level_01_patch_000_")
+    assert lines[5].startswith("linear_wave_fmr_level_00_patch_000_")
+    assert lines[6].startswith("linear_wave_fmr_level_01_patch_000_")
+
+    for output_index in (0, 1):
+        for level in (0, 1):
+            path = tmp_path / (
+                f"linear_wave_fmr_level_{level:02d}_patch_000_"
+                f"{output_index:08d}.h5"
+            )
+            series = io.Series(str(path), io.Access.read_only)
+            iteration = series.iterations[output_index]
+            assert set(iteration.meshes) == {
+                "h_plus",
+                "lapse",
+                "shift",
+                "K",
+                "W",
+                "hamiltonian_constraint",
+                "momentum_constraint",
+            }
+            expected_shape = (8, 8, 8) if level == 0 else (7, 7, 7)
+            assert tuple(
+                iteration.meshes["h_plus"][
+                    io.Mesh_Record_Component.SCALAR
+                ].shape
+            ) == expected_shape
+            iteration.close()
+            series.close()
+
+    assert not base.with_suffix(".h5").exists()

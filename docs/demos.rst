@@ -50,8 +50,14 @@ fine, uncovered coarse, and interface regions.
 
    python demos/linear_wave/linear_wave.py
 
-The default run writes a composite openPMD series to
-``demos/linear_wave/output/linear_wave_fmr.h5``. Configure it from Python:
+The default run writes the VisIt multiblock collection
+``demos/linear_wave/output/linear_wave_fmr.visit``. Open that file in VisIt to
+load the root and fine patches together. The collection spatially aligns the
+overlapping blocks; it does not remove root cells covered by the fine patch or
+encode native AMR nesting.
+
+Each patch is also an independent file-based openPMD series, with per-patch
+``.pmd`` helpers for ParaView. Configure the run from Python:
 
 .. code-block:: python
 
@@ -61,7 +67,7 @@ The default run writes a composite openPMD series to
        grid_size=16,
        final_time=0.02,
        output_iterations=2,
-       output_path="output/linear_wave_smoke.h5",
+       output_path="output/linear_wave_smoke",
        show_progress=False,
    )
 

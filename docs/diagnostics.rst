@@ -73,15 +73,9 @@ Mesh metadata preserves:
 ``ghost_cells`` may be a scalar or three-tuple and is stripped before geometry
 and output are established.
 
-For refinement output, ``write_levels`` defaults to one composite finest-grid
-mesh for each physical field. All levels must have matching field names,
-matching scalar/vector kinds, aligned physical offsets, integer spacing ratios,
-and a shared grid position. Coarse vertex values are repeated piecewise
-constantly into finest-index space, then finer chunks overwrite the covered
-region. ``composite=False`` retains separate level-prefixed mesh records.
-
-Writes are synchronous. The implementation retains host buffers until each
-openPMD flush completes; there is no asynchronous output queue.
+``FMRPatchSeriesWriter`` writes synchronous meshes for all FMR patches. The writer 
+is automatically configured to structure outputs in a format that is compatible with 
+easy visualization in VisIt and ParaView.
 
 API reference
 -------------

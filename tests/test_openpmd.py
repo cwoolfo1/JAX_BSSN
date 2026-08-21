@@ -1,185 +1,391 @@
+import os
+from pathlib import Path
+
+import jax.numpy as jnp
 import numpy as np
 import openpmd_api as io
 import pytest
 
-from JAX_BSSN.diagnostics.openpmd import (
-    OpenPMDWriter,
-    _prepare_composite_levels,
-    _repeat_vertex_centered,
-)
+from JAX_BSSN.diagnostics.openpmd import FMRPatchSeriesWriter, OpenPMDWriter
+from JAX_BSSN.fmr.refinement import FMRPatchSpec
 
 
-def _scalar_levels(coarse, fine, fine_offset=(1.0, 1.0, 1.0), ghost_cells=0):
-    return {
-        "coarse": {
-            "fields": {"chi": coarse},
-            "grid_spacing": 1.0,
-            "grid_global_offset": (0.0, 0.0, 0.0),
-        },
-        "fine": {
-            "fields": {"chi": fine},
-            "grid_spacing": 0.5,
-            "grid_global_offset": fine_offset,
-            "ghost_cells": ghost_cells,
-        },
-    }
+PATCH_SPEC = FMRPatchSpec((1, 1, 1), (3, 3, 3))
+FIELD_NAMES = {
+    "h_plus",
+    "lapse",
+    "shift",
+    "K",
+    "W",
+    "hamiltonian_constraint",
+    "momentum_constraint",
+}
 
 
-def _read_meshes(filename):
-    series = io.Series(str(filename), io.Access.read_only)
-    iteration = series.iterations[0]
-    meshes = {}
+def _diagnostic_field_maps():
+    root_base = np.arange(5**3, dtype=np.float64).reshape((5, 5, 5))
+    fine_active = 1000.0 + np.arange(5**3, dtype=np.float64).reshape((5, 5, 5))
+    fine_base = np.full((13, 13, 13), -999.0, dtype=np.float64)
+    fine_base[4:-4, 4:-4, 4:-4] = fine_active
 
-    for mesh_name in iteration.meshes:
-        mesh = iteration.meshes[mesh_name]
-        component_names = list(mesh)
-        arrays = {}
-        for component_name in component_names:
-            arrays[component_name] = mesh[component_name].load_chunk()
-
-        series.flush()
-        meshes[mesh_name] = {
-            "grid_spacing": tuple(mesh.grid_spacing),
-            "grid_global_offset": tuple(mesh.grid_global_offset),
-            "arrays": {
-                name: np.array(array, copy=True)
-                for name, array in arrays.items()
-            },
+    def fields(base):
+        return {
+            "h_plus": base,
+            "lapse": base + 1.0,
+            "shift": (base + 2.0, base + 3.0, base + 4.0),
+            "K": base + 5.0,
+            "W": base + 6.0,
+            "hamiltonian_constraint": base + 7.0,
+            "momentum_constraint": (
+                base + 8.0,
+                base + 9.0,
+                base + 10.0,
+            ),
         }
 
+    return fields(jnp.asarray(root_base)), fields(jnp.asarray(fine_base)), root_base, fine_active
+
+
+def _write_output(writer, output_index=0, simulation_step=0, time=0.0, **kwargs):
+    root_fields, fine_fields, root_base, fine_active = _diagnostic_field_maps()
+    geometry = {
+        "root_spacing": (1.0, 1.0, 1.0),
+        "fine_spacing": (0.5, 0.5, 0.5),
+        "root_origin": (-2.0, -2.0, -2.0),
+        "fine_origin": (-1.0, -1.0, -1.0),
+        "root_ghost_cells": 0,
+        "fine_ghost_cells": 4,
+        "patch_spec": PATCH_SPEC,
+    }
+    geometry.update(kwargs)
+    result = writer.write(
+        root_fields,
+        fine_fields,
+        output_index=output_index,
+        simulation_step=simulation_step,
+        time=time,
+        **geometry,
+    )
+    return result, root_fields, fine_fields, root_base, fine_active
+
+
+def _read_patch(path, output_index):
+    series = io.Series(str(path), io.Access.read_only)
+    iteration = series.iterations[output_index]
+    pending = {}
+    metadata = {}
+    for mesh_name in iteration.meshes:
+        mesh = iteration.meshes[mesh_name]
+        components = {}
+        for component_name in mesh:
+            component = mesh[component_name]
+            components[component_name] = component.load_chunk()
+        pending[mesh_name] = components
+        first_component = mesh[next(iter(mesh))]
+        metadata[mesh_name] = {
+            "components": set(mesh),
+            "spacing": tuple(mesh.grid_spacing),
+            "origin": tuple(mesh.grid_global_offset),
+            "position": tuple(first_component.position),
+            "shape": tuple(first_component.shape),
+            "geometry": mesh.geometry,
+            "axis_labels": list(mesh.axis_labels),
+            "data_order": mesh.data_order,
+            "grid_unit_SI": mesh.grid_unit_SI,
+            "unit_SI": mesh.unit_SI,
+            "component_unit_SI": first_component.unit_SI,
+        }
+    attributes = {
+        name: iteration.get_attribute(name) for name in iteration.attributes
+    }
+    time = iteration.time
+    dt = iteration.dt
+    series.flush()
+    arrays = {
+        mesh_name: {
+            component_name: np.array(array, copy=True)
+            for component_name, array in components.items()
+        }
+        for mesh_name, components in pending.items()
+    }
     iteration.close()
     series.close()
-    return meshes
-
-
-def test_vertex_centered_replication_in_one_dimension():
-    np.testing.assert_array_equal(
-        _repeat_vertex_centered(np.array([10, 20, 30]), 2),
-        [10, 10, 20, 20, 30],
-    )
-    np.testing.assert_array_equal(
-        _repeat_vertex_centered(np.array([10, 20]), 4),
-        [10, 10, 10, 10, 20],
-    )
-
-
-def test_vertex_centered_replication_in_three_dimensions():
-    coarse = np.arange(8).reshape(2, 2, 2)
-    expanded = _repeat_vertex_centered(coarse, (2, 2, 2))
-
-    assert expanded.shape == (3, 3, 3)
-    expected = np.empty((3, 3, 3), dtype=coarse.dtype)
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                expected[i, j, k] = coarse[min(i // 2, 1),
-                                           min(j // 2, 1),
-                                           min(k // 2, 1)]
-    np.testing.assert_array_equal(expanded, expected)
-
-
-def test_composite_scalar_mesh_uses_finest_spacing_and_fine_overwrite(tmp_path):
-    coarse = np.arange(27, dtype=np.float64).reshape(3, 3, 3)
-    fine = 100.0 + np.arange(27, dtype=np.float64).reshape(3, 3, 3)
-    filename = tmp_path / "scalar_composite.h5"
-    levels = _scalar_levels(coarse, fine)
-    # Resolution, rather than mapping order, determines overwrite order.
-    levels = {"fine": levels["fine"], "coarse": levels["coarse"]}
-
-    with OpenPMDWriter(filename, 1.0, 0.0, dt=0.1) as writer:
-        writer.write_levels(levels, step=0, time=0.0)
-
-    meshes = _read_meshes(filename)
-    assert set(meshes) == {"chi"}
-    assert meshes["chi"]["grid_spacing"] == (0.5, 0.5, 0.5)
-    assert meshes["chi"]["grid_global_offset"] == (0.0, 0.0, 0.0)
-
-    data = meshes["chi"]["arrays"][io.Mesh_Record_Component.SCALAR]
-    expected = _repeat_vertex_centered(coarse, (2, 2, 2))
-    expected[2:5, 2:5, 2:5] = fine
-    assert data.shape == (5, 5, 5)
-    np.testing.assert_array_equal(data, expected)
-
-
-def test_composite_vector_components_share_geometry_and_overwrite(tmp_path):
-    coarse_base = np.arange(27, dtype=np.float64).reshape(3, 3, 3)
-    fine_base = 100.0 + np.arange(27, dtype=np.float64).reshape(3, 3, 3)
-    coarse = tuple(coarse_base + 10.0 * component for component in range(3))
-    fine = tuple(fine_base + 10.0 * component for component in range(3))
-    levels = {
-        "coarse": {
-            "fields": {"beta": coarse},
-            "grid_spacing": (1.0, 1.0, 1.0),
-            "grid_global_offset": (0.0, 0.0, 0.0),
-        },
-        "fine": {
-            "fields": {"beta": fine},
-            "grid_spacing": (0.5, 0.5, 0.5),
-            "grid_global_offset": (1.0, 1.0, 1.0),
-        },
+    return {
+        "arrays": arrays,
+        "metadata": metadata,
+        "attributes": attributes,
+        "time": time,
+        "dt": dt,
     }
-    filename = tmp_path / "vector_composite.h5"
-
-    with OpenPMDWriter(filename, 1.0, 0.0, dt=0.1) as writer:
-        writer.write_levels(levels, step=0, time=0.0)
-
-    mesh = _read_meshes(filename)["beta"]
-    assert mesh["grid_spacing"] == (0.5, 0.5, 0.5)
-    assert set(mesh["arrays"]) == {"x", "y", "z"}
-    for component, name in enumerate(("x", "y", "z")):
-        expected = _repeat_vertex_centered(coarse[component], (2, 2, 2))
-        expected[2:5, 2:5, 2:5] = fine[component]
-        assert mesh["arrays"][name].shape == (5, 5, 5)
-        np.testing.assert_array_equal(mesh["arrays"][name], expected)
 
 
-def test_composite_hierarchy_rejects_noninteger_spacing_ratio():
-    field = np.zeros((3, 3, 3))
-    levels = _scalar_levels(field, field)
-    levels["fine"]["grid_spacing"] = 0.6
-
-    with pytest.raises(ValueError, match="grid_spacing ratio"):
-        _prepare_composite_levels(levels)
+def _patch_path(base, level, output_index, suffix="h5"):
+    return base.parent / (
+        f"{base.name}_level_{level:02d}_patch_000_{output_index:08d}.{suffix}"
+    )
 
 
-def test_composite_hierarchy_rejects_misaligned_physical_offset():
-    field = np.zeros((3, 3, 3))
-    levels = _scalar_levels(field, field, fine_offset=(1.25, 1.0, 1.0))
+def test_patch_series_writes_native_root_and_fine_arrays_and_metadata(tmp_path):
+    base = tmp_path / "linear_wave_fmr"
+    writer = FMRPatchSeriesWriter(base, dt=0.125)
+    _, root_fields, fine_fields, root_base, fine_active = _write_output(
+        writer, output_index=0, simulation_step=11, time=0.25
+    )
 
-    with pytest.raises(ValueError, match="grid_global_offset"):
-        _prepare_composite_levels(levels)
+    root = _read_patch(_patch_path(base, 0, 0), 0)
+    fine = _read_patch(_patch_path(base, 1, 0), 0)
+    scalar = io.Mesh_Record_Component.SCALAR
+
+    assert set(root["arrays"]) == set(fine["arrays"]) == FIELD_NAMES
+    assert root["metadata"]["h_plus"]["components"] == {scalar}
+    assert root["metadata"]["shift"]["components"] == {"x", "y", "z"}
+    assert fine["metadata"]["momentum_constraint"]["components"] == {
+        "x", "y", "z"
+    }
+    np.testing.assert_array_equal(root["arrays"]["h_plus"][scalar], root_base)
+    np.testing.assert_array_equal(fine["arrays"]["h_plus"][scalar], fine_active)
+    np.testing.assert_array_equal(
+        fine["arrays"]["shift"]["z"], fine_active + 4.0
+    )
+    assert not np.any(fine["arrays"]["h_plus"][scalar] == -999.0)
+
+    for patch, shape, spacing, origin in (
+        (root, (5, 5, 5), (1.0, 1.0, 1.0), (-2.0, -2.0, -2.0)),
+        (fine, (5, 5, 5), (0.5, 0.5, 0.5), (-1.0, -1.0, -1.0)),
+    ):
+        for metadata in patch["metadata"].values():
+            assert metadata["shape"] == shape
+            assert metadata["spacing"] == spacing
+            assert metadata["origin"] == origin
+            assert metadata["position"] == (0.0, 0.0, 0.0)
+            assert metadata["geometry"] == io.Geometry.cartesian
+            assert metadata["axis_labels"] == ["x", "y", "z"]
+            expected_order = io.Data_Order.C if hasattr(io, "Data_Order") else "C"
+            assert metadata["data_order"] == expected_order
+            assert metadata["grid_unit_SI"] == 1.0
+            assert metadata["unit_SI"] == 1.0
+            assert metadata["component_unit_SI"] == 1.0
+        assert patch["time"] == 0.25
+        assert patch["dt"] == 0.125
+
+    assert root["attributes"]["fmrLevel"] == 0
+    assert root["attributes"]["fmrPatch"] == 0
+    assert root["attributes"]["fmrParent"] == -1
+    assert root["attributes"]["refinementRatio"] == 1
+    assert root["attributes"]["coarseStart"] == [0, 0, 0]
+    assert root["attributes"]["coarseStop"] == [5, 5, 5]
+    assert root["attributes"]["simulationStep"] == 11
+    assert fine["attributes"]["fmrLevel"] == 1
+    assert fine["attributes"]["fmrPatch"] == 0
+    assert fine["attributes"]["fmrParent"] == 0
+    assert fine["attributes"]["refinementRatio"] == 2
+    assert fine["attributes"]["coarseStart"] == [1, 1, 1]
+    assert fine["attributes"]["coarseStop"] == [4, 4, 4]
+    assert fine["attributes"]["simulationStep"] == 11
+
+    # Slicing and device-to-host conversion must not mutate either JAX source.
+    np.testing.assert_array_equal(np.asarray(root_fields["h_plus"]), root_base)
+    fine_source = np.asarray(fine_fields["h_plus"])
+    assert fine_source.shape == (13, 13, 13)
+    assert np.all(fine_source[:4] == -999.0)
 
 
-def test_composite_ghost_cells_are_removed_before_geometry_and_write(tmp_path):
-    coarse = np.ones((3, 3, 3), dtype=np.float64)
-    padded_fine = np.full((5, 5, 5), -99.0)
-    padded_fine[1:-1, 1:-1, 1:-1] = 7.0
-    filename = tmp_path / "ghost_composite.h5"
+def test_default_demo_patch_has_32_root_and_31_active_fine_vertices(tmp_path):
+    base = tmp_path / "linear_wave_fmr"
+    dx = 1.0 / 32.0
+    root_origin = (-(32 - 1) * dx / 2.0,) * 3
+    patch_spec = FMRPatchSpec((8, 8, 8), (23, 23, 23))
+    fine_origin = tuple(
+        root_origin[axis] + patch_spec.coarse_lo[axis] * dx
+        for axis in range(3)
+    )
+    root = np.arange(32**3, dtype=np.float64).reshape((32,) * 3)
+    fine = np.full((39,) * 3, -1.0, dtype=np.float64)
+    native_fine = np.arange(31**3, dtype=np.float64).reshape((31,) * 3)
+    fine[4:-4, 4:-4, 4:-4] = native_fine
 
-    with OpenPMDWriter(filename, 1.0, 0.0, dt=0.1) as writer:
-        writer.write_levels(
-            _scalar_levels(coarse, padded_fine, ghost_cells=1),
-            step=0,
-            time=0.0,
+    FMRPatchSeriesWriter(base, dt=0.01).write(
+        {"h_plus": root},
+        {"h_plus": fine},
+        output_index=0,
+        simulation_step=0,
+        time=0.0,
+        root_spacing=(dx,) * 3,
+        fine_spacing=(dx / 2.0,) * 3,
+        root_origin=root_origin,
+        fine_origin=fine_origin,
+        root_ghost_cells=0,
+        fine_ghost_cells=4,
+        patch_spec=patch_spec,
+    )
+
+    root_patch = _read_patch(_patch_path(base, 0, 0), 0)
+    fine_patch = _read_patch(_patch_path(base, 1, 0), 0)
+    assert root_patch["metadata"]["h_plus"]["shape"] == (32, 32, 32)
+    assert fine_patch["metadata"]["h_plus"]["shape"] == (31, 31, 31)
+    assert fine_patch["metadata"]["h_plus"]["spacing"] == (dx / 2.0,) * 3
+    assert fine_patch["metadata"]["h_plus"]["origin"] == fine_origin
+    np.testing.assert_array_equal(
+        fine_patch["arrays"]["h_plus"][io.Mesh_Record_Component.SCALAR],
+        np.asarray(native_fine),
+    )
+
+
+def test_output_indices_simulation_steps_aliases_helpers_and_manifest_are_restart_safe(tmp_path):
+    base = tmp_path / "linear_wave_fmr"
+    writer = FMRPatchSeriesWriter(base, dt=0.1)
+    _write_output(writer, output_index=0, simulation_step=0, time=0.0)
+    _write_output(writer, output_index=1, simulation_step=7, time=0.7)
+
+    for output_index in (0, 1):
+        for level in (0, 1):
+            h5_path = _patch_path(base, level, output_index)
+            alias_path = _patch_path(base, level, output_index, "opmd")
+            assert h5_path.is_file()
+            assert alias_path.is_symlink()
+            assert os.readlink(alias_path) == h5_path.name
+        patch = _read_patch(_patch_path(base, 0, output_index), output_index)
+        assert patch["attributes"]["simulationStep"] == (0, 7)[output_index]
+        assert patch["time"] == (0.0, 0.7)[output_index]
+
+    assert (tmp_path / "linear_wave_fmr_level_00_patch_000.pmd").read_text() == (
+        "linear_wave_fmr_level_00_patch_000_%08T.h5\n"
+    )
+    assert (tmp_path / "linear_wave_fmr_level_01_patch_000.pmd").read_text() == (
+        "linear_wave_fmr_level_01_patch_000_%08T.h5\n"
+    )
+    assert not (tmp_path / "linear_wave_fmr.pmd").exists()
+    expected_manifest = (
+        "!NBLOCKS 2\n"
+        "!TIME 0.0\n"
+        "linear_wave_fmr_level_00_patch_000_00000000.opmd\n"
+        "linear_wave_fmr_level_01_patch_000_00000000.opmd\n"
+        "!TIME 0.7\n"
+        "linear_wave_fmr_level_00_patch_000_00000001.opmd\n"
+        "linear_wave_fmr_level_01_patch_000_00000001.opmd\n"
+    )
+    assert base.with_suffix(".visit").read_text() == expected_manifest
+
+    # A fresh writer represents a restarted process. Rewriting an identical
+    # saved index retains correct aliases and does not duplicate the group.
+    restarted = FMRPatchSeriesWriter(base, dt=0.1)
+    _write_output(restarted, output_index=1, simulation_step=7, time=0.7)
+    assert base.with_suffix(".visit").read_text() == expected_manifest
+
+
+@pytest.mark.parametrize("conflict_kind", ["wrong_symlink", "file", "directory"])
+def test_patch_series_refuses_conflicting_alias_paths(tmp_path, conflict_kind):
+    base = tmp_path / "linear_wave_fmr"
+    alias = _patch_path(base, 0, 0, "opmd")
+    if conflict_kind == "wrong_symlink":
+        alias.symlink_to("unrelated.h5")
+    elif conflict_kind == "file":
+        alias.write_text("not an alias")
+    else:
+        alias.mkdir()
+
+    with pytest.raises(FileExistsError, match="alias"):
+        _write_output(FMRPatchSeriesWriter(base, dt=0.1))
+    assert not _patch_path(base, 0, 0).exists()
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "!NBLOCKS 1\n",
+        "!NBLOCKS 2\n!TIME 0.0\nroot.opmd\n",
+        (
+            "!NBLOCKS 2\n!TIME 0.0\n"
+            "linear_wave_fmr_level_01_patch_000_00000000.opmd\n"
+            "linear_wave_fmr_level_00_patch_000_00000000.opmd\n"
+        ),
+        (
+            "!NBLOCKS 2\n!TIME 0.0\n"
+            "linear_wave_fmr_level_00_patch_000_00000000.opmd\n"
+            "linear_wave_fmr_level_01_patch_000_00000001.opmd\n"
+        ),
+    ],
+)
+def test_patch_series_rejects_malformed_incomplete_or_changed_manifests(
+    tmp_path, manifest
+):
+    base = tmp_path / "linear_wave_fmr"
+    base.with_suffix(".visit").write_text(manifest)
+    with pytest.raises(ValueError, match="manifest|block|NBLOCKS|indices"):
+        _write_output(FMRPatchSeriesWriter(base, dt=0.1))
+
+
+def test_patch_series_rejects_conflicting_manifest_times(tmp_path):
+    base = tmp_path / "linear_wave_fmr"
+    writer = FMRPatchSeriesWriter(base, dt=0.1)
+    _write_output(writer, output_index=0, simulation_step=0, time=0.0)
+    with pytest.raises(ValueError, match="conflicting time"):
+        _write_output(writer, output_index=0, simulation_step=0, time=0.25)
+
+    with pytest.raises(ValueError, match="conflicting simulationStep"):
+        _write_output(writer, output_index=0, simulation_step=3, time=0.0)
+
+
+def test_patch_series_rejects_sparse_output_indices_before_writing(tmp_path):
+    base = tmp_path / "linear_wave_fmr"
+    with pytest.raises(ValueError, match="contiguous"):
+        _write_output(
+            FMRPatchSeriesWriter(base, dt=0.1),
+            output_index=2,
+            simulation_step=9,
+            time=0.9,
+        )
+    assert not _patch_path(base, 0, 2).exists()
+
+
+def test_patch_series_rejects_topology_and_field_changes(tmp_path):
+    base = tmp_path / "linear_wave_fmr"
+    writer = FMRPatchSeriesWriter(base, dt=0.1)
+    _write_output(writer)
+
+    root_fields, fine_fields, _, _ = _diagnostic_field_maps()
+    fine_fields = dict(fine_fields)
+    fine_fields.pop("K")
+    with pytest.raises(ValueError, match="incompatible field sets"):
+        writer.write(
+            root_fields,
+            fine_fields,
+            output_index=1,
+            simulation_step=1,
+            time=0.1,
+            root_spacing=1.0,
+            fine_spacing=0.5,
+            root_origin=(-2.0,) * 3,
+            fine_origin=(-1.0,) * 3,
+            root_ghost_cells=0,
+            fine_ghost_cells=4,
+            patch_spec=PATCH_SPEC,
         )
 
-    data = _read_meshes(filename)["chi"]["arrays"][io.Mesh_Record_Component.SCALAR]
-    assert data.shape == (5, 5, 5)
-    np.testing.assert_array_equal(data[2:5, 2:5, 2:5], 7.0)
-    assert not np.any(data == -99.0)
+    with pytest.raises(ValueError, match="topology changed"):
+        writer.write(
+            root_fields,
+            _diagnostic_field_maps()[1],
+            output_index=1,
+            simulation_step=1,
+            time=0.1,
+            root_spacing=1.0,
+            fine_spacing=0.5,
+            root_origin=(-2.0,) * 3,
+            fine_origin=(-1.0,) * 3,
+            root_ghost_cells=0,
+            fine_ghost_cells=4,
+            patch_spec=PATCH_SPEC,
+            root_grid_position=(0.5,) * 3,
+            fine_grid_position=(0.5,) * 3,
+        )
 
-
-def test_composite_levels_require_matching_field_sets_and_kinds():
-    field = np.zeros((3, 3, 3))
-    levels = _scalar_levels(field, field)
-    levels["fine"]["fields"] = {"alpha": field}
-    with pytest.raises(ValueError, match="incompatible field set"):
-        _prepare_composite_levels(levels)
-
-    levels = _scalar_levels(field, field)
-    levels["fine"]["fields"]["chi"] = (field, field, field)
-    with pytest.raises(ValueError, match="changes from scalar to vector"):
-        _prepare_composite_levels(levels)
+    non_ratio_two = PATCH_SPEC._replace(refinement_ratio=4)
+    with pytest.raises(ValueError, match="2:1"):
+        _write_output(
+            FMRPatchSeriesWriter(tmp_path / "ratio", dt=0.1),
+            patch_spec=non_ratio_two,
+        )
 
 
 def test_uniform_write_keeps_existing_single_grid_behavior(tmp_path):
@@ -194,10 +400,8 @@ def test_uniform_write_keeps_existing_single_grid_behavior(tmp_path):
     ) as writer:
         writer.write({"chi": field}, step=0, time=0.0)
 
-    mesh = _read_meshes(filename)["chi"]
-    assert mesh["grid_spacing"] == (0.5, 0.25, 0.125)
-    assert mesh["grid_global_offset"] == (-1.0, -2.0, -3.0)
-    np.testing.assert_array_equal(
-        mesh["arrays"][io.Mesh_Record_Component.SCALAR],
-        field,
-    )
+    mesh = _read_patch(filename, 0)
+    scalar = io.Mesh_Record_Component.SCALAR
+    assert mesh["metadata"]["chi"]["spacing"] == (0.5, 0.25, 0.125)
+    assert mesh["metadata"]["chi"]["origin"] == (-1.0, -2.0, -3.0)
+    np.testing.assert_array_equal(mesh["arrays"]["chi"][scalar], field)

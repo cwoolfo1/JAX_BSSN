@@ -23,7 +23,7 @@ from JAX_BSSN.bssn.tensor_algebra import (
     traceless_part,
 )
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
+from JAX_BSSN.diagnostics.openpmd import FMRPatchSeriesWriter
 from JAX_BSSN.evolution.derivatives import diff1_field
 from JAX_BSSN.fmr.refinement import (
     FMRPatchSpec,
@@ -290,7 +290,9 @@ def run_linear_wave(
     if final_time is None:
         final_time = wavelength
     if output_path is None:
-        output_path = Path(__file__).resolve().parent / "output" / "linear_wave_fmr.h5"
+        output_path = (
+            Path(__file__).resolve().parent / "output" / "linear_wave_fmr"
+        )
     else:
         output_path = Path(output_path)
 
@@ -420,18 +422,17 @@ def run_linear_wave(
         ).astype(int)
     )
     output_step_set = set(output_steps)
+    output_indices = {
+        simulation_step: output_index
+        for output_index, simulation_step in enumerate(output_steps)
+    }
 
     active_start = tuple(
         first_coarse_point + index * dx_coarse for index in patch_spec.coarse_lo
     )
-    writer = OpenPMDWriter(
-        output_path,
-        grid_spacing=(dx_coarse,) * 3,
-        grid_global_offset=coarse_origin,
-        dt=dt,
-    )
+    writer = FMRPatchSeriesWriter(output_path, dt=dt)
 
-    def write_iteration(step, time):
+    def write_iteration(output_index, step, time):
         coarse_fields, fine_fields = compute_output_fields(
             coarse_variables, fine_variables
         )
@@ -448,22 +449,21 @@ def run_linear_wave(
             wavelength,
             region_masks,
         )
-        writer.write_levels(
-            {
-                "level_0": {
-                    "fields": coarse_fields,
-                    "grid_spacing": (dx_coarse,) * 3,
-                    "grid_global_offset": coarse_origin,
-                },
-                "level_1": {
-                    "fields": fine_fields,
-                    "grid_spacing": (dx_fine,) * 3,
-                    "grid_global_offset": active_start,
-                    "ghost_cells": patch_spec.ghost_width,
-                },
-            },
-            step=step,
+        writer.write(
+            coarse_fields,
+            fine_fields,
+            output_index=output_index,
+            simulation_step=step,
             time=time,
+            root_spacing=(dx_coarse,) * 3,
+            fine_spacing=(dx_fine,) * 3,
+            root_origin=coarse_origin,
+            fine_origin=active_start,
+            root_ghost_cells=0,
+            fine_ghost_cells=patch_spec.ghost_width,
+            patch_spec=patch_spec,
+            root_grid_position=(0.0, 0.0, 0.0),
+            fine_grid_position=(0.0, 0.0, 0.0),
         )
         _print_diagnostics(step, time, diagnostics, amplitude)
         return diagnostics
@@ -477,10 +477,15 @@ def run_linear_wave(
         f"patch coarse bounds={patch_spec.coarse_lo}:{patch_spec.coarse_hi}, "
         f"dt={dt:.8f}, steps={num_steps}, final time={final_time:.8f}"
     )
-    print(f"openPMD output={output_path} ({output_iterations} iterations)")
+    print(
+        f"VisIt openPMD collection={writer.visit_path} "
+        f"({output_iterations} outputs)"
+    )
 
     try:
-        final_diagnostics = write_iteration(step=0, time=0.0)
+        final_diagnostics = write_iteration(
+            output_index=0, step=0, time=0.0
+        )
         progress = tqdm(
             range(1, num_steps + 1),
             desc="Evolving linear wave",
@@ -494,7 +499,9 @@ def run_linear_wave(
 
             if step in output_step_set:
                 time = step * dt
-                final_diagnostics = write_iteration(step, time)
+                final_diagnostics = write_iteration(
+                    output_indices[step], step, time
+                )
                 progress.set_postfix(
                     coarse=f"{final_diagnostics['coarse_rms'] / abs(amplitude):.3e}",
                     fine=f"{final_diagnostics['fine_rms'] / abs(amplitude):.3e}",
@@ -512,7 +519,7 @@ def run_linear_wave(
         )
 
     return coarse_variables, fine_variables, {
-        "output_path": output_path,
+        "output_path": writer.visit_path,
         "num_steps": num_steps,
         "output_steps": output_steps,
         "final_time": num_steps * dt,

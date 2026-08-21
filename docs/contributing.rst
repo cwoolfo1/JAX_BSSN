@@ -18,8 +18,9 @@ Change checklist
 * Determinant-one and trace-free projections retain their RK stage placement.
 * FMR guard filling, inclusive bounds, active slices, injection, and shared
   timestep retain their current semantics.
-* openPMD names, component orientation, mesh geometry, ghost stripping, and
-  composite overwrite behavior remain compatible.
+* Uniform-grid openPMD names, component orientation, mesh geometry, and ghost
+  stripping remain compatible. FMR output preserves each patch's owned active
+  arrays without interpolation or replication.
 * Physical initial data remains demo-local, and tests use test-local helpers.
 * Exactly the gauge-wave, linear-wave, and single-puncture demos are presented
   as supported examples.
