@@ -9,7 +9,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.boundaries import (
+from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SOMMERFELD_BC,
     SUPERGAUSSIAN_BC,
@@ -19,7 +19,7 @@ from JAX_BSSN.boundaries import (
     sommerfeld_boundary_mask,
 )
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolve import compute_bssn_rhs
+from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs
 
 
 def flat_bssn_variables(shape, dtype=jnp.float64):

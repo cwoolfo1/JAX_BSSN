@@ -27,7 +27,7 @@ from JAX_BSSN.bssn.tensor_algebra import (
     lie_derivative_conformal_metric
 )
 
-from JAX_BSSN.derivatives import diff1_field, compute_all_derivatives
+from JAX_BSSN.evolution.derivatives import diff1_field, compute_all_derivatives
 
 
 class TestTensorAlgebra(unittest.TestCase):

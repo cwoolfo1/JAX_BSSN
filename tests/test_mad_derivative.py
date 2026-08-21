@@ -4,7 +4,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field
 
 jax.config.update("jax_enable_x64", True)
 

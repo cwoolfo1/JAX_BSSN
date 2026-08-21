@@ -21,7 +21,13 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["JAX_BSSN", "JAX_BSSN.bssn", "JAX_BSSN.diagnostics"]
+packages = [
+    "JAX_BSSN",
+    "JAX_BSSN.bssn",
+    "JAX_BSSN.diagnostics",
+    "JAX_BSSN.evolution",
+    "JAX_BSSN.fmr",
+]
 
 [project.scripts]
 JAX_BSSN = "JAX_BSSN.__main__:main"

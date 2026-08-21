@@ -17,7 +17,7 @@ import os
 # Add the project root to the Python path
 sys.path.append('/home/christopherwoolford/Documents/Research/Numerical_Relativity/JAX_BSSN')
 
-from JAX_BSSN.evolve import enforce_boundaries_and_trace_free_A, rk4_step
+from JAX_BSSN.evolution.time_evolve import enforce_boundaries_and_trace_free_A, rk4_step
 from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
 from JAX_BSSN.bssn.extrinsic_curvature import (
     evolve_trace_extrinsic_curvature,

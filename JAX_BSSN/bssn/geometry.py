@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_first_kind,
@@ -278,4 +278,3 @@ def compute_W2_covariant_lapse_hessian(
     W2_DiDj_alpha = W**2 * conformal_hessian_alpha + W * gradient_terms
 
     return W2_DiDj_alpha
-

@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 
 

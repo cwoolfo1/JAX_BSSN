@@ -14,7 +14,7 @@ from JAX_BSSN.bssn.tensor_algebra import (
     traceless_part,
 )
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.boundaries import (
+from JAX_BSSN.evolution.boundaries import (
     apply_sommerfeld_boundaries,
     apply_supergaussian_boundaries,
 )

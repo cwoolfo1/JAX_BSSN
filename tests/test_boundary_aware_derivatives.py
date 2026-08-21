@@ -9,12 +9,12 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.boundaries import (
+from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SOMMERFELD_BC,
     SUPERGAUSSIAN_BC,
 )
-from JAX_BSSN.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 
 
 class TestBoundaryAwareDerivatives(unittest.TestCase):

@@ -15,8 +15,8 @@ from JAX_BSSN.bssn.shift_and_lapse import (
 )
 from JAX_BSSN.bssn.spatial_metric import evolve_conformal_metric
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.derivatives import diff1_field
-from JAX_BSSN.evolve import rk4_step
+from JAX_BSSN.evolution.derivatives import diff1_field
+from JAX_BSSN.evolution.time_evolve import rk4_step
 
 
 class TestShiftEvolution(unittest.TestCase):

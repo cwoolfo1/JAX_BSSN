@@ -19,7 +19,7 @@ from JAX_BSSN.bssn.constraints import (
 )
 from JAX_BSSN.bssn.variables import BSSNParameters
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.errors import (
+from JAX_BSSN.diagnostics.constraints import (
     compute_constraint_norms,
     print_constraint_summary,
     monitor_simulation_health,
@@ -30,8 +30,8 @@ from JAX_BSSN.initialization import (
     get_initial_data,
     setup_simulation_parameters,
 )
-from JAX_BSSN.plotting import plot_results, plot_constraint_evolution, save_data
-from JAX_BSSN.evolve import rk4_step
+from JAX_BSSN.diagnostics.plotting import plot_results, plot_constraint_evolution, save_data
+from JAX_BSSN.evolution.time_evolve import rk4_step
 
 
 def run_simulation(

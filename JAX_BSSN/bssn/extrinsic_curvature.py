@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 from JAX_BSSN.bssn.constraints import compute_momentum_constraint
 from JAX_BSSN.bssn.geometry import compute_W2_covariant_lapse_hessian, compute_W2_ricci
 from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
@@ -210,4 +210,3 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     # compute dissipation term
 
     return dt_A + seventh_term + dissipation_term
-

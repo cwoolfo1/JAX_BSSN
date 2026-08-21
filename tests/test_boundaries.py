@@ -7,13 +7,13 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.boundaries import (
+from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SUPERGAUSSIAN_BC,
     apply_supergaussian_boundaries,
 )
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolve import rk4_step
+from JAX_BSSN.evolution.time_evolve import rk4_step
 from JAX_BSSN.bssn.tensor_algebra import (
     determinant_3x3_metric,
     invert_3x3_metric,

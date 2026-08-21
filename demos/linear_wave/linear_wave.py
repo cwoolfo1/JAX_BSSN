@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 from tqdm import tqdm
 
-from JAX_BSSN.boundaries import PERIODIC_BC
+from JAX_BSSN.evolution.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn.constraints import (
     compute_hamiltonian_constraint,
     compute_momentum_constraint,
@@ -19,7 +19,7 @@ from JAX_BSSN.bssn.constraints import (
 from JAX_BSSN.bssn.variables import BSSNParameters
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
 from JAX_BSSN.initialization import create_coordinate_arrays, linear_wave_data
-from JAX_BSSN.refinement import (
+from JAX_BSSN.fmr.refinement import (
     FMRPatchSpec,
     fine_active_shape,
     fine_active_view,

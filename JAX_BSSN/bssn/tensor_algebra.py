@@ -12,7 +12,7 @@ from jax import jit
 from typing import Tuple
 import numpy as np
 
-from JAX_BSSN.derivatives import diff1_field, compute_all_derivatives
+from JAX_BSSN.evolution.derivatives import diff1_field, compute_all_derivatives
 
 # NOTE: FULLY TESTED AND FUNCTIONAL AS OF DEC 3RD 2025
 

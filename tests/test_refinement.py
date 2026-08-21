@@ -8,7 +8,7 @@ from JAX_BSSN.initialization import (
     gauge_wave_analytic_state,
     linear_wave_data,
 )
-from JAX_BSSN.refinement import (FMRPatchSpec, fill_fine_ghosts,
+from JAX_BSSN.fmr.refinement import (FMRPatchSpec, fill_fine_ghosts,
     fine_active_shape, fine_active_slice, fine_active_view, fine_coordinates,
     fmr_rk4_step, prolongate_to_fine, restrict_to_coarse)
 

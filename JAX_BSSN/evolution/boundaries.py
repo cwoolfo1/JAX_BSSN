@@ -6,7 +6,7 @@ from jax import jit
 from functools import partial
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field
 
 
 PERIODIC_BC = 0

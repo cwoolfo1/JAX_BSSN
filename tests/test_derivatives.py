@@ -12,7 +12,7 @@ from jax import jit
 import jax
 from scipy import stats
 
-from JAX_BSSN.derivatives import (
+from JAX_BSSN.evolution.derivatives import (
     diff1_field,
     diff6_field,
     compute_all_derivatives,

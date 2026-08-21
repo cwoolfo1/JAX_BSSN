@@ -6,10 +6,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.boundaries import PERIODIC_BC
+from JAX_BSSN.evolution.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.initialization import create_coordinate_arrays, linear_wave_data
-from JAX_BSSN.refinement import (
+from JAX_BSSN.fmr.refinement import (
     FMRPatchSpec,
     fine_active_shape,
     fine_active_view,

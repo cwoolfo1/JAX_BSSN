@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
 from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
 from JAX_BSSN.bssn.tensor_algebra import christoffel_symbols_second_kind, invert_3x3_metric

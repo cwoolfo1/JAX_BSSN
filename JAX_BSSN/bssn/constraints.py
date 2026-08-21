@@ -5,7 +5,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE, compute_W2_ricci
 from JAX_BSSN.bssn.tensor_algebra import determinant_3x3_metric, invert_3x3_metric, trace_tensor
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
@@ -252,4 +252,3 @@ def compute_all_constraints(vars: BSSNVariables,
         trace_A=trace_A,
         gamma_condition=gamma_condition
     )
-

@@ -12,7 +12,7 @@ import numpy as np
 from scipy.special import j0, j1
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field
 from JAX_BSSN.bssn.tensor_algebra import (
     invert_3x3_metric,
     determinant_3x3_metric,
