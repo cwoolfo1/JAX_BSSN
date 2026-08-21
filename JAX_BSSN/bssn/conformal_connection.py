@@ -16,11 +16,11 @@ def evolve_conformal_connection(vars: BSSNVariables,
     """
     Evolve conformal connection functions Γ̃^i.
 
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of conformal connection
     """

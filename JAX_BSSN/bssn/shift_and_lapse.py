@@ -48,11 +48,11 @@ def compute_shift_derivatives(
 def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve lapse function.
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of lapse
     """
@@ -99,7 +99,7 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
 
     dissipation_term = params.nu / 64 * params.dx**5 * (dalpha_dx1 + dalpha_dx2 + dalpha_dx3)
     # compute dissipation term
-    
+
     return slicing_term + advection_term + dissipation_term
 
 
@@ -107,12 +107,12 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
 def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve shift vector β^i using Gamma driver.
-    
-    
+
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of shift
     """
@@ -149,5 +149,5 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
         dbeta_dx1 + dbeta_dx2 + dbeta_dx3
     )
     # compute dissipation term
-    
+
     return dt_beta + dissipation_term

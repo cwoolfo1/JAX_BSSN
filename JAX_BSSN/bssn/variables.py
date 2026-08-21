@@ -52,5 +52,3 @@ def get_boundary_codes(
         return params.yl_bc, params.yr_bc
     else:
         return params.zl_bc, params.zr_bc
-
-

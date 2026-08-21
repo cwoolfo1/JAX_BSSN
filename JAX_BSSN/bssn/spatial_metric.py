@@ -9,15 +9,15 @@ from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_
 
 
 @jit
-def evolve_conformal_metric(vars: BSSNVariables, 
+def evolve_conformal_metric(vars: BSSNVariables,
                            params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve conformal metric γ_ij.
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of conformal metric
     """
@@ -86,15 +86,15 @@ def evolve_conformal_factor(vars: BSSNVariables,
                            params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve conformal factor W.
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of conformal factor
     """
-    
+
     shift = vars.shift
     # unpack the shift vector
 
@@ -142,5 +142,5 @@ def evolve_conformal_factor(vars: BSSNVariables,
     dissipation_term = params.nu / 64 * params.dx**5 * (dW_dx1 + dW_dx2 + dW_dx3)
     # compute dissipation term
 
-    
+
     return first_term + second_term + third_term + dissipation_term

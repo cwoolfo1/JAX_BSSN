@@ -4,8 +4,8 @@
   <img src="docs/images/JAX_BSSN_logo.png" alt="JAX BSSN logo" width="720">
 </p>
 
-JAX-BSSN is an autodifferentiable implementation of the BSSN evolution system 
-for numerical relativity. JAX-BSSN features kriess oliger dissipation, momentum 
+JAX-BSSN is an autodifferentiable implementation of the BSSN evolution system
+for numerical relativity. JAX-BSSN features Kreiss–Oliger dissipation, momentum
 constraint damping, and fixed mesh refinement.
 
 ## Installation
@@ -80,4 +80,3 @@ Install test dependencies and run the complete suite with:
 python -m pip install -e ".[test]"
 python -m pytest
 ```
-

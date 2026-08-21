@@ -20,11 +20,11 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
                                     params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve trace of extrinsic curvature K.
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of trace K
     """
@@ -81,7 +81,7 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
 
     dissipation_term = params.nu / 64 * params.dx**5 * (dK_dx1 + dK_dx2 + dK_dx3)
     # compute dissipation term
-    
+
     return dt_K + dissipation_term
 
 
@@ -92,11 +92,11 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
                                         params: BSSNParameters) -> jnp.ndarray:
     """
     Evolve traceless extrinsic curvature A_ij.
-    
+
     Args:
-        vars: Current BSSN variables  
+        vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Time derivative of traceless extrinsic curvature
     """
@@ -199,7 +199,7 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
             dMidj = dMidj.at[i, j].set(
                 diff1_field(M[i, ...], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q)
             )
-        
+
     DjMi = dMidj - jnp.einsum('kij...,k...->ij...', christoffel_second, M)
     DiMj = jnp.swapaxes(DjMi, 0, 1)
     # compute covariant derivatives of M_i

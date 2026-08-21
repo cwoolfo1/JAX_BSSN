@@ -16,11 +16,11 @@ def compute_momentum_constraint(vars: BSSNVariables,
                                params: BSSNParameters) -> jnp.ndarray:
     """
     Compute momentum constraint M_i.
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Momentum constraint vector M_i
     """
@@ -104,17 +104,17 @@ class ConstraintViolations(NamedTuple):
 
 
 @jit
-def compute_hamiltonian_constraint(vars: BSSNVariables, 
+def compute_hamiltonian_constraint(vars: BSSNVariables,
                                   params: BSSNParameters) -> jnp.ndarray:
     """
     Compute Hamiltonian constraint violation.
-    
+
     where R is the 3D Ricci scalar.
-    
+
     Args:
         vars: BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Hamiltonian constraint violation H
     """
@@ -127,7 +127,7 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     # R = gamma_tilde^ij (W**2 R_ij), evaluated without inverse powers of W.
 
     K_squared = vars.trace_K**2
-    
+
     A_squared = jnp.einsum('ik...,jl...,ij...,kl...->...', inv_metric, inv_metric,
                             vars.traceless_K, vars.traceless_K)
 
@@ -142,12 +142,12 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
 def compute_det_gamma_violation(vars: BSSNVariables) -> jnp.ndarray:
     """
     Compute violation of det(γ) = 1 condition.
-    
+
     In BSSN, the conformal metric should satisfy det(γ) = 1.
-    
+
     Args:
         vars: BSSN variables
-        
+
     Returns:
         det(γ) - 1
     """
@@ -159,12 +159,12 @@ def compute_det_gamma_violation(vars: BSSNVariables) -> jnp.ndarray:
 def compute_trace_A_violation(vars: BSSNVariables) -> jnp.ndarray:
     """
     Compute violation of tr(A) = 0 condition.
-    
+
     The traceless extrinsic curvature should be traceless.
-    
+
     Args:
         vars: BSSN variables
-        
+
     Returns:
         tr(A) = γ^ij A_ij
     """
@@ -174,18 +174,18 @@ def compute_trace_A_violation(vars: BSSNVariables) -> jnp.ndarray:
 
 
 # @jit
-def compute_gamma_constraint(vars: BSSNVariables, 
+def compute_gamma_constraint(vars: BSSNVariables,
                             params: BSSNParameters) -> jnp.ndarray:
     """
     Compute Gamma constraint violation.
-    
+
     The Gamma constraint relates the conformal connection to metric derivatives:
     Γ^i = γ^jk Γ^i_jk
-    
+
     Args:
         vars: BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         Gamma constraint violation
     """
@@ -194,7 +194,7 @@ def compute_gamma_constraint(vars: BSSNVariables,
     return jnp.zeros_like(vars.lapse)
     # dx = params.dx
     # shape = vars.conformal_metric.shape[2:]
-    
+
     # # Compute metric derivatives
     # metric_derivs = jnp.zeros((3, 3, 3) + shape)
     # for i in range(3):
@@ -202,13 +202,13 @@ def compute_gamma_constraint(vars: BSSNVariables,
     #         for k in range(3):
     #             metric_derivs = metric_derivs.at[k, i, j].set(
     #                 diff1_field(vars.conformal_metric[i, j], k, dx))
-    
+
     # # Compute inverse metric
     # inv_metric = invert_3x3_metric(vars.conformal_metric)
-    
+
     # # Compute Christoffel symbols
     # christoffel = christoffel_symbols_second_kind(inv_metric, metric_derivs)
-    
+
     # # Compute γ^jk Γ^i_jk
     # gamma_from_christoffel = jnp.zeros((3,) + shape)
     # for i in range(3):
@@ -216,13 +216,13 @@ def compute_gamma_constraint(vars: BSSNVariables,
     #         for k in range(3):
     #             gamma_from_christoffel = gamma_from_christoffel.at[i].add(
     #                 inv_metric[j, k] * christoffel[i, j, k])
-    
+
     # # Constraint violation
     # gamma_violation = jnp.zeros((3,) + shape)
     # for i in range(3):
     #     gamma_violation = gamma_violation.at[i].set(
     #         vars.conformal_connection[i] - gamma_from_christoffel[i])
-    
+
     # return gamma_violation
 
 
@@ -231,11 +231,11 @@ def compute_all_constraints(vars: BSSNVariables,
                            params: BSSNParameters) -> ConstraintViolations:
     """
     Compute all constraint violations.
-    
+
     Args:
         vars: BSSN variables
         params: Evolution parameters
-        
+
     Returns:
         All constraint violations
     """
@@ -244,7 +244,7 @@ def compute_all_constraints(vars: BSSNVariables,
     det_gamma = compute_det_gamma_violation(vars)
     trace_A = compute_trace_A_violation(vars)
     gamma_condition = compute_gamma_constraint(vars, params)
-    
+
     return ConstraintViolations(
         hamiltonian=hamiltonian,
         momentum=momentum,
