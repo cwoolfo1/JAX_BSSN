@@ -33,7 +33,7 @@ def _validate_spec(spec: FMRPatchSpec) -> None:
     if spec.refinement_ratio != 2:
         raise ValueError("the first-pass FMR ratio is fixed at 2")
     if spec.ghost_width != 4:
-        raise ValueError("the BSSN composed stencil requires four guard cells")
+        raise ValueError("the BSSN FMR configuration requires four guard cells")
     if any(h < l for l, h in zip(spec.coarse_lo, spec.coarse_hi)):
         raise ValueError("coarse_hi must not precede coarse_lo")
 
@@ -200,7 +200,7 @@ def fmr_rk4_step(coarse, fine, coarse_params: BSSNParameters,
         raise ValueError("stage-synchronous FMR requires identical timesteps")
     if fine_params.dx * 2 != coarse_params.dx:
         raise ValueError("fine dx must be coarse dx / 2")
-    # For a fourth-order leading error, q_n=(h_fine/h_n)^4.  Selecting it here
+    # For fourth-order leading errors, q_n=(h_fine/h_n)^4.  Selecting it here
     # keeps unigrid/default callers unchanged and makes the refinement ratio the
     # single source of truth.
     coarse_params = coarse_params._replace(mad_q=jnp.where(

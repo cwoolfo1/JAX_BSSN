@@ -5,7 +5,19 @@ from JAX_BSSN.cartoon.diagnostics import (
     compute_cartoon_constraint_norms,
     compute_cartoon_constraints,
 )
-from JAX_BSSN.cartoon.evolution import cartoon_rk4_step, compute_cartoon_rhs
+from JAX_BSSN.cartoon.debugging import (
+    FIELD_NAMES,
+    CartoonFieldSummary,
+    CartoonStageSummary,
+    summarize_cartoon_fields,
+    summarize_cartoon_stage,
+)
+from JAX_BSSN.cartoon.evolution import (
+    CartoonRK4Trace,
+    cartoon_rk4_step,
+    cartoon_rk4_trace,
+    compute_cartoon_rhs,
+)
 from JAX_BSSN.cartoon.interpolation import (
     lagrange6_nonperiodic,
     lagrange6_weights,
@@ -33,10 +45,15 @@ __all__ = [
     "CARTOON_CENTER",
     "CARTOON_GHOST_CELLS",
     "CARTOON_SUPPORT_SIZE",
+    "FIELD_NAMES",
+    "CartoonFieldSummary",
+    "CartoonRK4Trace",
+    "CartoonStageSummary",
     "cartoon_axis_output_fields",
     "cartoon_centerline",
     "cartoon_positive_radius",
     "cartoon_rk4_step",
+    "cartoon_rk4_trace",
     "compact_cartoon_state",
     "compute_cartoon_constraint_norms",
     "compute_cartoon_constraints",
@@ -51,5 +68,7 @@ __all__ = [
     "project_cartoon_scalar",
     "project_cartoon_vector",
     "reconstruct_cartoon_support",
+    "summarize_cartoon_stage",
+    "summarize_cartoon_fields",
     "validate_cartoon_grid",
 ]

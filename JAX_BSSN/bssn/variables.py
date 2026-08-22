@@ -35,7 +35,7 @@ class BSSNParameters(NamedTuple):
     x_min: float = 0.0        # Coordinate at the first x grid point
     y_min: float = 0.0        # Coordinate at the first y grid point
     z_min: float = 0.0        # Coordinate at the first z grid point
-    mad_q: float = 1.0        # D4 weight in the MAD first derivative
+    mad_q: float = 1.0        # D4 weight in the MAD first/second derivatives
 
 
 def get_boundary_codes(

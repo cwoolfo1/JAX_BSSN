@@ -155,6 +155,122 @@ def diff1_field(
     return jnp.moveaxis(derivative_axis_last, -1, direction)
     # Using 4th-order central difference
 
+
+@partial(jit, static_argnames=['direction'])
+def diff2_field(
+    field: jnp.ndarray,
+    direction: int,
+    dx: float,
+    left_bc: int = 0,
+    right_bc: int = 0,
+    mad_q: float = 1.0,
+) -> jnp.ndarray:
+    """Compute a pure second derivative along one array axis.
+
+    Periodic interiors blend the centered fourth- and sixth-order-accurate
+    second-derivative stencils using the same MAD weight as ``diff1_field``.
+    Physical Sommerfeld axes deliberately retain the fourth-order stencil and
+    use fourth-order one-sided closures at their outer two points.
+    """
+
+    forward1 = jnp.roll(field, -1, axis=direction)
+    forward2 = jnp.roll(field, -2, axis=direction)
+    forward3 = jnp.roll(field, -3, axis=direction)
+    backward1 = jnp.roll(field, 1, axis=direction)
+    backward2 = jnp.roll(field, 2, axis=direction)
+    backward3 = jnp.roll(field, 3, axis=direction)
+
+    d4fdx2 = (
+        -forward2
+        + 16.0 * forward1
+        - 30.0 * field
+        + 16.0 * backward1
+        - backward2
+    ) / (12.0 * dx**2)
+    d6fdx2 = (
+        1.0 / 90.0 * forward3
+        - 3.0 / 20.0 * forward2
+        + 3.0 / 2.0 * forward1
+        - 49.0 / 18.0 * field
+        + 3.0 / 2.0 * backward1
+        - 3.0 / 20.0 * backward2
+        + 1.0 / 90.0 * backward3
+    ) / dx**2
+    d2fdx2 = jax.lax.cond(
+        mad_q == 1.0,
+        lambda _: d4fdx2,
+        lambda _: mad_q * d4fdx2 + (1.0 - mad_q) * d6fdx2,
+        operand=None,
+    )
+
+    field_axis_last = jnp.moveaxis(field, direction, -1)
+    derivative_axis_last = jnp.moveaxis(d2fdx2, direction, -1)
+
+    def replace_left_boundary(derivative):
+        left_0 = (
+            15.0 / 4.0 * field_axis_last[..., 0]
+            - 77.0 / 6.0 * field_axis_last[..., 1]
+            + 107.0 / 6.0 * field_axis_last[..., 2]
+            - 13.0 * field_axis_last[..., 3]
+            + 61.0 / 12.0 * field_axis_last[..., 4]
+            - 5.0 / 6.0 * field_axis_last[..., 5]
+        ) / dx**2
+        left_1 = (
+            5.0 / 6.0 * field_axis_last[..., 0]
+            - 5.0 / 4.0 * field_axis_last[..., 1]
+            - 1.0 / 3.0 * field_axis_last[..., 2]
+            + 7.0 / 6.0 * field_axis_last[..., 3]
+            - 1.0 / 2.0 * field_axis_last[..., 4]
+            + 1.0 / 12.0 * field_axis_last[..., 5]
+        ) / dx**2
+        derivative = derivative.at[..., 0].set(left_0)
+        derivative = derivative.at[..., 1].set(left_1)
+        return derivative
+
+    # The sixth-order centered stencil has no physical boundary closures yet.
+    derivative_axis_last = jax.lax.cond(
+        (left_bc == SOMMERFELD_BC) | (right_bc == SOMMERFELD_BC),
+        lambda _: jnp.moveaxis(d4fdx2, direction, -1),
+        lambda _: derivative_axis_last,
+        operand=None,
+    )
+    derivative_axis_last = jax.lax.cond(
+        left_bc == SOMMERFELD_BC,
+        replace_left_boundary,
+        lambda derivative: derivative,
+        derivative_axis_last,
+    )
+
+    def replace_right_boundary(derivative):
+        right_1 = (
+            1.0 / 12.0 * field_axis_last[..., -6]
+            - 1.0 / 2.0 * field_axis_last[..., -5]
+            + 7.0 / 6.0 * field_axis_last[..., -4]
+            - 1.0 / 3.0 * field_axis_last[..., -3]
+            - 5.0 / 4.0 * field_axis_last[..., -2]
+            + 5.0 / 6.0 * field_axis_last[..., -1]
+        ) / dx**2
+        right_0 = (
+            -5.0 / 6.0 * field_axis_last[..., -6]
+            + 61.0 / 12.0 * field_axis_last[..., -5]
+            - 13.0 * field_axis_last[..., -4]
+            + 107.0 / 6.0 * field_axis_last[..., -3]
+            - 77.0 / 6.0 * field_axis_last[..., -2]
+            + 15.0 / 4.0 * field_axis_last[..., -1]
+        ) / dx**2
+        derivative = derivative.at[..., -2].set(right_1)
+        derivative = derivative.at[..., -1].set(right_0)
+        return derivative
+
+    derivative_axis_last = jax.lax.cond(
+        right_bc == SOMMERFELD_BC,
+        replace_right_boundary,
+        lambda derivative: derivative,
+        derivative_axis_last,
+    )
+
+    return jnp.moveaxis(derivative_axis_last, -1, direction)
+
 @partial(jit, static_argnames=['direction'])
 def diff6_field(
     field: jnp.ndarray,
@@ -359,15 +475,9 @@ def laplacian_3d(field: jnp.ndarray, dx: float) -> jnp.ndarray:
         3D array containing the Laplacian
     """
 
-    dfdx1 = diff1_field(field, 0, dx)
-    dfdx2 = diff1_field(field, 1, dx)
-    dfdx3 = diff1_field(field, 2, dx)
-    # compute the first derivatives
-
-    d2fdx1dx1 = diff1_field(dfdx1, 0, dx)
-    d2fdx2dx2 = diff1_field(dfdx2, 1, dx)
-    d2fdx3dx3 = diff1_field(dfdx3, 2, dx)
-    # compute the second derivatives
+    d2fdx1dx1 = diff2_field(field, 0, dx)
+    d2fdx2dx2 = diff2_field(field, 1, dx)
+    d2fdx3dx3 = diff2_field(field, 2, dx)
 
     lapl = d2fdx1dx1 + d2fdx2dx2 + d2fdx3dx3
     # sum them to get the Laplacian

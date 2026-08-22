@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field, diff6_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
 from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
 from JAX_BSSN.bssn.tensor_algebra import christoffel_symbols_second_kind, invert_3x3_metric
@@ -125,28 +125,44 @@ def evolve_conformal_connection(vars: BSSNVariables,
     for i in range(3):
         for m in range(3):
             for n in range(3):
-                d2_shift = d2_shift.at[i, m, n].set(
-                    diff1_field(
+                if m == n:
+                    second_derivative = diff2_field(
+                        shift[i],
+                        m,
+                        dx,
+                        *get_boundary_codes(params, m), mad_q=params.mad_q,
+                    )
+                else:
+                    second_derivative = diff1_field(
                         d_shift[i, n],
                         m,
                         dx,
                         *get_boundary_codes(params, m), mad_q=params.mad_q,
                     )
-                )
+                d2_shift = d2_shift.at[i, m, n].set(second_derivative)
     # d2_shift[i, m, n] = partial_m partial_n beta^i
 
     eighth_term = jnp.einsum('mn...,imn...->i...', inv_gamma, d2_shift)
     # gamma^mn partial_m partial_n beta^i
 
-    div_shift_deriv = jnp.stack(
-        [
-            diff1_field(
-                div_shift, m, dx, *get_boundary_codes(params, m), mad_q=params.mad_q
-            )
-            for m in range(3)
-        ],
-        axis=0,
-    )
+    div_shift_deriv = jnp.zeros((3,) + shift.shape[1:], dtype=shift.dtype)
+    for m in range(3):
+        for n in range(3):
+            if m == n:
+                derivative = diff2_field(
+                    shift[n],
+                    m,
+                    dx,
+                    *get_boundary_codes(params, m), mad_q=params.mad_q,
+                )
+            else:
+                derivative = diff1_field(
+                    d_shift[n, n],
+                    m,
+                    dx,
+                    *get_boundary_codes(params, m), mad_q=params.mad_q,
+                )
+            div_shift_deriv = div_shift_deriv.at[m].add(derivative)
     # partial_m partial_n beta^n = partial_m div(beta)
 
     ninth_term = (1.0 / 3.0) * jnp.einsum(

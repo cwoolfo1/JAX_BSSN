@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_first_kind,
@@ -123,17 +123,26 @@ def compute_W2_ricci(vars: BSSNVariables,
     christoffel_first  = christoffel_symbols_first_kind(metric_derivs)
     christoffel_second = christoffel_symbols_second_kind(inv_conformal_metric, metric_derivs)
 
-    # Contract each mixed derivative as it is formed. This preserves the
-    # composed first-derivative stencil without materializing the full tensor.
+    # Contract each second derivative as it is formed without materializing
+    # the full tensor. Pure derivatives use a dedicated D2 stencil; only
+    # derivatives across distinct axes compose the centered D1 operator.
     term_1 = jnp.zeros_like(conformal_metric)
     for m in range(3):
         for n in range(3):
-            metric_second_derivative = diff1_field(
-                metric_derivs[m, ...],
-                n + 2,
-                dx,
-                *get_boundary_codes(params, n), mad_q=params.mad_q,
-            )
+            if m == n:
+                metric_second_derivative = diff2_field(
+                    conformal_metric,
+                    n + 2,
+                    dx,
+                    *get_boundary_codes(params, n), mad_q=params.mad_q,
+                )
+            else:
+                metric_second_derivative = diff1_field(
+                    metric_derivs[m, ...],
+                    n + 2,
+                    dx,
+                    *get_boundary_codes(params, n), mad_q=params.mad_q,
+                )
             term_1 = term_1 - 0.5 * (
                 inv_conformal_metric[m, n] * metric_second_derivative
             )
@@ -180,11 +189,15 @@ def compute_W2_ricci(vars: BSSNVariables,
     dWdij = jnp.zeros((3, 3) + W.shape, dtype=W.dtype)
     for i in range(3):
         for j in range(3):
-            dWdij = dWdij.at[i, j].set(
-                diff1_field(
+            if i == j:
+                second_derivative = diff2_field(
+                    W, j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
+                )
+            else:
+                second_derivative = diff1_field(
                     dWdi[i], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
                 )
-            )
+            dWdij = dWdij.at[i, j].set(second_derivative)
     # second derivatives of W
 
 
@@ -230,11 +243,15 @@ def compute_W2_covariant_lapse_hessian(
     dalphadij = jnp.zeros((3, 3) + alpha.shape, dtype=alpha.dtype)
     for i in range(3):
         for j in range(3):
-            dalphadij = dalphadij.at[i, j].set(
-                diff1_field(
+            if i == j:
+                second_derivative = diff2_field(
+                    alpha, j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
+                )
+            else:
+                second_derivative = diff1_field(
                     dalphadi[i], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
                 )
-            )
+            dalphadij = dalphadij.at[i, j].set(second_derivative)
 
     dWdi = jnp.stack(
         [

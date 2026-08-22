@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax import jit
 
 from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
-from JAX_BSSN.bssn.constraints import compute_momentum_constraint
+from JAX_BSSN.bssn.constraints import compute_momentum_constraint_and_derivative
 from JAX_BSSN.bssn.geometry import compute_W2_covariant_lapse_hessian, compute_W2_ricci
 from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
 from JAX_BSSN.bssn.tensor_algebra import (
@@ -186,19 +186,11 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     # A_ij is shape (3, 3, ni, nj, nk)
     # compute the 6th derivative in each direction
 
-    M = compute_momentum_constraint(vars, params)
-    # Momentum constraint term
+    M, dMidj = compute_momentum_constraint_and_derivative(vars, params)
+    # Momentum constraint and its product-rule spatial derivative
 
     kappa = params.kappa
     # constraint damping parameter
-
-    dMidj = jnp.zeros((3,) + M.shape, dtype=M.dtype)
-
-    for i in range(3):
-        for j in range(3):
-            dMidj = dMidj.at[i, j].set(
-                diff1_field(M[i, ...], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q)
-            )
 
     DjMi = dMidj - jnp.einsum('kij...,k...->ij...', christoffel_second, M)
     DiMj = jnp.swapaxes(DjMi, 0, 1)
