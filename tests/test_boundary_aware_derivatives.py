@@ -13,7 +13,7 @@ from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SOMMERFELD_BC,
 )
-from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field, diff6_field
 
 
 class TestBoundaryAwareDerivatives(unittest.TestCase):
@@ -51,6 +51,49 @@ class TestBoundaryAwareDerivatives(unittest.TestCase):
             rtol=1.0e-13,
             atol=1.0e-10,
         )
+
+    def test_second_derivative_lopsided_coefficients_and_array_axes(self):
+        field_1d = self.x**5 - 0.4 * self.x**4 + 0.2 * self.x**2
+        exact_1d = 20.0 * self.x**3 - 4.8 * self.x**2 + 0.4
+
+        derivative = diff2_field(
+            field_1d, 0, self.dx, SOMMERFELD_BC, SOMMERFELD_BC
+        )
+        boundary_indices = jnp.asarray([0, 1, self.n - 2, self.n - 1])
+        np.testing.assert_allclose(
+            derivative[boundary_indices],
+            exact_1d[boundary_indices],
+            rtol=0.0,
+            atol=2.0e-11,
+        )
+
+        for direction in (0, 1, 2, 3, 4):
+            reshape = (1,) * direction + (self.n,) + (1,) * (4 - direction)
+            shape = (2,) * direction + (self.n,) + (2,) * (4 - direction)
+            field = jnp.broadcast_to(field_1d.reshape(reshape), shape)
+            exact = jnp.broadcast_to(exact_1d.reshape(reshape), shape)
+            numerical = diff2_field(
+                field, direction, self.dx, SOMMERFELD_BC, SOMMERFELD_BC
+            )
+            selected = jnp.take(numerical, boundary_indices, axis=direction)
+            expected = jnp.take(exact, boundary_indices, axis=direction)
+            np.testing.assert_allclose(selected, expected, rtol=0.0, atol=2.0e-11)
+
+    def test_second_derivative_boundary_closure_is_fourth_order(self):
+        errors = []
+        for n in (17, 33, 65):
+            dx = 1.0 / (n - 1)
+            x = dx * jnp.arange(n, dtype=jnp.float64)
+            field = jnp.exp(x)
+            derivative = diff2_field(
+                field, 0, dx, SOMMERFELD_BC, SOMMERFELD_BC
+            )
+            indices = jnp.asarray([0, 1, n - 2, n - 1])
+            errors.append(float(jnp.max(jnp.abs(derivative[indices] - field[indices]))))
+
+        orders = np.log2(np.asarray(errors[:-1]) / np.asarray(errors[1:]))
+        self.assertTrue(np.all(orders > 3.7), orders)
+
     def test_first_derivative_lopsided_coefficients_and_array_axes(self):
         field_1d = self.x**4
         exact_1d = 4.0 * self.x**3

@@ -75,7 +75,7 @@ implemented sequence is:
 8. Refill final fine guard cells from the updated coarse state.
 
 Both parameter sets must have equal ``dt``, and the fine ``dx`` must be exactly
-half the coarse ``dx``. When ``use_mad`` is true, the coarse first-derivative
+half the coarse ``dx``. When ``use_mad`` is true, the coarse derivative
 weight is derived inside the timestep as
 
 .. math::
@@ -83,5 +83,5 @@ weight is derived inside the timestep as
    q_{\mathrm{coarse}}
    = \left(\frac{h_{\mathrm{fine}}}{h_{\mathrm{coarse}}}\right)^4.
 
-The fine level always uses ``mad_q = 1``, the ordinary fourth-order first
-derivative.
+The fine level always uses ``mad_q = 1``, selecting the ordinary fourth-order
+first- and second-derivative operators.

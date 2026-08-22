@@ -10,6 +10,7 @@ import numpy as np
 from JAX_BSSN.bssn.constraints import (
     compute_hamiltonian_constraint,
     compute_momentum_constraint,
+    compute_momentum_constraint_and_derivative,
 )
 from JAX_BSSN.bssn.extrinsic_curvature import (
     evolve_trace_extrinsic_curvature,
@@ -21,7 +22,7 @@ from JAX_BSSN.bssn.geometry import (
     compute_W2_ricci,
 )
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolution.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
 from JAX_BSSN.evolution.time_evolve import enforce_unit_determinant_conformal_metric, rk4_step
 from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_second_kind,
@@ -106,7 +107,12 @@ class TestBSSNEquationRegressions(unittest.TestCase):
         dWdij = jnp.stack(
             [
                 jnp.stack(
-                    [diff1_field(dWdi[i], j, dx) for j in range(3)],
+                    [
+                        diff2_field(W, j, dx)
+                        if i == j
+                        else diff1_field(dWdi[i], j, dx)
+                        for j in range(3)
+                    ],
                     axis=0,
                 )
                 for i in range(3)
@@ -135,7 +141,12 @@ class TestBSSNEquationRegressions(unittest.TestCase):
         dalphadij = jnp.stack(
             [
                 jnp.stack(
-                    [diff1_field(dalphadi[i], j, dx) for j in range(3)],
+                    [
+                        diff2_field(lapse, j, dx)
+                        if i == j
+                        else diff1_field(dalphadi[i], j, dx)
+                        for j in range(3)
+                    ],
                     axis=0,
                 )
                 for i in range(3)
@@ -167,7 +178,13 @@ class TestBSSNEquationRegressions(unittest.TestCase):
         dWdij = jnp.stack(
             [
                 jnp.stack(
-                    [diff1_field(dWdi[i], j, dx) for j in range(3)], axis=0
+                    [
+                        diff2_field(W, j, dx)
+                        if i == j
+                        else diff1_field(dWdi[i], j, dx)
+                        for j in range(3)
+                    ],
+                    axis=0,
                 )
                 for i in range(3)
             ],
@@ -176,7 +193,12 @@ class TestBSSNEquationRegressions(unittest.TestCase):
         dalphadij = jnp.stack(
             [
                 jnp.stack(
-                    [diff1_field(dalphadi[i], j, dx) for j in range(3)],
+                    [
+                        diff2_field(lapse, j, dx)
+                        if i == j
+                        else diff1_field(dalphadi[i], j, dx)
+                        for j in range(3)
+                    ],
                     axis=0,
                 )
                 for i in range(3)
@@ -446,12 +468,7 @@ class TestBSSNEquationRegressions(unittest.TestCase):
             axis=0,
         )
         christoffel = christoffel_symbols_second_kind(inv_gamma, metric_derivs)
-        M_i = compute_momentum_constraint(vars, params1)
-
-        dMidj = jnp.zeros((3,) + M_i.shape)
-        for i in range(3):
-            for j in range(3):
-                dMidj = dMidj.at[i, j].set(diff1_field(M_i[i], j, self.dx))
+        M_i, dMidj = compute_momentum_constraint_and_derivative(vars, params1)
 
         DjMi = dMidj - jnp.einsum("kij...,k...->ij...", christoffel, M_i)
         DiMj = jnp.swapaxes(DjMi, 0, 1)

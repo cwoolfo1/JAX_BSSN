@@ -4,7 +4,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from JAX_BSSN.evolution.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
 
 jax.config.update("jax_enable_x64", True)
 
@@ -15,6 +15,14 @@ def _error(n, q):
     field = jnp.sin(x)[:, None, None]
     exact = jnp.cos(x)[:, None, None]
     return float(jnp.sqrt(jnp.mean((diff1_field(field, 0, dx, mad_q=q) - exact) ** 2)))
+
+
+def _second_error(n, q):
+    dx = 2.0 * np.pi / n
+    x = jnp.arange(n, dtype=jnp.float64) * dx
+    field = jnp.sin(x)[:, None, None]
+    exact = -field
+    return float(jnp.sqrt(jnp.mean((diff2_field(field, 0, dx, mad_q=q) - exact) ** 2)))
 
 
 def _orders(errors):
@@ -54,4 +62,24 @@ def test_leading_error_matches_fine_d4_at_coincident_nodes():
         ratios.append(coarse_error / fine_error)
     print("MAD(H) / D4(h) leading-error ratios", ratios)
     assert abs(ratios[-1] - 1.0) < 2.0e-3
+    assert abs(ratios[-1] - 1.0) < abs(ratios[0] - 1.0)
+
+
+def test_second_derivative_d4_mad_and_d6_formal_orders():
+    ns = (32, 64, 128, 256)
+    d4 = [_second_error(n, 1.0) for n in ns]
+    mad = [_second_error(n, 1.0 / 16.0) for n in ns]
+    d6 = [_second_error(n, 0.0) for n in ns]
+    assert min(_orders(d4)[-2:]) > 3.9
+    assert min(_orders(mad)[-2:]) > 3.8
+    assert min(_orders(d6)[:2]) > 5.8
+
+
+def test_second_derivative_leading_error_matches_fine_d4():
+    ratios = []
+    for coarse_n in (16, 32, 64, 128, 256):
+        fine_error = _second_error(2 * coarse_n, 1.0)
+        coarse_error = _second_error(coarse_n, 1.0 / 16.0)
+        ratios.append(coarse_error / fine_error)
+    assert abs(ratios[-1] - 1.0) < 3.0e-3
     assert abs(ratios[-1] - 1.0) < abs(ratios[0] - 1.0)

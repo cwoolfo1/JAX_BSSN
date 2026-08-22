@@ -21,7 +21,7 @@ from JAX_BSSN.cartoon import (
     validate_cartoon_grid,
 )
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
-from JAX_BSSN.evolution.derivatives import diff1_field, divergence_3d
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field, divergence_3d
 from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs
 
 
@@ -287,8 +287,8 @@ def test_transverse_second_derivative_converges_at_fourth_order():
             _params(num_radial_points, dx),
         )
 
-        d2fdy2 = diff1_field(
-            diff1_field(support.conformal_factor, 1, dx), 1, dx
+        d2fdy2 = diff2_field(
+            support.conformal_factor, 1, dx
         )[:, CARTOON_CENTER, CARTOON_CENTER]
         x = (
             jnp.arange(num_radial_points + CARTOON_GHOST_CELLS)

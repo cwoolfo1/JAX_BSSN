@@ -15,7 +15,7 @@ from JAX_BSSN.bssn.shift_and_lapse import (
 )
 from JAX_BSSN.bssn.spatial_metric import evolve_conformal_metric
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolution.derivatives import diff1_field
+from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
 from JAX_BSSN.evolution.time_evolve import rk4_step
 
 
@@ -126,16 +126,21 @@ class TestShiftEvolution(unittest.TestCase):
         dt_Gamma = evolve_conformal_connection(vars, self.params)
 
         d_beta = compute_shift_derivatives(beta, self.params)
-        div_beta = d_beta[0, 0] + d_beta[1, 1] + d_beta[2, 2]
         expected = jnp.zeros((3,) + self.shape)
         for i in range(3):
             laplacian_beta_i = sum(
-                diff1_field(diff1_field(beta[i], m, self.dx), m, self.dx)
+                diff2_field(beta[i], m, self.dx)
                 for m in range(3)
+            )
+            grad_div_beta_i = sum(
+                diff2_field(beta[n], i, self.dx)
+                if i == n
+                else diff1_field(d_beta[n, n], i, self.dx)
+                for n in range(3)
             )
             expected = expected.at[i].set(
                 laplacian_beta_i
-                + (1.0 / 3.0) * diff1_field(div_beta, i, self.dx)
+                + (1.0 / 3.0) * grad_div_beta_i
             )
 
         np.testing.assert_allclose(dt_Gamma, expected, atol=3.0e-5)

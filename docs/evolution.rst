@@ -5,8 +5,8 @@ The evolution package owns the discretization and the placement of boundary
 and algebraic constraint operations for the BSSN equations.
 
 
-First derivatives and MAD
--------------------------
+First and second derivatives with MAD
+-------------------------------------
 
 ``diff1_field`` treats ``direction`` as an absolute array axis. Scalar fields
 therefore use directions 0, 1, and 2; vectors and tensors add their leading
@@ -27,9 +27,16 @@ centered sixth-order-accurate first derivative:
 
    D_{\mathrm{MAD}} = qD_4 + (1-q)D_6.
 
+``diff2_field`` applies the same MAD weight to dedicated centered second-
+derivative stencils.  With ``mad_q = 1`` it uses the five-point fourth-order
+operator; ``mad_q = 0`` selects the seven-point sixth-order operator.  Pure
+second derivatives never compose two centered first derivatives.  Mixed
+derivatives across distinct axes continue to compose the corresponding first
+derivative operators.
+
 FMR derives the coarse value of ``q`` from the spacing ratio and forces the
-fine value to one. On a physical Sommerfeld axis, first derivatives
-deliberately retain the fourth-order operator.
+fine value to one. On a physical Sommerfeld axis, first and second derivatives
+deliberately retain their fourth-order operators.
 
 Kreiss--Oliger dissipation
 --------------------------

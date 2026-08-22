@@ -63,10 +63,10 @@ are internal parity ghosts, not a physical face. The outer ``x`` face is
 Sommerfeld and all temporary ``y``/``z`` faces are periodic. Coordinate minima
 must be ``(-3.5dx, -4dx, -4dx)``.
 
-The current ``9 x 9`` support is sized for the composed fourth-order
-derivatives and requires ``mad_q = 1``. Cartoon setup rejects other MAD
-weights rather than allowing transverse stencils to exceed the reconstructed
-support.
+The current ``9 x 9`` support conservatively accommodates the fourth-order
+first-, second-, and mixed-derivative stencils and requires ``mad_q = 1``.
+Cartoon setup rejects other MAD weights rather than allowing transverse
+stencils to exceed the reconstructed support.
 
 Constraints and output
 ----------------------

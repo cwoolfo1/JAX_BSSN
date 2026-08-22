@@ -14,6 +14,7 @@ from scipy import stats
 
 from JAX_BSSN.evolution.derivatives import (
     diff1_field,
+    diff2_field,
     diff6_field,
     compute_all_derivatives,
     gradient_3d,
@@ -26,6 +27,22 @@ from JAX_BSSN.evolution.derivatives import (
 
 class TestDerivatives(unittest.TestCase):
     """Test suite for finite difference derivatives."""
+
+    def test_second_derivative_rejects_centered_d1_checkerboard_null_mode(self):
+        n = 32
+        dx = 0.2
+        checkerboard = ((-1.0) ** jnp.arange(n))[:, None, None]
+
+        composed = diff1_field(diff1_field(checkerboard, 0, dx), 0, dx)
+        dedicated = diff2_field(checkerboard, 0, dx)
+
+        np.testing.assert_allclose(composed, 0.0, rtol=0.0, atol=1.0e-12)
+        np.testing.assert_allclose(
+            dedicated,
+            -(16.0 / 3.0) * checkerboard / dx**2,
+            rtol=1.0e-12,
+            atol=1.0e-12,
+        )
 
     def test_first_derivative_1d_trigonometric(self):
         """
