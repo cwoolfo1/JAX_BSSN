@@ -156,6 +156,167 @@ def diff1_field(
     # Using 4th-order central difference
 
 
+@partial(jit, static_argnames=["direction"])
+def diff1_upwind_field(
+    field: jnp.ndarray,
+    rhs_coefficient: jnp.ndarray,
+    direction: int,
+    dx: float,
+    left_bc: int = 0,
+    right_bc: int = 0,
+    mad_q: float = 1.0,
+) -> jnp.ndarray:
+    """Compute a shift-advection first derivative along one array axis.
+
+    ``rhs_coefficient`` is the coefficient ``c`` in a right-hand-side term
+    ``+ c * partial_i(field)``.  This convention matters: positive ``c``
+    selects the forward-biased derivative because the equivalent transport
+    velocity in ``partial_t(field) + v * partial_i(field) = ...`` is
+    ``v = -c``.  Negative coefficients select the mirrored backward-biased
+    derivative, while a zero coefficient selects the centered derivative.
+
+    The fourth-order biased stencil is blended with its sixth-order counterpart
+    using the same MAD weight as :func:`diff1_field`.  A physical Sommerfeld
+    face forces fourth order on the whole axis.  At each such face the outer
+    three points are replaced by the existing boundary-aware centered D4
+    derivative, preventing periodic ``roll`` values from entering the biased
+    stencil.
+
+    ``direction`` is an absolute array axis.  A coefficient containing only
+    the trailing spatial dimensions therefore broadcasts naturally over any
+    leading tensor-component dimensions of ``field``.
+
+    Args:
+        field: Field values, optionally with leading component dimensions.
+        rhs_coefficient: Coefficient of this derivative in the evolution RHS.
+        direction: Absolute array axis along which to differentiate.
+        dx: Grid spacing along ``direction``.
+        left_bc: Boundary code for the left face on this spatial axis.
+        right_bc: Boundary code for the right face on this spatial axis.
+        mad_q: D4 weight in the D4/D6 MAD blend.
+
+    Returns:
+        An array with the same shape as ``field`` containing the selected
+        derivative (without multiplication by ``rhs_coefficient``).
+    """
+
+    forward1 = jnp.roll(field, -1, axis=direction)
+    forward2 = jnp.roll(field, -2, axis=direction)
+    forward3 = jnp.roll(field, -3, axis=direction)
+    backward1 = jnp.roll(field, 1, axis=direction)
+    backward2 = jnp.roll(field, 2, axis=direction)
+    backward3 = jnp.roll(field, 3, axis=direction)
+
+    d4_forward = (
+        -3.0 * backward1
+        - 10.0 * field
+        + 18.0 * forward1
+        - 6.0 * forward2
+        + forward3
+    ) / (12.0 * dx)
+    d4_backward = (
+        -backward3
+        + 6.0 * backward2
+        - 18.0 * backward1
+        + 10.0 * field
+        + 3.0 * forward1
+    ) / (12.0 * dx)
+    d4_centered = (
+        2.0 / 3.0 * (forward1 - backward1)
+        - 1.0 / 12.0 * (forward2 - backward2)
+    ) / dx
+
+    physical_axis = (left_bc == SOMMERFELD_BC) | (
+        right_bc == SOMMERFELD_BC
+    )
+
+    def d4_stencils(_):
+        return d4_forward, d4_backward, d4_centered
+
+    def mad_stencils(_):
+        forward4 = jnp.roll(field, -4, axis=direction)
+        backward4 = jnp.roll(field, 4, axis=direction)
+
+        d6_forward = (
+            2.0 * backward2
+            - 24.0 * backward1
+            - 35.0 * field
+            + 80.0 * forward1
+            - 30.0 * forward2
+            + 8.0 * forward3
+            - forward4
+        ) / (60.0 * dx)
+        d6_backward = (
+            backward4
+            - 8.0 * backward3
+            + 30.0 * backward2
+            - 80.0 * backward1
+            + 35.0 * field
+            + 24.0 * forward1
+            - 2.0 * forward2
+        ) / (60.0 * dx)
+        d6_centered = (
+            3.0 / 4.0 * (forward1 - backward1)
+            - 3.0 / 20.0 * (forward2 - backward2)
+            + 1.0 / 60.0 * (forward3 - backward3)
+        ) / dx
+
+        return (
+            mad_q * d4_forward + (1.0 - mad_q) * d6_forward,
+            mad_q * d4_backward + (1.0 - mad_q) * d6_backward,
+            mad_q * d4_centered + (1.0 - mad_q) * d6_centered,
+        )
+
+    forward, backward, centered = jax.lax.cond(
+        (mad_q == 1.0) | physical_axis,
+        d4_stencils,
+        mad_stencils,
+        operand=None,
+    )
+    derivative = jnp.where(
+        rhs_coefficient > 0.0,
+        forward,
+        jnp.where(rhs_coefficient < 0.0, backward, centered),
+    )
+
+    def replace_physical_boundaries(selected):
+        centered_d4 = diff1_field(
+            field,
+            direction,
+            dx,
+            left_bc,
+            right_bc,
+            mad_q=1.0,
+        )
+        selected_axis_last = jnp.moveaxis(selected, direction, -1)
+        centered_axis_last = jnp.moveaxis(centered_d4, direction, -1)
+
+        selected_axis_last = jax.lax.cond(
+            left_bc == SOMMERFELD_BC,
+            lambda derivative_axis_last: derivative_axis_last.at[..., :3].set(
+                centered_axis_last[..., :3]
+            ),
+            lambda derivative_axis_last: derivative_axis_last,
+            selected_axis_last,
+        )
+        selected_axis_last = jax.lax.cond(
+            right_bc == SOMMERFELD_BC,
+            lambda derivative_axis_last: derivative_axis_last.at[..., -3:].set(
+                centered_axis_last[..., -3:]
+            ),
+            lambda derivative_axis_last: derivative_axis_last,
+            selected_axis_last,
+        )
+        return jnp.moveaxis(selected_axis_last, -1, direction)
+
+    return jax.lax.cond(
+        physical_axis,
+        replace_physical_boundaries,
+        lambda selected: selected,
+        derivative,
+    )
+
+
 @partial(jit, static_argnames=['direction'])
 def diff2_field(
     field: jnp.ndarray,

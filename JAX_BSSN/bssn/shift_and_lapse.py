@@ -4,7 +4,11 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
+from JAX_BSSN.evolution.derivatives import (
+    diff1_field,
+    diff1_upwind_field,
+    diff6_field,
+)
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 
 
@@ -42,6 +46,36 @@ def compute_shift_derivatives(
     return d_beta
 
 
+@jit
+def compute_shift_advection(
+    field: jnp.ndarray, shift: jnp.ndarray, params: BSSNParameters
+) -> jnp.ndarray:
+    """Return the upwinded shift-advection term ``beta^i partial_i field``.
+
+    ``diff1_upwind_field`` interprets its coefficient with the sign it has on
+    the right-hand side. Passing ``shift[i]`` therefore selects the stable
+    lop-sided stencil for the BSSN convention
+    ``partial_t field = ... + beta^i partial_i field``. Only transport terms
+    use this helper; derivatives of the shift in Lie and geometric terms must
+    continue to use :func:`compute_shift_derivatives`.
+    """
+
+    spatial_start = field.ndim - 3
+    directional_terms = [
+        shift[direction]
+        * diff1_upwind_field(
+            field,
+            shift[direction],
+            spatial_start + direction,
+            params.dx,
+            *get_boundary_codes(params, direction),
+            mad_q=params.mad_q,
+        )
+        for direction in range(3)
+    ]
+    return sum(directional_terms)
+
+
 
 
 @jit
@@ -56,8 +90,6 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     Returns:
         Time derivative of lapse
     """
-    dx = params.dx
-
     def harmonic_slicing(_):
         return -jnp.power(vars.lapse, 2) * vars.trace_K
 
@@ -72,19 +104,8 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     )
     # choose the lapse source term without leaving JIT-compatible control flow
 
-    grad_alpha = jnp.stack(
-        [
-            diff1_field(
-                vars.lapse, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
-            )
-            for d in range(3)
-        ],
-        axis=0,
-    )
-    # first derivatives of the lapse
-
-    advection_term = jnp.einsum('m...,m...->...', vars.shift, grad_alpha)
-    # advect the lapse with the shift
+    advection_term = compute_shift_advection(vars.lapse, vars.shift, params)
+    # advect the lapse with the shift using the production upwind operator
 
     dalpha_dx1 = diff6_field(
         vars.lapse, 0, params.dx, *get_boundary_codes(params, 0)
@@ -119,11 +140,8 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     shift = vars.shift
     # unpack the shift vector
 
-    grad_shift = compute_shift_derivatives(shift, params)
-    # grad_shift[i, j] = partial_j beta^i
-
-    advection_term = jnp.einsum('j...,ij...->i...', shift, grad_shift)
-    # beta^j partial_j beta^i
+    advection_term = compute_shift_advection(shift, shift, params)
+    # beta^j partial_j beta^i, with only this transport derivative upwinded
 
     gamma_driver_term = params.g * vars.conformal_connection
     # single-variable Gamma-driver source for beta^i

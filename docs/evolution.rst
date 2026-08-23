@@ -38,6 +38,54 @@ FMR derives the coarse value of ``q`` from the spacing ratio and forces the
 fine value to one. On a physical Sommerfeld axis, first and second derivatives
 deliberately retain their fourth-order operators.
 
+Upwind shift advection
+----------------------
+
+``diff1_upwind_field`` is the first-derivative operator used only for shift
+advection. Its ``rhs_coefficient`` argument is the coefficient :math:`c` in
+
+.. math::
+
+   \partial_t u = \cdots + c\,\partial_i u.
+
+This convention is important: the corresponding transport velocity is
+:math:`-c`. A positive RHS coefficient therefore selects the forward-biased
+fourth-order stencil
+
+.. math::
+
+   D^{+}_4 f_i = \frac{-3f_{i-1}-10f_i+18f_{i+1}
+                     -6f_{i+2}+f_{i+3}}{12h},
+
+while a negative coefficient selects
+
+.. math::
+
+   D^{-}_4 f_i = \frac{-f_{i-3}+6f_{i-2}-18f_{i-1}
+                     +10f_i+3f_{i+1}}{12h}.
+
+As with centered first derivatives, MAD blends fourth- and sixth-order
+operators:
+
+.. math::
+
+   D_{\mathrm{upwind,MAD}} = qD_{4,\mathrm{upwind}}
+                              +(1-q)D_{6,\mathrm{upwind}}.
+
+The forward sixth-order stencil uses offsets ``(-2,-1,0,1,2,3,4)`` and
+coefficients ``(2,-24,-35,80,-30,8,-1)/(60h)``. The backward stencil uses
+offsets ``(-4,-3,-2,-1,0,1,2)`` and coefficients
+``(1,-8,30,-80,35,24,-2)/(60h)``. At a zero coefficient the selection falls
+back to the centered derivative; multiplication by that coefficient makes
+the complete advection contribution exactly zero.
+
+``mad_q = 1`` takes a dedicated D4 fast path, so the wider D6 stencil is not
+evaluated. On an axis with a physical Sommerfeld face the operator also uses
+D4 regardless of ``mad_q``. Within the three grid points adjacent to each
+configured Sommerfeld face, its biased result is replaced by the existing
+boundary-aware centered D4 derivative. This prevents a rolled biased stencil
+from importing values across a nonperiodic face.
+
 Kreiss--Oliger dissipation
 --------------------------
 

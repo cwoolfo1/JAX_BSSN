@@ -116,6 +116,23 @@ The shift uses a single-variable Gamma driver with advection and linear
 damping. ``zero_shift = 1`` suppresses the shift RHS at every RK stage;
 otherwise the configured driver is evolved.
 
+Shift advection
+---------------
+
+All seven evolved fields use the shared ``compute_shift_advection`` path for
+terms of the form
+
+.. math::
+
+   +\beta^i\partial_i u
+
+on the right-hand side: :math:`\tilde{\gamma}_{ij}`, :math:`W`,
+:math:`\tilde{A}_{ij}`, :math:`K`, :math:`\tilde{\Gamma}^i`, :math:`\alpha`,
+and :math:`\beta^i` itself. The positive sign here is the RHS-coefficient
+convention used by ``diff1_upwind_field``; its transport characteristic has
+velocity :math:`-\beta^i`, so positive :math:`\beta^i` selects a
+forward-biased derivative.
+
 Algebraic constraints
 ---------------------
 

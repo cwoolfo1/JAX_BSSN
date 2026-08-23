@@ -12,3 +12,6 @@ tests/__pycache__/
 demos/linear_wave/output/
 docs/_build/
 PKG-INFO
+*.mp4
+*.json
+*.csv

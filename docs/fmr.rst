@@ -84,4 +84,10 @@ weight is derived inside the timestep as
    = \left(\frac{h_{\mathrm{fine}}}{h_{\mathrm{coarse}}}\right)^4.
 
 The fine level always uses ``mad_q = 1``, selecting the ordinary fourth-order
-first- and second-derivative operators.
+first- and second-derivative operators. The same weight controls shift
+advection: with the fixed 2:1 ratio and ``use_mad = True``, the coarse level
+uses :math:`q=(1/2)^4=1/16` to blend its D4 and D6 upwind derivatives, while
+the fine level takes the D4 fast path. Setting ``use_mad = False`` selects
+``q = 1`` on both levels. Four guard cells cover the coarse D6 upwind reach of
+four points and the fine D4 upwind reach of three points at every synchronized
+RK stage.

@@ -6,7 +6,10 @@ from jax import jit
 from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 from JAX_BSSN.bssn.constraints import compute_momentum_constraint_and_derivative
 from JAX_BSSN.bssn.geometry import compute_W2_covariant_lapse_hessian, compute_W2_ricci
-from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
+from JAX_BSSN.bssn.shift_and_lapse import (
+    compute_shift_advection,
+    compute_shift_derivatives,
+)
 from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_second_kind,
     invert_3x3_metric,
@@ -52,17 +55,8 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     shift = vars.shift
     # unpack the shift vector
 
-    grad_K = jnp.stack(
-        [
-            diff1_field(K, d, params.dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
-            for d in range(3)
-        ],
-        axis=0,
-    )
-    # compute the gradient of K
-
-    fourth_term = jnp.einsum('i...,i...->...', shift, grad_K)
-    # compute the advection term due to shift
+    fourth_term = compute_shift_advection(K, shift, params)
+    # compute the upwinded advection term due to shift
 
 
     dt_K = first_term + second_term + third_term + fourth_term
@@ -141,22 +135,8 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     grad_shift = compute_shift_derivatives(shift, params)
     # compute the gradient of the shift vector
 
-    grad_A = jnp.stack(
-        [
-            diff1_field(
-                A_ij,
-                d + 2,
-                params.dx,
-                *get_boundary_codes(params, d), mad_q=params.mad_q,
-            )
-            for d in range(3)
-        ],
-        axis=0,
-    )
-    # compute the gradient of A_ij
-
-    fourth_term = jnp.einsum('m...,mij...->ij...', shift, grad_A)
-    # compute the advection term due to shift
+    fourth_term = compute_shift_advection(A_ij, shift, params)
+    # compute the upwinded advection term due to shift
 
     fifth_term = (
         jnp.einsum('mi...,mj...->ij...', A_ij, grad_shift)

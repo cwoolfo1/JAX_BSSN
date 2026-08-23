@@ -46,19 +46,42 @@ def _interpolate_nodes(array, nodes, weights, axis):
     return jnp.transpose(interpolated, permutation)
 
 
+def lagrange6_stencil(q: jnp.ndarray, source_size: int) -> jnp.ndarray:
+    """Return the six nonperiodic source indices selected for each target."""
+
+    if source_size < 6:
+        raise ValueError("six-point Lagrange interpolation needs six samples")
+    q = jnp.asarray(q)
+    base = jnp.floor(q).astype(jnp.int32)
+    start = jnp.clip(base - 2, 0, source_size - 6)
+    return start[..., None] + jnp.arange(6, dtype=jnp.int32)
+
+
 @partial(jit, static_argnames=("axis",))
 def lagrange6_nonperiodic(
     array: jnp.ndarray,
     q: jnp.ndarray,
     axis: int = -1,
 ) -> jnp.ndarray:
-    """Interpolate or extrapolate from the nearest six valid source nodes."""
+    """Interpolate between source nodes without polynomial extrapolation.
+
+    Targets outside ``[0, source_size - 1]`` return NaN.  This makes a
+    missing physical interpolation buffer visible instead of silently using a
+    clipped high-order extrapolation stencil.
+    """
 
     q = jnp.asarray(q)
+    axis = axis % array.ndim
     source_size = array.shape[axis]
-    base = jnp.floor(q).astype(jnp.int32)
-    start = jnp.clip(base - 2, 0, source_size - 6)
-    nodes = start[..., None] + jnp.arange(6, dtype=jnp.int32)
+    nodes = lagrange6_stencil(q, source_size)
     weights = lagrange6_weights(q, nodes)
+    interpolated = _interpolate_nodes(array, nodes, weights, axis)
 
-    return _interpolate_nodes(array, nodes, weights, axis)
+    valid = (q >= 0) & (q <= source_size - 1)
+    valid_shape = (
+        (1,) * axis
+        + valid.shape
+        + (1,) * (array.ndim - axis - 1)
+    )
+
+    return jnp.where(valid.reshape(valid_shape), interpolated, jnp.nan)

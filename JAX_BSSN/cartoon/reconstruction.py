@@ -1,7 +1,5 @@
 """Compact spherical Cartoon storage and Cartesian support reconstruction."""
 
-from typing import NamedTuple
-
 import jax.numpy as jnp
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
@@ -12,22 +10,9 @@ from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 CARTOON_GHOST_CELLS = 4
 CARTOON_SUPPORT_SIZE = 2 * CARTOON_GHOST_CELLS + 1
 CARTOON_CENTER = CARTOON_GHOST_CELLS
+CARTOON_OUTER_BUFFER_CELLS = 3
 
 VECTOR_X_REFLECTION_PARITY = (-1.0, 1.0, 1.0)
-
-
-class SphericalProfiles(NamedTuple):
-    """Nine independent radial functions in a spherical BSSN state."""
-
-    conformal_factor: jnp.ndarray
-    trace_K: jnp.ndarray
-    lapse: jnp.ndarray
-    shift_radial: jnp.ndarray
-    connection_radial: jnp.ndarray
-    metric_radial: jnp.ndarray
-    metric_tangential: jnp.ndarray
-    A_radial: jnp.ndarray
-    A_tangential: jnp.ndarray
 
 
 def _vector_parity(dtype):
@@ -205,33 +190,6 @@ def fill_cartoon_ghosts(vars: BSSNVariables) -> BSSNVariables:
     )
 
 
-def _extract_profiles(vars: BSSNVariables) -> SphericalProfiles:
-    metric_radial = cartoon_positive_radius(vars.conformal_metric[0, 0])
-    metric_tangential = 0.5 * (
-        cartoon_positive_radius(vars.conformal_metric[1, 1])
-        + cartoon_positive_radius(vars.conformal_metric[2, 2])
-    )
-    A_radial = cartoon_positive_radius(vars.traceless_K[0, 0])
-    A_tangential = 0.5 * (
-        cartoon_positive_radius(vars.traceless_K[1, 1])
-        + cartoon_positive_radius(vars.traceless_K[2, 2])
-    )
-
-    return SphericalProfiles(
-        conformal_factor=cartoon_positive_radius(vars.conformal_factor),
-        trace_K=cartoon_positive_radius(vars.trace_K),
-        lapse=cartoon_positive_radius(vars.lapse),
-        shift_radial=cartoon_positive_radius(vars.shift[0]),
-        connection_radial=cartoon_positive_radius(
-            vars.conformal_connection[0]
-        ),
-        metric_radial=metric_radial,
-        metric_tangential=metric_tangential,
-        A_radial=A_radial,
-        A_tangential=A_tangential,
-    )
-
-
 def _cartoon_geometry(num_x, dx, dtype):
     spacing = jnp.asarray(dx, dtype=dtype)
     x = (
@@ -259,19 +217,43 @@ def _cartoon_geometry(num_x, dx, dtype):
     return r, direction
 
 
-def _interpolate_profile(profile, r, dx):
-    q = r / jnp.asarray(dx, dtype=r.dtype) - 0.5
-    return lagrange6_nonperiodic(profile, q)
+def _sommerfeld_outer_buffer(axis, asymptotic_value, dx):
+    """Append temporary samples with Sommerfeld's radial 1/r falloff.
+
+    The compact state's last sample remains the physical outer face.  These
+    three reconstruction-only samples prevent off-axis radii from requesting
+    polynomial extrapolation beyond that face.
+    """
+
+    spacing = jnp.asarray(dx, dtype=axis.dtype)
+    asymptotic = jnp.asarray(asymptotic_value, dtype=axis.dtype)
+    asymptotic = jnp.broadcast_to(asymptotic, axis.shape[:-1])[..., None]
+    outer_radius = (
+        axis.shape[-1] - CARTOON_GHOST_CELLS - 0.5
+    ) * spacing
+    buffer_radius = outer_radius + spacing * jnp.arange(
+        1, CARTOON_OUTER_BUFFER_CELLS + 1, dtype=axis.dtype
+    )
+    buffer = asymptotic + (axis[..., -1:] - asymptotic) * (
+        outer_radius / buffer_radius
+    )
+    return jnp.concatenate((axis, buffer), axis=-1)
 
 
-def _reconstruct_vector(radial_profile, r, direction, dx):
-    amplitude = _interpolate_profile(radial_profile, r, dx)
-    return amplitude[None, ...] * direction
+def _interpolate_axis(field, r, dx, asymptotic_value):
+    """Interpolate the full parity-filled signed axis at positive radius."""
+
+    axis = cartoon_centerline(field)
+    axis = _sommerfeld_outer_buffer(axis, asymptotic_value, dx)
+    q = (
+        r / jnp.asarray(dx, dtype=r.dtype)
+        + CARTOON_GHOST_CELLS
+        - 0.5
+    )
+    return lagrange6_nonperiodic(axis, q, axis=-1)
 
 
-def _reconstruct_tensor(radial_profile, tangential_profile, r, direction, dx):
-    radial = _interpolate_profile(radial_profile, r, dx)
-    tangential = _interpolate_profile(tangential_profile, r, dx)
+def _reconstruct_tensor(radial, tangential, direction):
     identity = jnp.eye(3, dtype=radial.dtype)[:, :, None, None, None]
 
     return (
@@ -284,39 +266,54 @@ def _reconstruct_tensor(radial_profile, tangential_profile, r, direction, dx):
 def reconstruct_cartoon_support(
     vars: BSSNVariables, params: BSSNParameters
 ) -> BSSNVariables:
-    """Build temporary Cartesian support from compact radial profiles."""
+    """Build Cartesian support by signed-axis interpolation and rotation."""
 
     vars = fill_cartoon_ghosts(vars)
-    profiles = _extract_profiles(vars)
     num_x = vars.conformal_factor.shape[0]
     r, direction = _cartoon_geometry(num_x, params.dx, vars.lapse.dtype)
 
+    conformal_factor = _interpolate_axis(
+        vars.conformal_factor, r, params.dx, 1.0
+    )
+    trace_K = _interpolate_axis(vars.trace_K, r, params.dx, 0.0)
+    lapse = _interpolate_axis(vars.lapse, r, params.dx, 1.0)
+
+    shift_radial = _interpolate_axis(vars.shift[0], r, params.dx, 0.0)
+    connection_radial = _interpolate_axis(
+        vars.conformal_connection[0], r, params.dx, 0.0
+    )
+    shift = shift_radial[None, ...] * direction
+    conformal_connection = connection_radial[None, ...] * direction
+
+    metric_radial = _interpolate_axis(
+        vars.conformal_metric[0, 0], r, params.dx, 1.0
+    )
+    metric_tangential = _interpolate_axis(
+        vars.conformal_metric[1, 1], r, params.dx, 1.0
+    )
+    A_radial = _interpolate_axis(
+        vars.traceless_K[0, 0], r, params.dx, 0.0
+    )
+    A_tangential = _interpolate_axis(
+        vars.traceless_K[1, 1], r, params.dx, 0.0
+    )
+
     return BSSNVariables(
         conformal_metric=_reconstruct_tensor(
-            profiles.metric_radial,
-            profiles.metric_tangential,
-            r,
+            metric_radial,
+            metric_tangential,
             direction,
-            params.dx,
         ),
-        conformal_factor=_interpolate_profile(
-            profiles.conformal_factor, r, params.dx
-        ),
+        conformal_factor=conformal_factor,
         traceless_K=_reconstruct_tensor(
-            profiles.A_radial,
-            profiles.A_tangential,
-            r,
+            A_radial,
+            A_tangential,
             direction,
-            params.dx,
         ),
-        trace_K=_interpolate_profile(profiles.trace_K, r, params.dx),
-        conformal_connection=_reconstruct_vector(
-            profiles.connection_radial, r, direction, params.dx
-        ),
-        lapse=_interpolate_profile(profiles.lapse, r, params.dx),
-        shift=_reconstruct_vector(
-            profiles.shift_radial, r, direction, params.dx
-        ),
+        trace_K=trace_K,
+        conformal_connection=conformal_connection,
+        lapse=lapse,
+        shift=shift,
     )
 
 

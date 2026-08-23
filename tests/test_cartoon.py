@@ -7,6 +7,7 @@ from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.cartoon import (
     CARTOON_CENTER,
     CARTOON_GHOST_CELLS,
+    CARTOON_OUTER_BUFFER_CELLS,
     CARTOON_SUPPORT_SIZE,
     cartoon_centerline,
     cartoon_positive_radius,
@@ -15,6 +16,7 @@ from JAX_BSSN.cartoon import (
     compute_cartoon_constraint_norms,
     compute_cartoon_constraints,
     compute_cartoon_rhs,
+    compute_spherical_symmetry_norms,
     expand_cartoon_axis,
     fill_cartoon_ghosts,
     reconstruct_cartoon_support,
@@ -197,8 +199,14 @@ def test_scalar_cartoon_support_reconstruction():
         vars._replace(conformal_factor=W), _params(num_radial_points, dx)
     )
     X, Y, Z = _support_coordinates(num_radial_points, dx)
+    r = jnp.sqrt(X**2 + Y**2 + Z**2)
+    # Keep the degree-five exactness check away from the separate Sommerfeld
+    # continuation region at the outer physical face.
+    interpolation_interior = r <= radius[-3]
     np.testing.assert_allclose(
-        support.conformal_factor, 1.0 + X**2 + Y**2 + Z**2, atol=3.0e-13
+        support.conformal_factor[interpolation_interior],
+        (1.0 + r**2)[interpolation_interior],
+        atol=3.0e-13,
     )
 
 
@@ -228,7 +236,12 @@ def test_vector_and_tensor_cartoon_support_reconstruction():
     coordinates = jnp.stack((X, Y, Z))
     r = jnp.sqrt(X**2 + Y**2 + Z**2)
     direction = coordinates / r
-    np.testing.assert_allclose(support.shift, coordinates, atol=3.0e-13)
+    interpolation_interior = r <= radius[-3]
+    np.testing.assert_allclose(
+        support.shift[:, interpolation_interior],
+        coordinates[:, interpolation_interior],
+        atol=3.0e-13,
+    )
 
     expected_radial = 1.0 + r**2
     expected_tangential = 2.0 + 0.5 * r**2
@@ -239,8 +252,79 @@ def test_vector_and_tensor_cartoon_support_reconstruction():
         * jnp.einsum("i...,j...->ij...", direction, direction)
     )
     np.testing.assert_allclose(
-        support.conformal_metric, expected_metric, atol=5.0e-13
+        support.conformal_metric[:, :, interpolation_interior],
+        expected_metric[:, :, interpolation_interior],
+        atol=5.0e-13,
     )
+
+
+def test_tensor_reconstruction_uses_yy_without_tangential_averaging():
+    num_radial_points, dx = 12, 0.2
+    vars = _empty_variables(num_radial_points)
+    radius = _positive_radius(num_radial_points, dx)
+    metric = _set_positive(
+        vars.conformal_metric,
+        jnp.zeros((3, 3, num_radial_points))
+        .at[0, 0].set(1.0 + radius**2)
+        .at[1, 1].set(2.0 + radius**2)
+        .at[2, 2].set(20.0 + radius**2),
+    )
+    vars = fill_cartoon_ghosts(vars._replace(conformal_metric=metric))
+    support = reconstruct_cartoon_support(
+        vars, _params(num_radial_points, dx)
+    )
+
+    # On the +x centerline, reconstructed zz is the yy tangential input, not
+    # an average of yy and the intentionally corrupted zz component.
+    np.testing.assert_allclose(
+        support.conformal_metric[2, 2, 4:-3, 4, 4],
+        np.asarray(2.0 + radius[:-3] ** 2),
+        atol=3.0e-13,
+    )
+    norms = compute_spherical_symmetry_norms(vars)
+    np.testing.assert_allclose(norms["metric_tangential_linf"], 18.0)
+
+
+def test_outer_buffer_is_finite_and_matches_sommerfeld_falloff():
+    num_radial_points, dx = 12, 0.2
+    vars = _empty_variables(num_radial_points)
+    radius = _positive_radius(num_radial_points, dx)
+    W = _set_positive(vars.conformal_factor, 1.0 + 0.4 / radius)
+    support = reconstruct_cartoon_support(
+        vars._replace(conformal_factor=W), _params(num_radial_points, dx)
+    )
+    X, Y, Z = _support_coordinates(num_radial_points, dx)
+    r = jnp.sqrt(X**2 + Y**2 + Z**2)
+
+    assert bool(jnp.all(jnp.isfinite(support.conformal_factor)))
+    q_max = float(jnp.max(r / dx + CARTOON_GHOST_CELLS - 0.5))
+    buffered_source_size = (
+        num_radial_points
+        + CARTOON_GHOST_CELLS
+        + CARTOON_OUTER_BUFFER_CELLS
+    )
+    assert q_max <= buffered_source_size - 1
+    outer = r > radius[-1]
+    np.testing.assert_allclose(
+        support.conformal_factor[outer],
+        (1.0 + 0.4 / r)[outer],
+        rtol=2.0e-5,
+        atol=2.0e-7,
+    )
+
+
+def test_cartoon_support_reconstruction_is_jittable():
+    num_radial_points, dx = 8, 0.2
+    vars = _empty_variables(num_radial_points)
+    radius = _positive_radius(num_radial_points, dx)
+    W = _set_positive(vars.conformal_factor, 1.0 + radius**2)
+    params = _params(num_radial_points, dx)
+
+    reconstruct = jax.jit(
+        lambda state: reconstruct_cartoon_support(state, params)
+    )
+    support = reconstruct(vars._replace(conformal_factor=W))
+    assert bool(jnp.all(jnp.isfinite(support.conformal_factor)))
 
 
 def test_cartesian_derivatives_recover_transverse_geometry():
@@ -306,6 +390,237 @@ def test_transverse_second_derivative_converges_at_fourth_order():
         for index in range(2)
     ]
     assert min(orders) > 3.8
+
+
+def test_centerline_d4_transverse_stencil_does_not_wrap():
+    dx = 0.2
+    field = jnp.zeros((1, CARTOON_SUPPORT_SIZE, 1), dtype=jnp.float64)
+    center = CARTOON_CENTER
+    coefficients = {
+        -2: 1.0 / 12.0,
+        -1: -2.0 / 3.0,
+        1: 2.0 / 3.0,
+        2: -1.0 / 12.0,
+    }
+
+    for offset, coefficient in coefficients.items():
+        impulse = field.at[0, center + offset, 0].set(1.0)
+        derivative = diff1_field(impulse, 1, dx)
+        np.testing.assert_allclose(
+            derivative[0, center, 0], coefficient / dx
+        )
+
+    boundary_impulses = field.at[0, 0, 0].set(1.0).at[0, -1, 0].set(1.0)
+    derivative = diff1_field(boundary_impulses, 1, dx)
+    np.testing.assert_allclose(derivative[0, center, 0], 0.0)
+
+
+def test_reconstruction_convergence_by_region():
+    fields = ("scalar", "vector", "tensor")
+    region_errors = {
+        region: {field: [] for field in fields}
+        for region in ("origin", "interior", "outer")
+    }
+    for num_radial_points in (24, 48, 96):
+        dx = 2.0 / num_radial_points
+        vars = _empty_variables(num_radial_points)
+        radius = _positive_radius(num_radial_points, dx)
+        scalar = _set_positive(
+            vars.conformal_factor, 1.0 + 0.1 * jnp.exp(-radius**2)
+        )
+        vector_radial = radius * jnp.exp(-radius**2)
+        shift = _set_positive(
+            vars.shift,
+            jnp.stack((vector_radial, 0.0 * radius, 0.0 * radius)),
+        )
+        tangential = 1.0 + 0.05 * jnp.exp(-radius**2)
+        radial = tangential + 0.02 * radius**2 * jnp.exp(-radius**2)
+        metric = _set_positive(
+            vars.conformal_metric,
+            jnp.zeros((3, 3, num_radial_points))
+            .at[0, 0].set(radial)
+            .at[1, 1].set(tangential)
+            .at[2, 2].set(tangential),
+        )
+        support = reconstruct_cartoon_support(
+            vars._replace(
+                conformal_factor=scalar,
+                shift=shift,
+                conformal_metric=metric,
+            ),
+            _params(num_radial_points, dx),
+        )
+        X, Y, Z = _support_coordinates(num_radial_points, dx)
+        coordinates = jnp.stack((X, Y, Z))
+        r = jnp.sqrt(X**2 + Y**2 + Z**2)
+        direction = coordinates / r
+        exact_tangential = 1.0 + 0.05 * jnp.exp(-r**2)
+        exact_radial = (
+            exact_tangential + 0.02 * r**2 * jnp.exp(-r**2)
+        )
+        exact_metric = (
+            exact_tangential[None, None]
+            * jnp.eye(3)[:, :, None, None, None]
+            + (exact_radial - exact_tangential)[None, None]
+            * jnp.einsum("i...,j...->ij...", direction, direction)
+        )
+        errors = {
+            "scalar": jnp.abs(
+                support.conformal_factor
+                - (1.0 + 0.1 * jnp.exp(-r**2))
+            ),
+            "vector": jnp.max(
+                jnp.abs(
+                    support.shift
+                    - r[None] * jnp.exp(-r**2)[None] * direction
+                ),
+                axis=0,
+            ),
+            "tensor": jnp.max(
+                jnp.abs(support.conformal_metric - exact_metric),
+                axis=(0, 1),
+            ),
+        }
+        regions = {
+            "origin": r < 5.0 * dx,
+            "interior": (r > 0.5) & (r < 1.25),
+        }
+        for name, mask in regions.items():
+            for field, error in errors.items():
+                region_errors[name][field].append(
+                    float(jnp.max(error[mask]))
+                )
+
+        outer_scalar = _set_positive(
+            vars.conformal_factor, 1.0 + 0.1 / radius
+        )
+        outer_vector_radial = 0.1 / radius
+        outer_shift = _set_positive(
+            vars.shift,
+            jnp.stack(
+                (
+                    outer_vector_radial,
+                    0.0 * radius,
+                    0.0 * radius,
+                )
+            ),
+        )
+        outer_radial = 1.0 + 0.1 / radius
+        outer_tangential = 1.0 - 0.05 / radius
+        outer_metric = _set_positive(
+            vars.conformal_metric,
+            jnp.zeros((3, 3, num_radial_points))
+            .at[0, 0].set(outer_radial)
+            .at[1, 1].set(outer_tangential)
+            .at[2, 2].set(outer_tangential),
+        )
+        outer_support = reconstruct_cartoon_support(
+            vars._replace(
+                conformal_factor=outer_scalar,
+                shift=outer_shift,
+                conformal_metric=outer_metric,
+            ),
+            _params(num_radial_points, dx),
+        )
+        exact_outer_tangential = 1.0 - 0.05 / r
+        exact_outer_radial = 1.0 + 0.1 / r
+        exact_outer_metric = (
+            exact_outer_tangential[None, None]
+            * jnp.eye(3)[:, :, None, None, None]
+            + (exact_outer_radial - exact_outer_tangential)[None, None]
+            * jnp.einsum("i...,j...->ij...", direction, direction)
+        )
+        outer_errors = {
+            "scalar": jnp.abs(
+                outer_support.conformal_factor - (1.0 + 0.1 / r)
+            ),
+            "vector": jnp.max(
+                jnp.abs(outer_support.shift - (0.1 / r)[None] * direction),
+                axis=0,
+            ),
+            "tensor": jnp.max(
+                jnp.abs(
+                    outer_support.conformal_metric - exact_outer_metric
+                ),
+                axis=(0, 1),
+            ),
+        }
+        outer_mask = r > radius[-3]
+        for field, error in outer_errors.items():
+            region_errors["outer"][field].append(
+                float(jnp.max(error[outer_mask]))
+            )
+
+    for fields_by_region in region_errors.values():
+        for errors in fields_by_region.values():
+            orders = [
+                np.log(errors[index] / errors[index + 1]) / np.log(2.0)
+                for index in range(2)
+            ]
+            assert min(orders) > 5.0
+
+
+def test_minkowski_evolution_and_symmetry_diagnostics_are_exact():
+    num_radial_points, dx = 12, 0.2
+    vars = _empty_variables(num_radial_points)
+    identity = jnp.eye(3)[:, :, None]
+    metric = _set_positive(
+        vars.conformal_metric,
+        jnp.broadcast_to(identity, (3, 3, num_radial_points)),
+    )
+    W = _set_positive(vars.conformal_factor, jnp.ones(num_radial_points))
+    lapse = _set_positive(vars.lapse, jnp.ones(num_radial_points))
+    vars = fill_cartoon_ghosts(
+        vars._replace(conformal_metric=metric, conformal_factor=W, lapse=lapse)
+    )
+    params = _params(num_radial_points, dx)._replace(nu=0.0)
+
+    rhs = compute_cartoon_rhs(vars, params)
+    for field in rhs:
+        np.testing.assert_allclose(field, 0.0, atol=2.0e-13)
+    evolved = cartoon_rk4_step(vars, params)
+    for actual, expected in zip(evolved, vars):
+        np.testing.assert_allclose(actual, expected, atol=2.0e-13)
+    assert all(
+        float(value) < 1.0e-30
+        for value in compute_spherical_symmetry_norms(evolved).values()
+    )
+
+
+def test_schwarzschild_puncture_short_evolution_regression():
+    num_radial_points, dx = 16, 0.5
+    vars = _empty_variables(num_radial_points)
+    radius = _positive_radius(num_radial_points, dx)
+    W_axis = (1.0 + 0.5 / radius) ** -2
+    identity = jnp.eye(3)[:, :, None]
+    metric = _set_positive(
+        vars.conformal_metric,
+        jnp.broadcast_to(identity, (3, 3, num_radial_points)),
+    )
+    W = _set_positive(vars.conformal_factor, W_axis)
+    lapse = _set_positive(vars.lapse, W_axis)
+    vars = fill_cartoon_ghosts(
+        vars._replace(conformal_metric=metric, conformal_factor=W, lapse=lapse)
+    )
+    params = _params(num_radial_points, dx)._replace(
+        dt=0.01 * dx, gauge=1, nu=0.0, kappa=0.0
+    )
+
+    evolved = vars
+    for _ in range(3):
+        evolved = cartoon_rk4_step(evolved, params)
+    assert all(bool(jnp.all(jnp.isfinite(field))) for field in evolved)
+    violations = compute_cartoon_constraints(evolved, params)
+    assert all(
+        bool(jnp.isfinite(value))
+        for value in compute_cartoon_constraint_norms(violations).values()
+    )
+    assert max(
+        float(value)
+        for value in compute_spherical_symmetry_norms(
+            evolved, exclude_outer=4
+        ).values()
+    ) < 2.0e-12
 
 
 def test_cartoon_rk4_evolves_compact_axis_and_refreshes_parity():
@@ -430,7 +745,8 @@ def _full_and_compact_states(full_nx, dx):
 def test_full_3d_and_compact_cartoon_rhs_converge_on_positive_axis():
     resolution_errors = []
 
-    for full_nx in (16, 24):
+    resolutions = (24, 32)
+    for full_nx in resolutions:
         dx = 4.0 / full_nx
         full_vars, full_params, compact_vars, compact_params = (
             _full_and_compact_states(full_nx, dx)
@@ -463,7 +779,9 @@ def test_full_3d_and_compact_cartoon_rhs_converge_on_positive_axis():
 
     coarse_max = max(coarse_errors)
     fine_max = max(fine_errors)
-    observed_order = np.log(coarse_max / fine_max) / np.log(24.0 / 16.0)
+    observed_order = np.log(coarse_max / fine_max) / np.log(
+        resolutions[1] / resolutions[0]
+    )
     assert observed_order > 3.4
 
 

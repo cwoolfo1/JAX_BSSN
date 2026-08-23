@@ -30,18 +30,32 @@ recreates every ghost value from the first four positive samples.
 Spherical reconstruction
 ------------------------
 
-A spherical BSSN state has nine independent radial profiles: three scalars,
-two radial vectors, and radial/tangential values for each symmetric tensor.
-``reconstruct_cartoon_support`` extracts those profiles and reconstructs a
-Cartesian ``(Nr + 4) x 9 x 9`` support grid.
+``reconstruct_cartoon_support`` directly interpolates the parity-filled
+compact centerline and reconstructs a Cartesian ``(Nr + 4) x 9 x 9`` support
+grid. It does not create a separate radial-profile representation or average
+the ``yy`` and ``zz`` tensor components.
 
-Radial profiles are evaluated at
+Axis fields are evaluated at
 :math:`r=\sqrt{x^2+y^2+z^2}` with six-point, degree-five nonperiodic Lagrange
 interpolation. Vectors use :math:`V^i=V_r n^i`; tensors use
 
 .. math::
 
    T_{ij} = T_t\delta_{ij} + (T_r-T_t)n_i n_j.
+
+For the signed compact axis the continuous interpolation coordinate is
+
+.. math::
+
+   q = r/\Delta x + N_{\mathrm{ghost}} - 1/2 = r/\Delta x + 3.5.
+
+Thus the first positive half-cell naturally selects a centered stencil that
+includes the ``-1.5dx`` and ``-0.5dx`` parity ghosts. Three temporary outer
+samples are appended for reconstruction only. They continue each field's
+deviation from its flat-space value as ``1/r``, consistent with the radial
+falloff in the Sommerfeld boundary condition. Out-of-domain interpolation
+returns NaN, so a missing buffer cannot silently become polynomial
+extrapolation.
 
 Only the positive centerline RHS is retained after the Cartesian equations
 are evaluated. Four reflected ghosts are then regenerated from that result.
@@ -54,7 +68,7 @@ For each classical RK4 stage it performs this sequence:
 
 1. Enforce determinant-one and trace-free BSSN algebraic constraints.
 2. Refresh compact origin ghosts from reflection parity.
-3. Reconstruct Cartesian support from the nine radial profiles.
+3. Reconstruct Cartesian support from the parity-filled signed axis.
 4. Evaluate the ordinary Cartesian BSSN RHS and its outer Sommerfeld face.
 5. Project the support RHS back onto compact radial storage.
 
@@ -64,9 +78,14 @@ Sommerfeld and all temporary ``y``/``z`` faces are periodic. Coordinate minima
 must be ``(-3.5dx, -4dx, -4dx)``.
 
 The current ``9 x 9`` support conservatively accommodates the fourth-order
-first-, second-, and mixed-derivative stencils and requires ``mad_q = 1``.
-Cartoon setup rejects other MAD weights rather than allowing transverse
-stencils to exceed the reconstructed support.
+first-, second-, mixed-, and upwind shift-advection stencils. In particular,
+the D4 upwind operator reaches three points toward the transport direction;
+the centerline has four reconstructed samples available on either side.
+Cartoon requires ``mad_q = 1``, which takes the D4 fast path and does not
+evaluate the wider D6 upwind stencil. Setup rejects other MAD weights rather
+than allowing transverse stencils to exceed the supported evolution
+contract. The outer radial Sommerfeld face additionally uses the centered D4
+fallback in its three adjacent points.
 
 Constraints and output
 ----------------------
@@ -75,6 +94,9 @@ Constraints and output
 Cartesian constraints, and projects each result back to compact storage.
 ``compute_cartoon_constraint_norms`` reduces only independent positive-radius
 samples and excludes four outer samples by default.
+``compute_spherical_symmetry_norms`` reports L2 and L-infinity norms of
+``gamma_yy-gamma_zz``, ``A_yy-A_zz``, and reference-axis components that
+should vanish.
 
 ``cartoon_axis_output_fields`` expands compact fields and constraints onto a
 complete reflected ``2*Nr x 1 x 1`` signed axis. Its mapping can be passed

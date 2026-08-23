@@ -3,8 +3,11 @@
 import jax.numpy as jnp
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
-from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
+from JAX_BSSN.evolution.derivatives import diff6_field
+from JAX_BSSN.bssn.shift_and_lapse import (
+    compute_shift_advection,
+    compute_shift_derivatives,
+)
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 
 
@@ -21,28 +24,16 @@ def evolve_conformal_metric(vars: BSSNVariables,
     Returns:
         Time derivative of conformal metric
     """
-    grad_gamma = jnp.stack(
-        [
-            diff1_field(
-                vars.conformal_metric,
-                d + 2,
-                params.dx,
-                *get_boundary_codes(params, d), mad_q=params.mad_q,
-            )
-            for d in range(3)
-        ],
-        axis=0,
-    )
-    # compute the gradient of the conformal metric
-
     shift = vars.shift
     # unpack the shift vector
 
     grad_shift = compute_shift_derivatives(shift, params)
     # grad_shift[i, j] = partial_j beta^i
 
-    first_term = jnp.einsum("m...,mij...->ij...", shift, grad_gamma)
-    # compute the advection term due to shift
+    first_term = compute_shift_advection(
+        vars.conformal_metric, shift, params
+    )
+    # compute the upwinded advection term due to shift
 
     second_term = jnp.einsum("mi...,mj...->ij...", vars.conformal_metric, grad_shift)
     # compute the term due to the gradient of the shift
@@ -98,23 +89,11 @@ def evolve_conformal_factor(vars: BSSNVariables,
     shift = vars.shift
     # unpack the shift vector
 
-    grad_W = jnp.stack(
-        [
-            diff1_field(
-                vars.conformal_factor,
-                d,
-                params.dx,
-                *get_boundary_codes(params, d), mad_q=params.mad_q,
-            )
-            for d in range(3)
-        ],
-        axis=0,
-    )
-    # compute the gradient of the conformal factor
-
     # First term: advection due to shift: beta^i ∂_i W
-    first_term = jnp.einsum('i...,i...->...', shift, grad_W)
-    # compute the advection term due to shift
+    first_term = compute_shift_advection(
+        vars.conformal_factor, shift, params
+    )
+    # compute the upwinded advection term due to shift
 
     # Second term: (1/3) α W K
     second_term = (1.0/3.0) * vars.lapse * vars.conformal_factor * vars.trace_K

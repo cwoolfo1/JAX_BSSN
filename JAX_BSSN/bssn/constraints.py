@@ -7,7 +7,12 @@ from jax import jit
 
 from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE, compute_W2_ricci
-from JAX_BSSN.bssn.tensor_algebra import determinant_3x3_metric, invert_3x3_metric, trace_tensor
+from JAX_BSSN.bssn.tensor_algebra import (
+    christoffel_symbols_second_kind,
+    determinant_3x3_metric,
+    invert_3x3_metric,
+    trace_tensor,
+)
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 
 
@@ -360,7 +365,7 @@ def compute_trace_A_violation(vars: BSSNVariables) -> jnp.ndarray:
     return trace_A
 
 
-# @jit
+@jit
 def compute_gamma_constraint(vars: BSSNVariables,
                             params: BSSNParameters) -> jnp.ndarray:
     """
@@ -377,43 +382,30 @@ def compute_gamma_constraint(vars: BSSNVariables,
         Gamma constraint violation
     """
 
-    # raise NotImplementedError("Gamma constraint computation not implemented")
-    return jnp.zeros_like(vars.lapse)
-    # dx = params.dx
-    # shape = vars.conformal_metric.shape[2:]
-
-    # # Compute metric derivatives
-    # metric_derivs = jnp.zeros((3, 3, 3) + shape)
-    # for i in range(3):
-    #     for j in range(3):
-    #         for k in range(3):
-    #             metric_derivs = metric_derivs.at[k, i, j].set(
-    #                 diff1_field(vars.conformal_metric[i, j], k, dx))
-
-    # # Compute inverse metric
-    # inv_metric = invert_3x3_metric(vars.conformal_metric)
-
-    # # Compute Christoffel symbols
-    # christoffel = christoffel_symbols_second_kind(inv_metric, metric_derivs)
-
-    # # Compute γ^jk Γ^i_jk
-    # gamma_from_christoffel = jnp.zeros((3,) + shape)
-    # for i in range(3):
-    #     for j in range(3):
-    #         for k in range(3):
-    #             gamma_from_christoffel = gamma_from_christoffel.at[i].add(
-    #                 inv_metric[j, k] * christoffel[i, j, k])
-
-    # # Constraint violation
-    # gamma_violation = jnp.zeros((3,) + shape)
-    # for i in range(3):
-    #     gamma_violation = gamma_violation.at[i].set(
-    #         vars.conformal_connection[i] - gamma_from_christoffel[i])
-
-    # return gamma_violation
+    metric_derivatives = jnp.stack(
+        [
+            diff1_field(
+                vars.conformal_metric,
+                direction + 2,
+                params.dx,
+                *get_boundary_codes(params, direction),
+                mad_q=params.mad_q,
+            )
+            for direction in range(3)
+        ],
+        axis=0,
+    )
+    inverse_metric = invert_3x3_metric(vars.conformal_metric)
+    christoffel = christoffel_symbols_second_kind(
+        inverse_metric, metric_derivatives
+    )
+    contracted_christoffel = jnp.einsum(
+        'jk...,ijk...->i...', inverse_metric, christoffel
+    )
+    return vars.conformal_connection - contracted_christoffel
 
 
-# @jit
+@jit
 def compute_all_constraints(vars: BSSNVariables,
                            params: BSSNParameters) -> ConstraintViolations:
     """

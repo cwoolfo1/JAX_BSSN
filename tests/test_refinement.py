@@ -175,3 +175,58 @@ def test_stage_synchronous_gauge_wave_step_is_finite_and_accurate():
     assert float(jnp.sqrt(jnp.mean(error**2))) < 2e-7
     determinant = jnp.linalg.det(jnp.moveaxis(fine.conformal_metric, (0, 1), (-2, -1)))
     np.testing.assert_allclose(fine_active_view(determinant, spec), 1.0, atol=2e-12)
+
+
+def test_stage_synchronous_nonzero_shift_upwind_step_is_finite():
+    # Match the preceding test's shapes so a full-suite run can reuse JIT
+    # compilations while exercising the coarse MAD and fine D4 upwind paths.
+    n, dx = 10, 0.1
+    origin = (-0.5,) * 3
+    x = origin[0] + jnp.arange(n) * dx
+    X, Y, Z = jnp.meshgrid(x, x, x, indexing="ij")
+    spec = FMRPatchSpec((3, 3, 3), (6, 6, 6), use_mad=True)
+    FX, FY, FZ = fine_coordinates(spec, dx, origin)
+
+    shift_components = jnp.asarray((0.125, -0.05, 0.025))
+
+    def with_constant_shift(state):
+        shift = jnp.broadcast_to(
+            shift_components[:, None, None, None], state.shift.shape
+        )
+        return state._replace(shift=shift)
+
+    coarse = with_constant_shift(gauge_wave_analytic_state(X, Y, Z))
+    fine = with_constant_shift(gauge_wave_analytic_state(FX, FY, FZ))
+    coarse_params = BSSNParameters(
+        eta=0.0,
+        kappa=0.0,
+        g=0.0,
+        nu=0.0,
+        dx=dx,
+        dt=0.001,
+        zero_shift=0,
+        gauge=0,
+        x_min=origin[0],
+        y_min=origin[1],
+        z_min=origin[2],
+    )
+    fine_params = coarse_params._replace(
+        dx=dx / 2,
+        x_min=float(FX[0, 0, 0]),
+        y_min=float(FY[0, 0, 0]),
+        z_min=float(FZ[0, 0, 0]),
+    )
+
+    coarse, fine = fmr_rk4_step(
+        coarse, fine, coarse_params, fine_params, spec
+    )
+
+    assert all(bool(jnp.all(jnp.isfinite(field))) for field in coarse + fine)
+    expected_coarse_shift = jnp.broadcast_to(
+        shift_components[:, None, None, None], coarse.shift.shape
+    )
+    expected_fine_shift = jnp.broadcast_to(
+        shift_components[:, None, None, None], fine.shift.shape
+    )
+    np.testing.assert_allclose(coarse.shift, expected_coarse_shift, atol=2e-13)
+    np.testing.assert_allclose(fine.shift, expected_fine_shift, atol=2e-13)

@@ -5,7 +5,10 @@ from jax import jit
 
 from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field, diff6_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
-from JAX_BSSN.bssn.shift_and_lapse import compute_shift_derivatives
+from JAX_BSSN.bssn.shift_and_lapse import (
+    compute_shift_advection,
+    compute_shift_derivatives,
+)
 from JAX_BSSN.bssn.tensor_algebra import christoffel_symbols_second_kind, invert_3x3_metric
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 
@@ -98,22 +101,10 @@ def evolve_conformal_connection(vars: BSSNVariables,
     fourth_term = -2 * jnp.einsum('ij...,j...->i...', A_ij_raised, dalphadi)
     # fourth term
 
-    grad_Gamma = jnp.stack(
-        [
-            diff1_field(
-                vars.conformal_connection,
-                m + 1,
-                dx,
-                *get_boundary_codes(params, m), mad_q=params.mad_q,
-            )
-            for m in range(3)
-        ],
-        axis=0,
+    fifth_term = compute_shift_advection(
+        vars.conformal_connection, shift, params
     )
-    # grad_Gamma[m, i] = partial_m Gamma^i
-
-    fifth_term = jnp.einsum('m...,mi...->i...', shift, grad_Gamma)
-    # advection of the conformal connection by the shift
+    # upwinded advection of the conformal connection by the shift
 
     sixth_term = (2.0 / 3.0) * vars.conformal_connection * div_shift
     # conformal-weight correction from div(beta)

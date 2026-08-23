@@ -13,7 +13,12 @@ from JAX_BSSN.evolution.boundaries import (
     PERIODIC_BC,
     SOMMERFELD_BC,
 )
-from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field, diff6_field
+from JAX_BSSN.evolution.derivatives import (
+    diff1_field,
+    diff1_upwind_field,
+    diff2_field,
+    diff6_field,
+)
 
 
 class TestBoundaryAwareDerivatives(unittest.TestCase):
@@ -50,6 +55,92 @@ class TestBoundaryAwareDerivatives(unittest.TestCase):
             expected_sixth,
             rtol=1.0e-13,
             atol=1.0e-10,
+        )
+
+    def test_upwind_sommerfeld_faces_use_centered_d4_width_three(self):
+        field = jnp.exp(self.x) + 0.1 * self.x**4
+        coefficient = jnp.resize(
+            jnp.asarray([1.0, -1.0, 0.0], dtype=field.dtype), (self.n,)
+        )
+        centered_d4 = diff1_field(
+            field, 0, self.dx, SOMMERFELD_BC, SOMMERFELD_BC, mad_q=1.0
+        )
+        upwind_d4 = diff1_upwind_field(
+            field,
+            coefficient,
+            0,
+            self.dx,
+            SOMMERFELD_BC,
+            SOMMERFELD_BC,
+            mad_q=1.0,
+        )
+        upwind_requested_d6 = diff1_upwind_field(
+            field,
+            coefficient,
+            0,
+            self.dx,
+            SOMMERFELD_BC,
+            SOMMERFELD_BC,
+            mad_q=0.0,
+        )
+
+        np.testing.assert_allclose(
+            upwind_d4[:3], centered_d4[:3], rtol=0.0, atol=1.0e-13
+        )
+        np.testing.assert_allclose(
+            upwind_d4[-3:], centered_d4[-3:], rtol=0.0, atol=1.0e-13
+        )
+        np.testing.assert_allclose(
+            upwind_requested_d6, upwind_d4, rtol=0.0, atol=1.0e-13
+        )
+
+    def test_upwind_physical_face_closures_do_not_use_wrapped_values(self):
+        field = jnp.sin(self.x) + 0.2 * self.x**2
+
+        changed_right = field.at[-4:].set(
+            jnp.asarray([1.0e6, -2.0e6, 3.0e6, -4.0e6])
+        )
+        left_reference = diff1_upwind_field(
+            field,
+            -1.0,
+            0,
+            self.dx,
+            SOMMERFELD_BC,
+            PERIODIC_BC,
+        )
+        left_with_opposite_sentinel = diff1_upwind_field(
+            changed_right,
+            -1.0,
+            0,
+            self.dx,
+            SOMMERFELD_BC,
+            PERIODIC_BC,
+        )
+        np.testing.assert_array_equal(
+            left_with_opposite_sentinel[:3], left_reference[:3]
+        )
+
+        changed_left = field.at[:4].set(
+            jnp.asarray([-5.0e6, 6.0e6, -7.0e6, 8.0e6])
+        )
+        right_reference = diff1_upwind_field(
+            field,
+            1.0,
+            0,
+            self.dx,
+            PERIODIC_BC,
+            SOMMERFELD_BC,
+        )
+        right_with_opposite_sentinel = diff1_upwind_field(
+            changed_left,
+            1.0,
+            0,
+            self.dx,
+            PERIODIC_BC,
+            SOMMERFELD_BC,
+        )
+        np.testing.assert_array_equal(
+            right_with_opposite_sentinel[-3:], right_reference[-3:]
         )
 
     def test_second_derivative_lopsided_coefficients_and_array_axes(self):
