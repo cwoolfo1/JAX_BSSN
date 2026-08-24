@@ -1,18 +1,21 @@
-"""Spherical Cartoon reconstruction, evolution, and diagnostics."""
+"""Cartoon symmetry methods with a legacy spherical root namespace."""
 
-from JAX_BSSN.cartoon.diagnostics import (
+from JAX_BSSN.cartoon.spherical_symmetry.diagnostics import (
     cartoon_axis_output_fields,
     compute_cartoon_constraint_norms,
     compute_cartoon_constraints,
     compute_spherical_symmetry_norms,
 )
-from JAX_BSSN.cartoon.evolution import cartoon_rk4_step, compute_cartoon_rhs
+from JAX_BSSN.cartoon.spherical_symmetry.evolution import (
+    cartoon_rk4_step,
+    compute_cartoon_rhs,
+)
 from JAX_BSSN.cartoon.interpolation import (
     lagrange6_nonperiodic,
     lagrange6_stencil,
     lagrange6_weights,
 )
-from JAX_BSSN.cartoon.reconstruction import (
+from JAX_BSSN.cartoon.spherical_symmetry.reconstruction import (
     CARTOON_CENTER,
     CARTOON_GHOST_CELLS,
     CARTOON_OUTER_BUFFER_CELLS,

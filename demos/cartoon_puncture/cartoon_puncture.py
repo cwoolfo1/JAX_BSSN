@@ -25,7 +25,7 @@ from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 
 MASS = 1.0
 R_MAX = 100.0
-NUM_RADIAL_POINTS = 2000
+NUM_RADIAL_POINTS = 4000
 
 CFL = 0.2
 FINAL_TIME = 100.0
@@ -34,7 +34,7 @@ SNAPSHOT_COUNT = 500
 KAPPA = 0.002
 ETA = 2.0
 NU = 0.02
-GAMMA_DRIVER = 2.5
+GAMMA_DRIVER = 0.75
 
 
 def cartoon_parameters(
@@ -156,7 +156,12 @@ def run_cartoon_puncture(
             )
             writer.write(
                 cartoon_axis_output_fields(
-                    vars, violations.hamiltonian, violations.momentum
+                    vars,
+                    violations.hamiltonian,
+                    violations.momentum,
+                    det_gamma=violations.det_gamma,
+                    trace_A=violations.trace_A,
+                    gamma_condition=violations.gamma_condition,
                 ),
                 step=0,
                 time=0.0,
@@ -195,6 +200,9 @@ def run_cartoon_puncture(
                             vars,
                             violations.hamiltonian,
                             violations.momentum,
+                            det_gamma=violations.det_gamma,
+                            trace_A=violations.trace_A,
+                            gamma_condition=violations.gamma_condition,
                         ),
                         step=step,
                         time=time,

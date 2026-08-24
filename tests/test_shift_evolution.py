@@ -9,13 +9,18 @@ import numpy as np
 
 from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
 from JAX_BSSN.bssn.shift_and_lapse import (
+    compute_shift_advection,
     compute_shift_derivatives,
     evolve_lapse,
     evolve_shift,
 )
 from JAX_BSSN.bssn.spatial_metric import evolve_conformal_metric
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
+from JAX_BSSN.evolution.derivatives import (
+    diff1_field,
+    diff1_upwind_field,
+    diff2_field,
+)
 from JAX_BSSN.evolution.time_evolve import rk4_step
 
 
@@ -60,6 +65,22 @@ class TestShiftEvolution(unittest.TestCase):
             shift=beta,
         )
 
+    def expected_shift_advection(self, field, shift):
+        """Build beta^i partial_i(field) directly from the upwind operator."""
+
+        spatial_start = field.ndim - 3
+        return sum(
+            shift[direction]
+            * diff1_upwind_field(
+                field,
+                shift[direction],
+                spatial_start + direction,
+                self.dx,
+                mad_q=self.params.mad_q,
+            )
+            for direction in range(3)
+        )
+
     def test_shift_derivatives_keep_component_and_derivative_axes(self):
         beta = jnp.stack(
             [
@@ -79,6 +100,47 @@ class TestShiftEvolution(unittest.TestCase):
         np.testing.assert_allclose(d_beta[1, 2], 0.5 * jnp.cos(self.Y + self.Z), atol=6.0e-5)
         np.testing.assert_allclose(d_beta[2, 0], -0.25 * jnp.sin(self.X - self.Z), atol=6.0e-5)
         np.testing.assert_allclose(d_beta[2, 2], 0.25 * jnp.sin(self.X - self.Z), atol=6.0e-5)
+
+    def test_only_transport_derivative_is_upwinded(self):
+        field = (
+            0.7 * jnp.sin(5.0 * self.X + 2.0 * self.Y)
+            + 0.2 * jnp.cos(3.0 * self.Y - 4.0 * self.Z)
+            + 0.1 * jnp.sin(2.0 * self.Z - self.X)
+        )
+        beta = jnp.stack(
+            [
+                0.35 * jnp.sin(self.X) + 0.08,
+                -0.3 * jnp.cos(self.Y) - 0.04,
+                0.25 * jnp.sin(self.Z + 0.3),
+            ],
+            axis=0,
+        )
+
+        actual = compute_shift_advection(field, beta, self.params)
+        expected = self.expected_shift_advection(field, beta)
+        centered = sum(
+            beta[direction] * diff1_field(field, direction, self.dx)
+            for direction in range(3)
+        )
+
+        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1.0e-13)
+        self.assertGreater(float(jnp.max(jnp.abs(actual - centered))), 1.0e-3)
+
+        # Lie/geometric derivatives of beta remain the centered operator.
+        grad_beta = compute_shift_derivatives(beta, self.params)
+        expected_grad_beta = jnp.stack(
+            [
+                jnp.stack(
+                    [diff1_field(beta[i], d, self.dx) for d in range(3)],
+                    axis=0,
+                )
+                for i in range(3)
+            ],
+            axis=0,
+        )
+        np.testing.assert_allclose(
+            grad_beta, expected_grad_beta, rtol=0.0, atol=1.0e-13
+        )
 
     def test_bssn_parameters_default_to_evolved_shift_and_harmonic_lapse(self):
         params = BSSNParameters()
@@ -159,11 +221,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_alpha = evolve_lapse(vars, self.params)
 
-        grad_alpha = jnp.stack(
-            [diff1_field(alpha, d, self.dx) for d in range(3)],
-            axis=0,
-        )
-        expected = jnp.einsum("i...,i...->...", beta, grad_alpha)
+        expected = self.expected_shift_advection(alpha, beta)
 
         np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
 
@@ -183,11 +241,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_alpha = evolve_lapse(vars, params)
 
-        grad_alpha = jnp.stack(
-            [diff1_field(alpha, d, self.dx) for d in range(3)],
-            axis=0,
-        )
-        advection = jnp.einsum("i...,i...->...", beta, grad_alpha)
+        advection = self.expected_shift_advection(alpha, beta)
         expected = -alpha**2 * K + advection
 
         np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
@@ -208,11 +262,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_alpha = evolve_lapse(vars, params)
 
-        grad_alpha = jnp.stack(
-            [diff1_field(alpha, d, self.dx) for d in range(3)],
-            axis=0,
-        )
-        advection = jnp.einsum("i...,i...->...", beta, grad_alpha)
+        advection = self.expected_shift_advection(alpha, beta)
         expected = -2.0 * alpha * K + advection
 
         np.testing.assert_allclose(dt_alpha, expected, atol=2.0e-5)
@@ -238,8 +288,7 @@ class TestShiftEvolution(unittest.TestCase):
 
         dt_beta = evolve_shift(vars, self.params)
 
-        d_beta = compute_shift_derivatives(beta, self.params)
-        advection = jnp.einsum("j...,ij...->i...", beta, d_beta)
+        advection = self.expected_shift_advection(beta, beta)
         expected = (
             self.params.g * Gamma
             + advection

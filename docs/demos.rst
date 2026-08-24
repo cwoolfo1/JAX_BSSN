@@ -99,3 +99,20 @@ Output is written under ``output/`` as ``cartoon_puncture.h5`` and
 ``2*Nr x 1 x 1`` axis, including all BSSN tensor components and Hamiltonian and
 momentum constraints. Constraint norms use only independent positive radii and
 exclude the four outer stencil-affected samples.
+
+Axisymmetric Cartoon puncture
+-----------------------------
+
+The parallel z-axis axisymmetric executable stores a positive-rho by full-z
+plane, reconstructs nine Cartesian y planes at every RK stage, and writes an
+expanded signed x-z plane to a distinct openPMD file:
+
+.. code-block:: bash
+
+   python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
+
+Its defaults are ``rho_max=32M``, ``z in [-32M,32M]``, ``Nrho=256``,
+``Nz=512``, CFL ``0.2``, and final time ``10M``. Smoke runs can reduce the
+grid and duration with ``--num-rho``, ``--num-z``, ``--rho-max``,
+``--z-half-width``, and ``--final-time``. Constraints are evaluated only at
+the initial, output, and final iterations.

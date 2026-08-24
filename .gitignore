@@ -15,3 +15,4 @@ PKG-INFO
 *.mp4
 *.json
 *.csv
+*.h5

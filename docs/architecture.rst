@@ -19,8 +19,10 @@ Package map
    assembly, algebraic projections, and unigrid RK4.
 
 ``JAX_BSSN.cartoon``
-   Compact half-cell radial storage, parity ghosts, spherical-to-Cartesian
-   support reconstruction, Cartoon RK4, and radial constraint diagnostics.
+   Shared interpolation plus separate ``spherical_symmetry`` and
+   ``axisymmetry`` compact reconstruction, RK4, and constraint paths. The root
+   evolution, reconstruction, and diagnostics modules are spherical
+   compatibility exports.
 
 ``JAX_BSSN.fmr``
    Geometry and transfers for one vertex-centered refinement patch, plus the
@@ -82,9 +84,10 @@ boundary would define a different numerical algorithm.
 Cartoon execution flow
 ----------------------
 
-``JAX_BSSN.cartoon.cartoon_rk4_step`` owns a separate compact evolution path.
-At every RK stage it applies the algebraic projections, refreshes the four
-origin parity ghosts, reconstructs a temporary ``9 x 9`` transverse support,
-evaluates the ordinary Cartesian RHS, and projects the positive centerline
-back to radial storage. The final combined state is projected and parity-filled
-once more.
+The spherical ``cartoon_rk4_step`` and axisymmetric
+``axisymmetric_rk4_step`` own separate compact evolution paths. At every RK
+stage they apply the algebraic projections, refresh four radial parity ghosts,
+reconstruct temporary Cartesian support, evaluate the ordinary Cartesian RHS,
+and project the independent reference data back to compact storage. Spherical
+support has ``9 x 9`` transverse points; z-axis axisymmetric support has nine
+y planes and retains the complete physical z domain.

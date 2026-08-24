@@ -1,4 +1,4 @@
-"""Six-point interpolation for spherical Cartoon reconstruction."""
+"""Six-point interpolation shared by Cartoon symmetry reconstructions."""
 
 from functools import partial
 

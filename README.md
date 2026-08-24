@@ -30,6 +30,7 @@ The supported physical examples are:
 2. Linear wave
 3. Single puncture
 4. Spherical Cartoon puncture
+5. Axisymmetric Cartoon puncture
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -63,6 +64,12 @@ axis to openPMD:
 python demos/cartoon_puncture/cartoon_puncture.py
 ```
 
+Run the z-axis axisymmetric Cartoon puncture and write a signed x-z plane:
+
+```bash
+python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
+```
+
 The default three-dimensional runs compile substantial JAX kernels. The
 [demo guide](docs/demos.rst) includes smaller smoke configurations.
 
@@ -71,7 +78,7 @@ The default three-dimensional runs compile substantial JAX kernels. The
 ```text
 JAX_BSSN/
 ├── bssn/          # state, tensor algebra, geometry, equations, raw constraints
-├── cartoon/       # spherical reconstruction, compact RK4, radial diagnostics
+├── cartoon/       # spherical and axisymmetric reconstruction/evolution
 ├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
 ├── fmr/           # one-patch geometry, transfers, stage-synchronous RK4
 └── diagnostics/   # reductions, reporting, plotting, openPMD
