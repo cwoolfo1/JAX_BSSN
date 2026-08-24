@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from tqdm import tqdm
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.cartoon import (
+from JAX_BSSN.cartoon.spherical_symmetry import (
     CARTOON_GHOST_CELLS,
     cartoon_axis_output_fields,
     cartoon_rk4_step,

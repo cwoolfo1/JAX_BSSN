@@ -71,19 +71,6 @@ def _set_positive(field, values):
     return field.at[..., AXISYMMETRIC_GHOST_CELLS :, 0, :].set(values)
 
 
-def test_legacy_and_canonical_spherical_imports_are_identical():
-    import JAX_BSSN.cartoon as legacy
-    import JAX_BSSN.cartoon.diagnostics as legacy_diagnostics
-    import JAX_BSSN.cartoon.evolution as legacy_evolution
-    import JAX_BSSN.cartoon.reconstruction as legacy_reconstruction
-    import JAX_BSSN.cartoon.spherical_symmetry as canonical
-
-    assert legacy.compute_cartoon_rhs is canonical.compute_cartoon_rhs
-    assert legacy_evolution.cartoon_rk4_step is canonical.cartoon_rk4_step
-    assert legacy_reconstruction.reconstruct_cartoon_support is canonical.reconstruct_cartoon_support
-    assert legacy_diagnostics.compute_cartoon_constraints is canonical.compute_cartoon_constraints
-
-
 def test_grid_validation_enforces_axisymmetric_contract():
     vars = _minkowski()
     params = _params(12, 17, 0.2)

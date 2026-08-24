@@ -7,7 +7,10 @@ import openpmd_api as io
 import pytest
 
 from JAX_BSSN.bssn.variables import BSSNVariables
-from JAX_BSSN.cartoon import cartoon_axis_output_fields, compact_cartoon_state
+from JAX_BSSN.cartoon.spherical_symmetry import (
+    cartoon_axis_output_fields,
+    compact_cartoon_state,
+)
 from JAX_BSSN.diagnostics.openpmd import FMRPatchSeriesWriter, OpenPMDWriter
 from JAX_BSSN.fmr.refinement import FMRPatchSpec
 

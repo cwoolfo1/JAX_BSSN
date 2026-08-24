@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.cartoon import (
+from JAX_BSSN.cartoon.spherical_symmetry import (
     CARTOON_CENTER,
     CARTOON_GHOST_CELLS,
     CARTOON_OUTER_BUFFER_CELLS,
