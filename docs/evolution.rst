@@ -8,14 +8,6 @@ and algebraic constraint operations for the BSSN equations.
 Derivatives with mesh adapted differencing (MAD)
 -------------------------------------
 
-Baker, J. G., & Van Meter, J. R. (2005). 
-Reducing reflections from mesh refinement 
-interfaces in numerical relativity. 
-Physical Review D—Particles, Fields, 
-Gravitation, and Cosmology, 72(10), 104010.
-
-
-
 With ``mad_q = 1`` the result is exactly the historical centered fourth-order
 operator
 
@@ -36,6 +28,16 @@ at mesh-refinement interfaces. The ``diff2_field`` applies the same MAD weight
 to dedicated centered second derivative stencils.  With ``mad_q = 1`` it uses 
 the five-point fourth-order operator; ``mad_q = 0`` selects the seven-point 
 sixth-order operator.
+
+
+.. note::
+   Baker, J. G., & Van Meter, J. R. (2005). 
+   Reducing reflections from mesh refinement 
+   interfaces in numerical relativity. 
+   Physical Review D—Particles, Fields, 
+   Gravitation, and Cosmology, 72(10), 104010.
+
+
 
 Upwind shift advection
 ----------------------
