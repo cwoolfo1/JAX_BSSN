@@ -25,8 +25,8 @@ Package map
    compatibility exports.
 
 ``JAX_BSSN.fmr``
-   Geometry and transfers for one vertex-centered refinement patch, plus the
-   stage-synchronous coarse/fine RK4 step.
+   Geometry and transfers for a nested chain of vertex-centered refinement
+   patches, plus the stage-synchronous multi-level RK4 step.
 
 ``JAX_BSSN.diagnostics``
    Constraint reductions and reporting, plotting, NumPy snapshots, and

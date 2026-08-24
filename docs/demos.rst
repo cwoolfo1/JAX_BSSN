@@ -28,10 +28,10 @@ The default configuration uses ``grid_size=60``, amplitude ``0.1``, wavelength
 Linear wave with FMR
 --------------------
 
-The linear-wave demo evolves a plus-polarized wave through one centered 2:1
-refinement patch. It uses RK4, coarse mesh adaptive differencing stencils, and
-ordinary fourth-order fine derivatives. Diagnostics split error into native
-fine, uncovered coarse, and interface regions.
+The linear-wave demo evolves a plus-polarized wave through a configurable
+centered chain of 2:1 refinement patches (three total levels by default). It
+uses synchronized RK4 and reports composite diagnostics using the finest
+available value at each physical location.
 
 .. code-block:: bash
 

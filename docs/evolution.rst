@@ -34,9 +34,10 @@ second derivatives never compose two centered first derivatives.  Mixed
 derivatives across distinct axes continue to compose the corresponding first
 derivative operators.
 
-FMR derives the coarse value of ``q`` from the spacing ratio and forces the
-fine value to one. On a physical Sommerfeld axis, first and second derivatives
-deliberately retain their fourth-order operators.
+FMR derives each non-finest value of ``q`` from its spacing relative to the
+global finest spacing and forces the finest value to one. On a physical
+Sommerfeld axis, first and second derivatives deliberately retain their
+fourth-order operators.
 
 Upwind shift advection
 ----------------------

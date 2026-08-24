@@ -18,7 +18,7 @@ JAX BSSN
    The installed package provides the vacuum Cartesian BSSN equations, fourth-
    order finite differences, Kreiss--Oliger dissipation, periodic and Sommerfeld
    boundary treatments, spherical and axisymmetric Cartoon reconstruction, synchronous openPMD
-   diagnostics, and one stage-synchronous 2:1 refinement patch. The supported
+   diagnostics, and a stage-synchronous nested 2:1 refinement hierarchy. The supported
    physical examples are gauge wave, linear wave, Cartesian single puncture,
    spherical Cartoon puncture, and axisymmetric Cartoon puncture.
 

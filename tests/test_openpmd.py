@@ -12,7 +12,7 @@ from JAX_BSSN.cartoon.spherical_symmetry import (
     compact_cartoon_state,
 )
 from JAX_BSSN.diagnostics.openpmd import FMRPatchSeriesWriter, OpenPMDWriter
-from JAX_BSSN.fmr.refinement import FMRPatchSpec
+from JAX_BSSN.fmr.refinement import FMRHierarchySpec, FMRPatchSpec
 
 
 PATCH_SPEC = FMRPatchSpec((1, 1, 1), (3, 3, 3))
@@ -53,19 +53,16 @@ def _diagnostic_field_maps():
 
 def _write_output(writer, output_index=0, simulation_step=0, time=0.0, **kwargs):
     root_fields, fine_fields, root_base, fine_active = _diagnostic_field_maps()
-    geometry = {
-        "root_spacing": (1.0, 1.0, 1.0),
-        "fine_spacing": (0.5, 0.5, 0.5),
-        "root_origin": (-2.0, -2.0, -2.0),
-        "fine_origin": (-1.0, -1.0, -1.0),
-        "root_ghost_cells": 0,
-        "fine_ghost_cells": 4,
-        "patch_spec": PATCH_SPEC,
-    }
+    patch_spec = kwargs.pop("patch_spec", PATCH_SPEC)
+    geometry = dict(
+        spacings=((1.0,) * 3, (0.5,) * 3),
+        origins=((-2.0,) * 3, (-1.0,) * 3),
+        ghost_cells=(0, 4),
+        hierarchy=FMRHierarchySpec((patch_spec,)),
+    )
     geometry.update(kwargs)
     result = writer.write(
-        root_fields,
-        fine_fields,
+        (root_fields, fine_fields),
         output_index=output_index,
         simulation_step=simulation_step,
         time=time,
@@ -210,24 +207,43 @@ def test_default_demo_patch_has_32_root_and_31_active_fine_vertices(tmp_path):
     fine[4:-4, 4:-4, 4:-4] = native_fine
 
     FMRPatchSeriesWriter(base, dt=0.01).write(
-        {"h_plus": root},
-        {"h_plus": fine},
+        ({"h_plus": root}, {"h_plus": fine}),
         output_index=0,
         simulation_step=0,
         time=0.0,
-        root_spacing=(dx,) * 3,
-        fine_spacing=(dx / 2.0,) * 3,
-        root_origin=root_origin,
-        fine_origin=fine_origin,
-        root_ghost_cells=0,
-        fine_ghost_cells=4,
-        patch_spec=patch_spec,
+        spacings=((dx,) * 3, (dx / 2.0,) * 3),
+        origins=(root_origin, fine_origin),
+        ghost_cells=(0, 4),
+        hierarchy=FMRHierarchySpec((patch_spec,)),
     )
 
     root_patch = _read_patch(_patch_path(base, 0, 0), 0)
     fine_patch = _read_patch(_patch_path(base, 1, 0), 0)
     assert root_patch["metadata"]["h_plus"]["shape"] == (32, 32, 32)
     assert fine_patch["metadata"]["h_plus"]["shape"] == (31, 31, 31)
+
+
+def test_patch_series_writes_three_level_parent_chain_and_manifest(tmp_path):
+    base = tmp_path / "three_level"
+    second_spec = FMRPatchSpec((1, 1, 1), (3, 3, 3))
+    hierarchy = FMRHierarchySpec((PATCH_SPEC, second_spec))
+    root = np.zeros((5, 5, 5))
+    level_one = np.zeros((13, 13, 13))
+    level_two = np.zeros((13, 13, 13))
+    FMRPatchSeriesWriter(base, dt=0.1).write(
+        ({"h_plus": root}, {"h_plus": level_one}, {"h_plus": level_two}),
+        output_index=0, simulation_step=0, time=0.0,
+        spacings=(1.0, 0.5, 0.25),
+        origins=((-2.0,) * 3, (-1.0,) * 3, (-0.5,) * 3),
+        ghost_cells=(0, 4, 4), hierarchy=hierarchy,
+    )
+    finest = _read_patch(_patch_path(base, 2, 0), 0)
+    assert finest["attributes"]["fmrLevel"] == 2
+    assert finest["attributes"]["fmrParent"] == 1
+    assert finest["attributes"]["coarseStart"] == [1, 1, 1]
+    lines = base.with_suffix(".visit").read_text().splitlines()
+    assert lines[0] == "!NBLOCKS 3"
+    assert lines[3].startswith("three_level_level_02_patch_000_")
     assert fine_patch["metadata"]["h_plus"]["spacing"] == (dx / 2.0,) * 3
     assert fine_patch["metadata"]["h_plus"]["origin"] == fine_origin
     np.testing.assert_array_equal(
@@ -475,36 +491,27 @@ def test_patch_series_rejects_topology_and_field_changes(tmp_path):
     fine_fields.pop("K")
     with pytest.raises(ValueError, match="incompatible field sets"):
         writer.write(
-            root_fields,
-            fine_fields,
+            (root_fields, fine_fields),
             output_index=1,
             simulation_step=1,
             time=0.1,
-            root_spacing=1.0,
-            fine_spacing=0.5,
-            root_origin=(-2.0,) * 3,
-            fine_origin=(-1.0,) * 3,
-            root_ghost_cells=0,
-            fine_ghost_cells=4,
-            patch_spec=PATCH_SPEC,
+            spacings=(1.0, 0.5),
+            origins=((-2.0,) * 3, (-1.0,) * 3),
+            ghost_cells=(0, 4),
+            hierarchy=FMRHierarchySpec((PATCH_SPEC,)),
         )
 
     with pytest.raises(ValueError, match="topology changed"):
         writer.write(
-            root_fields,
-            _diagnostic_field_maps()[1],
+            (root_fields, _diagnostic_field_maps()[1]),
             output_index=1,
             simulation_step=1,
             time=0.1,
-            root_spacing=1.0,
-            fine_spacing=0.5,
-            root_origin=(-2.0,) * 3,
-            fine_origin=(-1.0,) * 3,
-            root_ghost_cells=0,
-            fine_ghost_cells=4,
-            patch_spec=PATCH_SPEC,
-            root_grid_position=(0.5,) * 3,
-            fine_grid_position=(0.5,) * 3,
+            spacings=(1.0, 0.5),
+            origins=((-2.0,) * 3, (-1.0,) * 3),
+            ghost_cells=(0, 4),
+            hierarchy=FMRHierarchySpec((PATCH_SPEC,)),
+            grid_positions=((0.5,) * 3, (0.5,) * 3),
         )
 
     non_ratio_two = PATCH_SPEC._replace(refinement_ratio=4)

@@ -1,11 +1,11 @@
 Fixed mesh refinement
 =====================
 
-The current FMR implementation is intentionally narrow: one immutable,
-vertex-centered refinement patch with a fixed 2:1 spacing ratio and four guard
-cells. ``JAX_BSSN.fmr.refinement`` keeps geometry, interpolation, guard filling,
-restriction, and the synchronized RK4 step together so their ownership is
-visible.
+FMR supports one immutable nested chain with a vertex-centered patch on each
+non-root level, a fixed 2:1 spacing ratio, and four guard cells. Patch bounds
+are expressed in the active-index coordinates of the immediate parent.
+``JAX_BSSN.fmr.refinement`` keeps geometry, transfers, and synchronized RK4
+together so their ownership is visible.
 
 Patch geometry
 --------------
@@ -60,8 +60,10 @@ outside the covered box remain unchanged.
 Stage-synchronous RK4
 ---------------------
 
-Coarse and fine levels use one shared timestep. There is no subcycling. The
-implemented sequence is:
+Every level uses the finest-grid timestep. There is no subcycling. At each RK
+stage, guard filling proceeds from root to finest. After RK4, restriction
+proceeds from finest to root before final guards are filled root-to-finest.
+For a two-level hierarchy, the sequence is:
 
 1. Project both level states to determinant-one and trace-free form.
 2. Fill fine guard cells from the matching coarse stage.
@@ -74,20 +76,17 @@ implemented sequence is:
    coarse state.
 8. Refill final fine guard cells from the updated coarse state.
 
-Both parameter sets must have equal ``dt``, and the fine ``dx`` must be exactly
-half the coarse ``dx``. When ``use_mad`` is true, the coarse derivative
-weight is derived inside the timestep as
+All parameter sets must have equal ``dt``, and successive ``dx`` values must
+differ by exactly two. When ``use_mad`` is true, each level's derivative
+weight is derived from the global finest spacing as
 
 .. math::
 
-   q_{\mathrm{coarse}}
-   = \left(\frac{h_{\mathrm{fine}}}{h_{\mathrm{coarse}}}\right)^4.
+   q_n = \left(\frac{h_{\mathrm{finest}}}{h_n}\right)^4.
 
-The fine level always uses ``mad_q = 1``, selecting the ordinary fourth-order
+The finest level always uses ``mad_q = 1``, selecting the ordinary fourth-order
 first- and second-derivative operators. The same weight controls shift
-advection: with the fixed 2:1 ratio and ``use_mad = True``, the coarse level
-uses :math:`q=(1/2)^4=1/16` to blend its D4 and D6 upwind derivatives, while
-the fine level takes the D4 fast path. Setting ``use_mad = False`` selects
-``q = 1`` on both levels. Four guard cells cover the coarse D6 upwind reach of
-four points and the fine D4 upwind reach of three points at every synchronized
-RK stage.
+advection. In a three-level hierarchy the weights are ``1/256``, ``1/16``,
+and ``1`` from root to finest. Setting ``use_mad = False`` selects ``q = 1``
+on every level. Four guard cells cover the D6 upwind reach of four points and
+the finest D4 upwind reach of three points at every synchronized RK stage.

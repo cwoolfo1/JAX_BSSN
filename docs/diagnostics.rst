@@ -61,6 +61,6 @@ Mesh metadata preserves:
 ``ghost_cells`` may be a scalar or three-tuple and is stripped before geometry
 and output are established.
 
-``FMRPatchSeriesWriter`` writes synchronous meshes for all FMR patches. The writer 
-is automatically configured to structure outputs in a format that is compatible with 
-easy visualization in VisIt and ParaView.
+``FMRPatchSeriesWriter`` accepts ordered per-level field maps and geometry and
+writes synchronous meshes for the complete nested hierarchy. Dynamic block
+manifests and per-level helper files are compatible with VisIt and ParaView.

@@ -8,7 +8,7 @@ from tests.initial_data import (
     gauge_wave_analytic_state,
     linear_wave_data,
 )
-from JAX_BSSN.fmr.refinement import (FMRPatchSpec, fill_fine_ghosts,
+from JAX_BSSN.fmr.refinement import (FMRHierarchySpec, FMRPatchSpec, fill_fine_ghosts,
     fine_active_shape, fine_active_slice, fine_active_view, fine_coordinates,
     fmr_rk4_step, prolongate_to_fine, restrict_to_coarse)
 
@@ -155,6 +155,44 @@ def test_restriction_injects_all_variable_shapes_exactly():
         np.testing.assert_array_equal(field[covered], expected + offset)
 
 
+def test_three_level_transfers_use_parent_ghost_offset_and_restrict_bottom_up():
+    root_spec = FMRPatchSpec((3, 3, 3), (8, 8, 8))
+    child_spec = FMRPatchSpec((2, 2, 2), (4, 4, 4))
+    root_shape = (12, 12, 12)
+    level_one_shape = tuple(n + 8 for n in fine_active_shape(root_spec))
+    level_two_shape = tuple(n + 8 for n in fine_active_shape(child_spec))
+    root = _variables(jnp.zeros(root_shape))
+    level_one_base = jnp.arange(np.prod(level_one_shape), dtype=jnp.float64).reshape(
+        level_one_shape
+    )
+    level_one = _variables(level_one_base)
+    level_two = _variables(jnp.full(level_two_shape, -7.0))
+
+    filled = fill_fine_ghosts(
+        level_one, level_two, child_spec, parent_ghost_width=root_spec.ghost_width
+    )
+    expected = prolongate_to_fine(
+        level_one[0], child_spec, parent_ghost_width=root_spec.ghost_width
+    )
+    mask = np.ones(level_two_shape, dtype=bool)
+    mask[fine_active_slice(child_spec)] = False
+    np.testing.assert_allclose(np.asarray(filled[0])[mask], np.asarray(expected)[mask])
+    np.testing.assert_array_equal(
+        np.asarray(filled[0][fine_active_slice(child_spec)]), -7.0
+    )
+
+    finest = _variables(jnp.full(level_two_shape, 42.0))
+    restricted_one = restrict_to_coarse(
+        level_one, finest, child_spec, parent_ghost_width=root_spec.ghost_width
+    )
+    restricted_root = restrict_to_coarse(root, restricted_one, root_spec)
+    root_covered = tuple(slice(lo, hi + 1)
+                         for lo, hi in zip(root_spec.coarse_lo, root_spec.coarse_hi))
+    level_one_active = fine_active_view(restricted_one[0], root_spec)
+    np.testing.assert_array_equal(restricted_root[0][root_covered],
+                                  level_one_active[::2, ::2, ::2])
+
+
 def test_stage_synchronous_gauge_wave_step_is_finite_and_accurate():
     n, dx = 10, 0.1
     x = -0.5 + jnp.arange(n) * dx
@@ -168,7 +206,9 @@ def test_stage_synchronous_gauge_wave_step_is_finite_and_accurate():
         dt=dt, zero_shift=1, gauge=0, x_min=-0.5, y_min=-0.5, z_min=-0.5)
     fine_params = coarse_params._replace(dx=dx/2,
         x_min=float(FX[0, 0, 0]), y_min=float(FY[0, 0, 0]), z_min=float(FZ[0, 0, 0]))
-    coarse, fine = fmr_rk4_step(coarse, fine, coarse_params, fine_params, spec)
+    coarse, fine = fmr_rk4_step(
+        (coarse, fine), (coarse_params, fine_params), FMRHierarchySpec((spec,))
+    )
     assert all(bool(jnp.all(jnp.isfinite(field))) for field in coarse + fine)
     exact = gauge_wave_analytic_state(FX, FY, FZ, dt)
     error = fine_active_view(fine.lapse - exact.lapse, spec)
@@ -184,7 +224,7 @@ def test_stage_synchronous_nonzero_shift_upwind_step_is_finite():
     origin = (-0.5,) * 3
     x = origin[0] + jnp.arange(n) * dx
     X, Y, Z = jnp.meshgrid(x, x, x, indexing="ij")
-    spec = FMRPatchSpec((3, 3, 3), (6, 6, 6), use_mad=True)
+    spec = FMRPatchSpec((3, 3, 3), (6, 6, 6))
     FX, FY, FZ = fine_coordinates(spec, dx, origin)
 
     shift_components = jnp.asarray((0.125, -0.05, 0.025))
@@ -218,7 +258,7 @@ def test_stage_synchronous_nonzero_shift_upwind_step_is_finite():
     )
 
     coarse, fine = fmr_rk4_step(
-        coarse, fine, coarse_params, fine_params, spec
+        (coarse, fine), (coarse_params, fine_params), FMRHierarchySpec((spec,))
     )
 
     assert all(bool(jnp.all(jnp.isfinite(field))) for field in coarse + fine)

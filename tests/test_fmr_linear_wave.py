@@ -11,6 +11,7 @@ import openpmd_api as io
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.fmr.refinement import (
+    FMRHierarchySpec,
     FMRPatchSpec,
     fine_active_shape,
     fine_active_view,
@@ -48,7 +49,6 @@ def _linear_wave_fmr_error(grid_size):
     patch_spec = FMRPatchSpec(
         (grid_size // 4,) * 3,
         (3 * grid_size // 4 - 1,) * 3,
-        use_mad=True,
     )
     fine_X, fine_Y, fine_Z = fine_coordinates(
         patch_spec, dx_coarse, coarse_origin
@@ -102,11 +102,8 @@ def _linear_wave_fmr_error(grid_size):
 
     def evolve_step(_, state):
         return fmr_rk4_step(
-            state[0],
-            state[1],
-            coarse_parameters,
-            fine_parameters,
-            patch_spec,
+            state, (coarse_parameters, fine_parameters),
+            FMRHierarchySpec((patch_spec,)),
         )
 
     evolve = jax.jit(
@@ -176,8 +173,9 @@ def test_small_production_fmr_run_writes_readable_visit_collection(tmp_path):
     from demos.linear_wave.linear_wave import run_linear_wave
 
     base = tmp_path / "linear_wave_fmr"
-    _, _, run = run_linear_wave(
+    _, run = run_linear_wave(
         grid_size=8,
+        level_count=3,
         final_time=0.02,
         output_iterations=2,
         output_path=base,
@@ -187,15 +185,17 @@ def test_small_production_fmr_run_writes_readable_visit_collection(tmp_path):
     visit_path = Path(run["output_path"])
     assert visit_path == base.with_suffix(".visit")
     lines = visit_path.read_text().splitlines()
-    assert lines[0] == "!NBLOCKS 2"
-    assert len(lines) == 7
+    assert lines[0] == "!NBLOCKS 3"
+    assert len(lines) == 9
     assert lines[2].startswith("linear_wave_fmr_level_00_patch_000_")
     assert lines[3].startswith("linear_wave_fmr_level_01_patch_000_")
-    assert lines[5].startswith("linear_wave_fmr_level_00_patch_000_")
-    assert lines[6].startswith("linear_wave_fmr_level_01_patch_000_")
+    assert lines[4].startswith("linear_wave_fmr_level_02_patch_000_")
+    assert lines[6].startswith("linear_wave_fmr_level_00_patch_000_")
+    assert lines[7].startswith("linear_wave_fmr_level_01_patch_000_")
+    assert lines[8].startswith("linear_wave_fmr_level_02_patch_000_")
 
     for output_index in (0, 1):
-        for level in (0, 1):
+        for level in (0, 1, 2):
             path = tmp_path / (
                 f"linear_wave_fmr_level_{level:02d}_patch_000_"
                 f"{output_index:08d}.h5"
@@ -211,7 +211,8 @@ def test_small_production_fmr_run_writes_readable_visit_collection(tmp_path):
                 "hamiltonian_constraint",
                 "momentum_constraint",
             }
-            expected_shape = (8, 8, 8) if level == 0 else (7, 7, 7)
+            expected_shape = ((8, 8, 8) if level == 0 else
+                              (7, 7, 7) if level == 1 else (5, 5, 5))
             assert tuple(
                 iteration.meshes["h_plus"][
                     io.Mesh_Record_Component.SCALAR

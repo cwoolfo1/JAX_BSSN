@@ -41,7 +41,7 @@ Run the periodic analytic gauge wave:
 python demos/gauge_wave/gauge_wave.py
 ```
 
-Run the linear wave through one fixed-refinement patch and write composite
+Run the linear wave through a nested fixed-refinement hierarchy and write composite
 openPMD output:
 
 ```bash
@@ -80,7 +80,7 @@ JAX_BSSN/
 ├── bssn/          # state, tensor algebra, geometry, equations, raw constraints
 ├── cartoon/       # spherical and axisymmetric reconstruction/evolution
 ├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
-├── fmr/           # one-patch geometry, transfers, stage-synchronous RK4
+├── fmr/           # nested-patch geometry, transfers, stage-synchronous RK4
 └── diagnostics/   # reductions, reporting, plotting, openPMD
 ```
 
