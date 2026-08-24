@@ -3,24 +3,18 @@ JAX BSSN
 
 .. container:: hero
 
-   JAX BSSN is a autodifferentiable and jit-compiled implementation of the Cartesian
-   Baumgarte--Shapiro--Shibata--Nakamura evolution system in JAX.
+   JAX BSSN is a autodifferentiable and jit-compiled implementation of the
+   BSSN numerical relativity evolution system in JAX. JAX BSSN is a research 
+   level codebase designed for rapid prototyping and experimentation with gradient-
+   based methods in numerical relativity. JAX BSSN features a vacuum BSSN with fourth 
+   order finite differencing, fourth order Runge-Kutta time evolution, Kreiss-Oliger 
+   dissipation, periodic and Sommerfeld boundary conditions, and cartoon based methods 
+   for spherical and axisymmetric spacetimes.
 
    .. container:: hero-actions
 
-      :doc:`Run a physical demo <demos>`
-      :doc:`Understand one RK4 step <evolution>`
+      :doc:`Check out some cool demos <demos>`
 
-.. container:: hero-callout
-
-   .. rubric:: Current scope
-
-   The installed package provides the vacuum Cartesian BSSN equations, fourth-
-   order finite differences, Kreiss--Oliger dissipation, periodic and Sommerfeld
-   boundary treatments, spherical and axisymmetric Cartoon reconstruction, synchronous openPMD
-   diagnostics, and a stage-synchronous nested 2:1 refinement hierarchy. The supported
-   physical examples are gauge wave, linear wave, Cartesian single puncture,
-   spherical Cartoon puncture, and axisymmetric Cartoon puncture.
 
 Quick navigation
 ----------------
@@ -32,19 +26,19 @@ Quick navigation
       :link: installation
       :link-type: doc
 
-      Set up the solver, test dependencies, and documentation toolchain.
+      Set up the codebase.
 
    .. grid-item-card:: Follow the architecture
       :link: architecture
       :link-type: doc
 
-      See package ownership and the complete execution flow.
+      View the overall structure and design.
 
    .. grid-item-card:: Inspect the BSSN system
       :link: bssn
       :link-type: doc
 
-      Review every evolved variable and equation owner.
+      Review the BSSN equations and their implementation.
 
    .. grid-item-card:: Trace an RK4 step
       :link: evolution
@@ -56,19 +50,13 @@ Quick navigation
       :link: fmr
       :link-type: doc
 
-      Examine patch geometry, guard filling, and synchronized stages.
+      Examine our implementation of fixed mesh refinement.
 
    .. grid-item-card:: Use Cartoon symmetry
       :link: cartoon
       :link-type: doc
 
-      Follow spherical and axisymmetric storage, reconstruction, and RK4 staging.
-
-   .. grid-item-card:: Run the demos
-      :link: demos
-      :link-type: doc
-
-      Launch the three supported physical examples explicitly.
+      Review the implementation of cartoon-based symmetry.
 
 Contents
 --------

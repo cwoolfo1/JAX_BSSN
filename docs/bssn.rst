@@ -48,37 +48,6 @@ tuple position.
      - ``(3, Nx, Ny, Nz)``
      - Contravariant shift vector.
 
-Equation ownership
-------------------
-
-.. list-table:: Time-derivative ownership
-   :header-rows: 1
-   :widths: 32 38 30
-
-   * - Evolved field
-     - Function
-     - Module
-   * - :math:`\tilde{\gamma}_{ij}`
-     - ``evolve_conformal_metric``
-     - ``bssn.spatial_metric``
-   * - :math:`W`
-     - ``evolve_conformal_factor``
-     - ``bssn.spatial_metric``
-   * - :math:`\tilde{A}_{ij}`
-     - ``evolve_traceless_extrinsic_curvature``
-     - ``bssn.extrinsic_curvature``
-   * - :math:`K`
-     - ``evolve_trace_extrinsic_curvature``
-     - ``bssn.extrinsic_curvature``
-   * - :math:`\tilde{\Gamma}^{i}`
-     - ``evolve_conformal_connection``
-     - ``bssn.conformal_connection``
-   * - :math:`\alpha`
-     - ``evolve_lapse``
-     - ``bssn.shift_and_lapse``
-   * - :math:`\beta^{i}`
-     - ``evolve_shift``
-     - ``bssn.shift_and_lapse``
 
 Shared geometry
 ---------------
@@ -129,9 +98,7 @@ terms of the form
 on the right-hand side: :math:`\tilde{\gamma}_{ij}`, :math:`W`,
 :math:`\tilde{A}_{ij}`, :math:`K`, :math:`\tilde{\Gamma}^i`, :math:`\alpha`,
 and :math:`\beta^i` itself. The positive sign here is the RHS-coefficient
-convention used by ``diff1_upwind_field``; its transport characteristic has
-velocity :math:`-\beta^i`, so positive :math:`\beta^i` selects a
-forward-biased derivative.
+convention used by ``diff1_upwind_field``.
 
 Algebraic constraints
 ---------------------

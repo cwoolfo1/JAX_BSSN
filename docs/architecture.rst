@@ -11,8 +11,7 @@ Package map
 -----------
 
 ``JAX_BSSN.bssn``
-   State definitions, tensor algebra, shared geometry, the individual BSSN
-   time-derivative equations, and raw constraint fields.
+   the individual BSSN time-derivative equations, and raw constraint fields.
 
 ``JAX_BSSN.evolution``
    Finite-difference operators, physical boundary treatments, complete RHS
@@ -20,49 +19,25 @@ Package map
 
 ``JAX_BSSN.cartoon``
    Shared interpolation plus separate ``spherical_symmetry`` and
-   ``axisymmetry`` compact reconstruction, RK4, and constraint paths. The root
-   evolution, reconstruction, and diagnostics modules are spherical
-   compatibility exports.
+   ``axisymmetry`` cartoon algorithms, RK4, and constraint paths.
 
 ``JAX_BSSN.fmr``
    Geometry and transfers for a nested chain of vertex-centered refinement
-   patches, plus the stage-synchronous multi-level RK4 step.
+   patches.
 
 ``JAX_BSSN.diagnostics``
    Constraint reductions and reporting, plotting, NumPy snapshots, and
    synchronous openPMD output. Evolution equations never import this package.
 
 ``demos``
-   The three supported physical configurations and their initial data. Physical
-   initial data are deliberately not part of the installed package.
+   Physics demonstrations and their initial data including waves and single 
+   puncture black holes.
 
 ``tests``
-   Regression, convergence, and transfer tests. Gauge- and linear-wave test
-   data live in ``tests/initial_data.py`` rather than executable demo modules.
+   Unittest suite that contains API tests and regression tests for the BSSN equations, cartoon symmetry, and FMR.
 
-Dependency direction
---------------------
 
-The intended dependency flow is:
-
-.. code-block:: text
-
-   bssn.variables
-        |
-        +--> evolution.derivatives
-        +--> bssn tensor/geometry/equation modules
-        +--> evolution.boundaries
-        +--> evolution.time_evolve
-        +--> cartoon
-        +--> fmr.refinement
-        +--> diagnostics
-
-Raw constraints remain in ``bssn.constraints`` because the momentum
-constraint participates in the evolution equations. Norms, printing, and
-health decisions remain in ``diagnostics.constraints`` so the solver does not
-depend on reporting code.
-
-Unigrid execution flow
+Cartesian RK4 algorithm
 ----------------------
 
 ``JAX_BSSN.evolution.time_evolve.rk4_step`` performs one update in this exact
@@ -78,10 +53,7 @@ order:
 7. Combine the classical RK4 stages and apply both algebraic projections once
    more.
 
-Sommerfeld is an RHS boundary treatment. Moving it across the RHS/projection
-boundary would define a different numerical algorithm.
-
-Cartoon execution flow
+Cartoon RK4 algorithms
 ----------------------
 
 The spherical ``cartoon_rk4_step`` and axisymmetric
