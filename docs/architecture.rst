@@ -38,7 +38,7 @@ Package map
 
 
 Cartesian RK4 algorithm
-----------------------
+-----------------------
 
 ``JAX_BSSN.evolution.time_evolve.rk4_step`` performs one update in this exact
 order:
