@@ -1,7 +1,7 @@
 # JAX BSSN
 
 <p align="center">
-  <img src="docs/images/JAX_BSSN_logo.png" alt="JAX BSSN logo" width="720">
+  <img src="docs/images/JAX_BSSN_logo.png" alt="JAX BSSN logo" width="400">
 </p>
 
 JAX-BSSN is an autodifferentiable implementation of the BSSN evolution system
