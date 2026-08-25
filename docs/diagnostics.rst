@@ -7,7 +7,7 @@ as well as plotting and openPMD output.
 Raw constraint fields
 ---------------------
 
-``JAX_BSSN.bssn.constraints`` produces spatially resolved arrays:
+``JAX_BSSN.bssn.constraints`` produces arrays:
 
 .. list-table:: Constraint fields
    :header-rows: 1
@@ -29,9 +29,6 @@ Raw constraint fields
    * - ``trace_A``
      - ``(Nx, Ny, Nz)``
      - :math:`\tilde{\gamma}^{ij}\tilde{A}_{ij}`.
-   * - ``gamma_condition``
-     - ``(Nx, Ny, Nz)`` currently
-     - Placeholder returned by the current Gamma-constraint implementation.
 
 
 
@@ -49,18 +46,3 @@ openPMD output
 ``OpenPMDWriter`` writes synchronous Cartesian mesh iterations. Scalar fields
 are three-dimensional arrays. Vector fields are three-component tuples or
 lists whose components share one three-dimensional shape.
-
-Mesh metadata preserves:
-
-* C data order.
-* Axis labels ``x``, ``y``, and ``z`` in array order.
-* ``grid_spacing``, ``grid_global_offset``, and ``grid_position``.
-* Scalar record components and vector component names ``x``, ``y``, ``z``.
-* Floating-point dtype where possible.
-
-``ghost_cells`` may be a scalar or three-tuple and is stripped before geometry
-and output are established.
-
-``FMRPatchSeriesWriter`` accepts ordered per-level field maps and geometry and
-writes synchronous meshes for the complete nested hierarchy. Dynamic block
-manifests and per-level helper files are compatible with VisIt and ParaView.

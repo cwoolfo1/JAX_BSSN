@@ -2,7 +2,7 @@ Demos
 =====
 
 The supported physical examples are gauge wave, linear wave, Cartesian single
-puncture, and spherical Cartoon puncture. Each demo contains its own
+puncture, axisymmetric Cartoon puncture, and spherical Cartoon puncture. Each demo contains its own
 coordinates, initial data, parameters, and run loop.
 
 Install demo support first:
@@ -112,7 +112,5 @@ expanded signed x-z plane to a distinct openPMD file:
    python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
 
 Its defaults are ``rho_max=32M``, ``z in [-32M,32M]``, ``Nrho=256``,
-``Nz=512``, CFL ``0.2``, and final time ``10M``. Smoke runs can reduce the
-grid and duration with ``--num-rho``, ``--num-z``, ``--rho-max``,
-``--z-half-width``, and ``--final-time``. Constraints are evaluated only at
+``Nz=512``, CFL ``0.2``, and final time ``10M``. Constraints are evaluated only at
 the initial, output, and final iterations.
