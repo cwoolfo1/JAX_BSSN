@@ -6,7 +6,7 @@ and algebraic constraint operations for the BSSN equations.
 
 
 Derivatives with mesh adapted differencing (MAD)
--------------------------------------
+------------------------------------------------
 
 With ``mad_q = 1`` the result is exactly the historical centered fourth-order
 operator
