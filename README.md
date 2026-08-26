@@ -31,6 +31,7 @@ The supported physical examples are:
 3. Single puncture
 4. Spherical Cartoon puncture
 5. Axisymmetric Cartoon puncture
+6. Axisymmetric boosted Bowen--York puncture
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -70,6 +71,22 @@ Run the z-axis axisymmetric Cartoon puncture and write a signed x-z plane:
 python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
 ```
 
+Run a black hole with Bowen--York momentum along the positive z axis, then
+render grouped BSSN movies with a tracked puncture position:
+
+```bash
+cd demos/axisymmetric_bowen_york
+python axisymmetric_bowen_york.py
+python make_movies.py  # optional; requires ffmpeg
+```
+
+The initial-data phase solves the three-dimensional Cartesian Hamiltonian
+constraint before extracting its exact `y=0` plane for Cartoon evolution. It
+therefore uses substantially more memory than the subsequent axisymmetric
+time evolution. The regular conformal correction is fixed to zero on the
+finite outer grid layers, so enlarge the initial-data domain when studying
+finite-boundary error.
+
 The default three-dimensional runs compile substantial JAX kernels. The
 [demo guide](docs/demos.rst) includes smaller smoke configurations.
 
@@ -81,7 +98,8 @@ JAX_BSSN/
 ├── cartoon/       # spherical and axisymmetric reconstruction/evolution
 ├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
 ├── fmr/           # nested-patch geometry, transfers, stage-synchronous RK4
-└── diagnostics/   # reductions, reporting, plotting, openPMD
+├── diagnostics/   # reductions, reporting, plotting, openPMD
+└── utilities/     # reusable initial-data and numerical helper routines
 ```
 
 Physical initial data lives under `demos/`, not in the installed source

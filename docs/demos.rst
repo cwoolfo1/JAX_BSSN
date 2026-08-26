@@ -114,3 +114,32 @@ expanded signed x-z plane to a distinct openPMD file:
 Its defaults are ``rho_max=32M``, ``z in [-32M,32M]``, ``Nrho=256``,
 ``Nz=512``, CFL ``0.2``, and final time ``10M``. Constraints are evaluated only at
 the initial, output, and final iterations.
+
+Axisymmetric boosted Bowen--York puncture
+------------------------------------------
+
+The boosted Bowen--York demo first solves the three-dimensional Cartesian
+Hamiltonian constraint for a single puncture with linear momentum along the
+z axis. Its exact ``y=0`` plane is converted to the repository's W-form BSSN
+variables and evolved with the existing axisymmetric Cartoon RK4 path.
+
+.. code-block:: bash
+
+   cd demos/axisymmetric_bowen_york
+   python axisymmetric_bowen_york.py
+   python make_movies.py
+
+The defaults use ``M=1``, ``Pz=0.5M``, ``rho_max=12M``,
+``z in [-12M,12M]``, ``Nrho=48``, ``Nz=96``, CFL ``0.2``, and final time
+``10M``. The elliptic grid is ``96 x 97 x 96``: its central y sample is
+exactly zero, while the even x and z dimensions keep the puncture between
+grid points. The run writes complete BSSN fields and constraints to
+``output/axisymmetric_bowen_york.h5``. The renderer creates grouped H.264
+movies and ``movies/puncture_trajectory.txt`` using the minimum of W near the
+symmetry axis.
+
+The elliptic solve is second-order and fixes the regular correction ``u`` to
+zero on the finite outer grid layers. This approximates asymptotic flatness
+and should be checked by enlarging the domain. Because the initial solve is
+fully three-dimensional, its memory use is much larger than the compact
+Cartoon evolution that follows.

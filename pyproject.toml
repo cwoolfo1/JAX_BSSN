@@ -38,4 +38,5 @@ packages = [
     "JAX_BSSN.diagnostics",
     "JAX_BSSN.evolution",
     "JAX_BSSN.fmr",
+    "JAX_BSSN.utilities",
 ]
