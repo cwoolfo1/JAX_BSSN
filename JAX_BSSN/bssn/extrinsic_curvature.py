@@ -4,8 +4,15 @@ import jax.numpy as jnp
 from jax import jit
 
 from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
-from JAX_BSSN.bssn.constraints import compute_momentum_constraint_and_derivative
-from JAX_BSSN.bssn.geometry import compute_W2_covariant_lapse_hessian, compute_W2_ricci
+from JAX_BSSN.bssn.constraints import (
+    compute_momentum_constraint_and_derivative,
+    compute_momentum_constraint_and_derivative_with_matter,
+)
+from JAX_BSSN.bssn.geometry import (
+    W_FLOOR_VALUE,
+    compute_W2_covariant_lapse_hessian,
+    compute_W2_ricci,
+)
 from JAX_BSSN.bssn.shift_and_lapse import (
     compute_shift_advection,
     compute_shift_derivatives,
@@ -18,9 +25,12 @@ from JAX_BSSN.bssn.tensor_algebra import (
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
 
 
-@jit
-def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
-                                    params: BSSNParameters) -> jnp.ndarray:
+def _evolve_trace_extrinsic_curvature(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    energy_density=None,
+    spatial_stress=None,
+) -> jnp.ndarray:
     """
     Evolve trace of extrinsic curvature K.
 
@@ -62,6 +72,17 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     dt_K = first_term + second_term + third_term + fourth_term
     # compute dt_K
 
+    if energy_density is not None:
+        W_floor = jnp.maximum(vars.conformal_factor, W_FLOOR_VALUE)
+        physical_inverse_metric = W_floor**2 * inv_gamma
+        stress_trace = jnp.einsum(
+            'ij...,ij...->...', physical_inverse_metric, spatial_stress
+        )
+        dt_K = dt_K + 4.0 * jnp.pi * alpha * (
+            energy_density + stress_trace
+        )
+        # +4 pi alpha (rho + S), with S = gamma^ij S_ij
+
     dK_dx1 = diff6_field(
         vars.trace_K, 0, params.dx, *get_boundary_codes(params, 0)
     )
@@ -79,11 +100,36 @@ def evolve_trace_extrinsic_curvature(vars: BSSNVariables,
     return dt_K + dissipation_term
 
 
+@jit
+def evolve_trace_extrinsic_curvature(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+) -> jnp.ndarray:
+    """Evolve the vacuum trace of the extrinsic curvature."""
+
+    return _evolve_trace_extrinsic_curvature(vars, params)
 
 
 @jit
-def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
-                                        params: BSSNParameters) -> jnp.ndarray:
+def evolve_trace_extrinsic_curvature_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    energy_density: jnp.ndarray,
+    spatial_stress: jnp.ndarray,
+) -> jnp.ndarray:
+    """Evolve ``K`` with physical Eulerian matter sources."""
+
+    return _evolve_trace_extrinsic_curvature(
+        vars, params, energy_density, spatial_stress
+    )
+
+
+def _evolve_traceless_extrinsic_curvature(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    momentum_density=None,
+    spatial_stress=None,
+) -> jnp.ndarray:
     """
     Evolve traceless extrinsic curvature A_ij.
 
@@ -126,8 +172,18 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     W2_ricci = compute_W2_ricci(vars, params)
 
     third_term = alpha * W2_ricci - W2_DiDj_alpha
+    if spatial_stress is not None:
+        W_floor = jnp.maximum(vars.conformal_factor, W_FLOOR_VALUE)
+        third_term = (
+            third_term
+            - 8.0
+            * jnp.pi
+            * alpha
+            * W_floor**2
+            * spatial_stress
+        )
     third_term = traceless_part(third_term, vars.conformal_metric, inv_gamma)
-    # [alpha W**2 R_ij - W**2 D_i D_j alpha]^TF
+    # [alpha W**2 (R_ij - 8 pi S_ij) - W**2 D_i D_j alpha]^TF
 
     shift = vars.shift
     # unpack the shift vector
@@ -166,7 +222,12 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     # A_ij is shape (3, 3, ni, nj, nk)
     # compute the 6th derivative in each direction
 
-    M, dMidj = compute_momentum_constraint_and_derivative(vars, params)
+    if momentum_density is None:
+        M, dMidj = compute_momentum_constraint_and_derivative(vars, params)
+    else:
+        M, dMidj = compute_momentum_constraint_and_derivative_with_matter(
+            vars, params, momentum_density
+        )
     # Momentum constraint and its product-rule spatial derivative
 
     kappa = params.kappa
@@ -182,3 +243,27 @@ def evolve_traceless_extrinsic_curvature(vars: BSSNVariables,
     # compute dissipation term
 
     return dt_A + seventh_term + dissipation_term
+
+
+@jit
+def evolve_traceless_extrinsic_curvature(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+) -> jnp.ndarray:
+    """Evolve the vacuum conformal traceless extrinsic curvature."""
+
+    return _evolve_traceless_extrinsic_curvature(vars, params)
+
+
+@jit
+def evolve_traceless_extrinsic_curvature_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    momentum_density: jnp.ndarray,
+    spatial_stress: jnp.ndarray,
+) -> jnp.ndarray:
+    """Evolve ``A_tilde_ij`` with physical Eulerian matter sources."""
+
+    return _evolve_traceless_extrinsic_curvature(
+        vars, params, momentum_density, spatial_stress
+    )

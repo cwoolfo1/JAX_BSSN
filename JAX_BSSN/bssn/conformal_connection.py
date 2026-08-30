@@ -190,3 +190,19 @@ def evolve_conformal_connection(vars: BSSNVariables,
     # compute dissipation term
 
     return dt_Gamma + dissipation_term
+
+
+@jit
+def evolve_conformal_connection_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    momentum_density: jnp.ndarray,
+) -> jnp.ndarray:
+    """Evolve ``Gamma_tilde^i`` with covariant momentum density ``S_i``."""
+
+    vacuum_rhs = evolve_conformal_connection(vars, params)
+    inverse_conformal_metric = invert_3x3_metric(vars.conformal_metric)
+    matter_source = -16.0 * jnp.pi * vars.lapse * jnp.einsum(
+        'ij...,j...->i...', inverse_conformal_metric, momentum_density
+    )
+    return vacuum_rhs + matter_source

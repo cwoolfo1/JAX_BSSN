@@ -1,7 +1,12 @@
-from JAX_BSSN.bssn.conformal_connection import evolve_conformal_connection
+from JAX_BSSN.bssn.conformal_connection import (
+    evolve_conformal_connection,
+    evolve_conformal_connection_with_matter,
+)
 from JAX_BSSN.bssn.extrinsic_curvature import (
     evolve_trace_extrinsic_curvature,
+    evolve_trace_extrinsic_curvature_with_matter,
     evolve_traceless_extrinsic_curvature,
+    evolve_traceless_extrinsic_curvature_with_matter,
 )
 from JAX_BSSN.bssn.shift_and_lapse import evolve_lapse, evolve_shift
 from JAX_BSSN.bssn.spatial_metric import (
@@ -45,6 +50,40 @@ def compute_bssn_rhs(
         traceless_K=evolve_traceless_extrinsic_curvature(vars, params),
         trace_K=evolve_trace_extrinsic_curvature(vars, params),
         conformal_connection=evolve_conformal_connection(vars, params),
+        lapse=evolve_lapse(vars, params),
+        shift=evolve_shift_or_freeze(vars, params),
+    )
+
+    return apply_sommerfeld_boundaries(vars, rhs, params)
+
+
+@jit
+def compute_bssn_rhs_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    energy_density,
+    momentum_density,
+    spatial_stress,
+) -> BSSNVariables:
+    """Assemble the BSSN RHS with physical Eulerian matter sources.
+
+    The source layouts are ``rho[nx, ny, nz]``, ``S_i[3, nx, ny, nz]``, and
+    ``S_ij[3, 3, nx, ny, nz]``.  Sources are added to the bulk equations before
+    the active Sommerfeld faces are imposed.
+    """
+
+    rhs = BSSNVariables(
+        conformal_metric=evolve_conformal_metric(vars, params),
+        conformal_factor=evolve_conformal_factor(vars, params),
+        traceless_K=evolve_traceless_extrinsic_curvature_with_matter(
+            vars, params, momentum_density, spatial_stress
+        ),
+        trace_K=evolve_trace_extrinsic_curvature_with_matter(
+            vars, params, energy_density, spatial_stress
+        ),
+        conformal_connection=evolve_conformal_connection_with_matter(
+            vars, params, momentum_density
+        ),
         lapse=evolve_lapse(vars, params),
         shift=evolve_shift_or_freeze(vars, params),
     )

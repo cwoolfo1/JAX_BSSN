@@ -284,6 +284,56 @@ def compute_momentum_constraint_and_derivative(
     return M_i, dM
 
 
+@jit
+def compute_momentum_constraint_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    momentum_density: jnp.ndarray,
+) -> jnp.ndarray:
+    """Return the momentum constraint including the physical source ``S_i``.
+
+    ``momentum_density`` is the covariant Eulerian momentum density on the
+    Cartesian grid, with shape ``(3, nx, ny, nz)``.
+    """
+
+    geometric_momentum = compute_momentum_constraint(vars, params)
+    return geometric_momentum - 8.0 * jnp.pi * momentum_density
+
+
+@jit
+def compute_momentum_constraint_and_derivative_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    momentum_density: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Return matter-coupled ``M_i`` and its coordinate derivative.
+
+    The derivative layout is ``partial_l M_i -> (i, l, nx, ny, nz)``, matching
+    :func:`compute_momentum_constraint_and_derivative`.
+    """
+
+    geometric_momentum, geometric_derivative = (
+        compute_momentum_constraint_and_derivative(vars, params)
+    )
+    momentum_derivative = jnp.stack(
+        [
+            diff1_field(
+                momentum_density,
+                direction + 1,
+                params.dx,
+                *get_boundary_codes(params, direction),
+                mad_q=params.mad_q,
+            )
+            for direction in range(3)
+        ],
+        axis=1,
+    )
+
+    momentum = geometric_momentum - 8.0 * jnp.pi * momentum_density
+    momentum_derivative = (
+        geometric_derivative - 8.0 * jnp.pi * momentum_derivative
+    )
+    return momentum, momentum_derivative
 
 
 class ConstraintViolations(NamedTuple):
@@ -328,6 +378,18 @@ def compute_hamiltonian_constraint(vars: BSSNVariables,
     hamiltonian = ricci_scalar + 2/3 * K_squared - A_squared
 
     return hamiltonian
+
+
+@jit
+def compute_hamiltonian_constraint_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    energy_density: jnp.ndarray,
+) -> jnp.ndarray:
+    """Return the Hamiltonian constraint including physical energy density."""
+
+    geometric_hamiltonian = compute_hamiltonian_constraint(vars, params)
+    return geometric_hamiltonian - 16.0 * jnp.pi * energy_density
 
 
 @jit
@@ -430,4 +492,32 @@ def compute_all_constraints(vars: BSSNVariables,
         det_gamma=det_gamma,
         trace_A=trace_A,
         gamma_condition=gamma_condition
+    )
+
+
+@jit
+def compute_all_constraints_with_matter(
+    vars: BSSNVariables,
+    params: BSSNParameters,
+    energy_density: jnp.ndarray,
+    momentum_density: jnp.ndarray,
+) -> ConstraintViolations:
+    """Compute the BSSN constraints with physical matter sources."""
+
+    hamiltonian = compute_hamiltonian_constraint_with_matter(
+        vars, params, energy_density
+    )
+    momentum = compute_momentum_constraint_with_matter(
+        vars, params, momentum_density
+    )
+    det_gamma = compute_det_gamma_violation(vars)
+    trace_A = compute_trace_A_violation(vars)
+    gamma_condition = compute_gamma_constraint(vars, params)
+
+    return ConstraintViolations(
+        hamiltonian=hamiltonian,
+        momentum=momentum,
+        det_gamma=det_gamma,
+        trace_A=trace_A,
+        gamma_condition=gamma_condition,
     )
