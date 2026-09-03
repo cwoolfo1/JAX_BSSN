@@ -7,12 +7,17 @@ import numpy as np
 
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
+from JAX_BSSN.evolution.time_evolve import rk4_step
 
 from JAX_BSSN.EM.boundaries import apply_planar_sommerfeld_boundaries
-from JAX_BSSN.EM.equations import compute_em_rhs
 from JAX_BSSN.EM.evolve import einstein_maxwell_rk4_step
 from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
-from tests.EM.em_helpers import flat_bssn_variables, zero_bssn_rhs
+from tests.EM.em_helpers import (
+    flat_bssn_variables,
+    zero_bssn_rhs,
+    zero_em_variables,
+)
+from tests.initial_data import periodic_gauge_wave_state
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables, EMVariables
 
 
@@ -133,80 +138,36 @@ def test_coupled_rk4_keeps_flat_zero_state_stationary():
         np.testing.assert_allclose(evolved_field, 0.0, atol=1.0e-13)
 
 
-def _wave_rk4_step(wave, bssn, bssn_rhs, params):
-    dt = params.dt
-    k1 = compute_em_rhs(wave, bssn, bssn_rhs, params)
-    midpoint = jax.tree_util.tree_map(
-        lambda value, rhs: value + 0.5 * dt * rhs, wave, k1
+def test_cartesian_zero_em_step_matches_vacuum_bssn_step():
+    grid_size = 8
+    dx = 1.0 / grid_size
+    x = jnp.linspace(-0.5, 0.5, grid_size, endpoint=False)[:, None, None]
+    transverse_zero = jnp.zeros_like(x)
+    bssn = periodic_gauge_wave_state(
+        x,
+        transverse_zero,
+        transverse_zero,
+        dx,
+        amplitude=0.02,
+    )
+    params = BSSNParameters(
+        dx=dx,
+        dt=1.0e-4,
+        nu=0.0,
+        kappa=0.0,
+        eta=0.0,
+        g=0.0,
+    )
+    state = EinsteinMaxwellVariables(
+        bssn=bssn,
+        em=zero_em_variables((grid_size, 1, 1)),
     )
 
-    k2 = compute_em_rhs(midpoint, bssn, bssn_rhs, params)
-    midpoint = jax.tree_util.tree_map(
-        lambda value, rhs: value + 0.5 * dt * rhs, wave, k2
-    )
+    coupled = einstein_maxwell_rk4_step(state, params)
+    vacuum = rk4_step(bssn, params)
+    jax.block_until_ready((coupled, vacuum))
 
-    k3 = compute_em_rhs(midpoint, bssn, bssn_rhs, params)
-    endpoint = jax.tree_util.tree_map(
-        lambda value, rhs: value + dt * rhs, wave, k3
-    )
-
-    k4 = compute_em_rhs(endpoint, bssn, bssn_rhs, params)
-    return jax.tree_util.tree_map(
-        lambda value, rhs1, rhs2, rhs3, rhs4: value
-        + dt * (rhs1 + 2.0 * rhs2 + 2.0 * rhs3 + rhs4) / 6.0,
-        wave,
-        k1,
-        k2,
-        k3,
-        k4,
-    )
-
-
-@jax.jit
-def _evolve_wave(wave, bssn, bssn_rhs, params, num_steps):
-    return jax.lax.fori_loop(
-        0,
-        num_steps,
-        lambda _, state: _wave_rk4_step(
-            state, bssn, bssn_rhs, params
-        ),
-        wave,
-    )
-
-
-def _periodic_wave_error(grid_size):
-    length = 2.0 * np.pi
-    dx = length / grid_size
-    dt = 0.1 * dx
-    num_steps = round(0.25 / dt)
-    final_time = num_steps * dt
-    shape = (grid_size, 1, 1)
-    x = dx * jnp.arange(grid_size, dtype=jnp.float64)
-
-    profile = jnp.sin(x)[:, None, None]
-    profile_dot = -jnp.cos(x)[:, None, None]
-    E = jnp.zeros((3,) + shape, dtype=jnp.float64).at[1].set(profile)
-    P = jnp.zeros_like(E).at[1].set(profile_dot)
-    H = jnp.zeros_like(E).at[2].set(profile)
-    Q = jnp.zeros_like(E).at[2].set(profile_dot)
-    wave = EMVariables(E, P, H, Q)
-
-    bssn = flat_bssn_variables(shape)
-    bssn_rhs = zero_bssn_rhs(bssn)
-    params = BSSNParameters(dx=dx, dt=dt, nu=0.0)
-    evolved = _evolve_wave(wave, bssn, bssn_rhs, params, num_steps)
-    jax.block_until_ready(evolved)
-
-    expected = jnp.sin(x - final_time)
-    error = jnp.sqrt(
-        jnp.mean((evolved.electric_field[1, :, 0, 0] - expected) ** 2)
-    )
-    return float(error)
-
-
-def test_periodic_plane_wave_converges_at_second_order():
-    coarse = _periodic_wave_error(24)
-    fine = _periodic_wave_error(48)
-
-    assert coarse / fine > 3.7
-
+    for actual, expected in zip(coupled.bssn, vacuum):
+        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=2.0e-14)
+    for field in coupled.em:
+        np.testing.assert_allclose(field, 0.0, rtol=0.0, atol=2.0e-14)

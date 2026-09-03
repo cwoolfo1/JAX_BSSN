@@ -1,7 +1,5 @@
 """Spherical Cartoon reconstruction and evolution for Maxwell covectors."""
 
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 
@@ -285,79 +283,6 @@ def _add_scaled(state, rhs, scale):
     )
 
 
-@partial(jax.jit, static_argnames=("background_func",))
-def compute_cartoon_prescribed_rhs(
-    wave,
-    time,
-    params,
-    background_func,
-    background_params,
-):
-    """Evaluate a prescribed-background Maxwell RHS on spherical support."""
-
-    support_em = reconstruct_cartoon_wave_support(wave, params)
-    support_bssn, support_bssn_rhs = background_func(
-        time, support_em, background_params
-    )
-    support_rhs = compute_em_rhs(
-        support_em, support_bssn, support_bssn_rhs, params
-    )
-    return project_cartoon_wave_rhs(support_rhs)
-
-
-@partial(jax.jit, static_argnames=("background_func",))
-def cartoon_prescribed_wave_rk4_step(
-    wave,
-    time,
-    params,
-    background_func,
-    background_params,
-):
-    """Advance compact spherical Maxwell fields on prescribed geometry."""
-
-    dt = params.dt
-    wave = fill_cartoon_wave_ghosts(wave)
-    k1 = compute_cartoon_prescribed_rhs(
-        wave, time, params, background_func, background_params
-    )
-
-    midpoint = fill_cartoon_wave_ghosts(_add_scaled(wave, k1, 0.5 * dt))
-    k2 = compute_cartoon_prescribed_rhs(
-        midpoint,
-        time + 0.5 * dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    midpoint = fill_cartoon_wave_ghosts(_add_scaled(wave, k2, 0.5 * dt))
-    k3 = compute_cartoon_prescribed_rhs(
-        midpoint,
-        time + 0.5 * dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    endpoint = fill_cartoon_wave_ghosts(_add_scaled(wave, k3, dt))
-    k4 = compute_cartoon_prescribed_rhs(
-        endpoint,
-        time + dt,
-        params,
-        background_func,
-        background_params,
-    )
-    increment = jax.tree_util.tree_map(
-        lambda d1, d2, d3, d4: (d1 + 2.0 * d2 + 2.0 * d3 + d4)
-        / 6.0,
-        k1,
-        k2,
-        k3,
-        k4,
-    )
-    return fill_cartoon_wave_ghosts(_add_scaled(wave, increment, dt))
-
-
 def _prepare_coupled_stage(state):
     bssn = enforce_algebraic_constraints(state.bssn)
     return EinsteinMaxwellVariables(
@@ -432,11 +357,9 @@ def spherical_einstein_maxwell_rk4_step(
 
 __all__ = [
     "spherical_einstein_maxwell_rk4_step",
-    "cartoon_prescribed_wave_rk4_step",
     "compact_cartoon_wave",
     "compute_cartoon_constraint_divergences",
     "compute_spherical_einstein_maxwell_rhs",
-    "compute_cartoon_prescribed_rhs",
     "expand_cartoon_wave_axis",
     "fill_cartoon_wave_ghosts",
     "project_cartoon_wave_rhs",

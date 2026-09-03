@@ -20,6 +20,15 @@ from JAX_BSSN.EM.variables import EinsteinMaxwellVariables, EMVariables
 from tests.EM.em_helpers import flat_bssn_variables, zero_bssn_rhs
 
 
+def _duality_transform(em):
+    return EMVariables(
+        electric_field=em.magnetic_field,
+        electric_field_dot=em.magnetic_field_dot,
+        magnetic_field=-em.electric_field,
+        magnetic_field_dot=-em.electric_field_dot,
+    )
+
+
 def test_em_ricci_is_removed_and_electric_weyl_includes_stress():
     shape = (6, 4, 4)
     bssn = flat_bssn_variables(shape)
@@ -127,3 +136,60 @@ def test_nonzero_stage_uses_synchronized_two_way_sources():
     assert float(jnp.max(jnp.abs(evolved.bssn.conformal_connection))) > 0.0
     for field in (*evolved.bssn, *evolved.em):
         assert bool(jnp.all(jnp.isfinite(field)))
+
+
+def test_synchronized_coupled_rhs_preserves_maxwell_duality_and_self_stress():
+    grid_size = 8
+    shape = (grid_size, 1, 1)
+    dx = 2.0 * jnp.pi / grid_size
+    x = dx * jnp.arange(grid_size, dtype=jnp.float64)
+    sine = jnp.sin(x)[:, None, None]
+    cosine = jnp.cos(x)[:, None, None]
+
+    electric_field = jnp.zeros((3,) + shape, dtype=jnp.float64)
+    electric_field = electric_field.at[1].set(0.02 * sine)
+    electric_field_dot = jnp.zeros_like(electric_field)
+    electric_field_dot = electric_field_dot.at[1].set(-0.02 * cosine)
+    magnetic_field = jnp.zeros_like(electric_field)
+    magnetic_field = magnetic_field.at[2].set(0.03 * cosine)
+    magnetic_field_dot = jnp.zeros_like(electric_field)
+    magnetic_field_dot = magnetic_field_dot.at[2].set(0.03 * sine)
+    em = EMVariables(
+        electric_field,
+        electric_field_dot,
+        magnetic_field,
+        magnetic_field_dot,
+    )
+    bssn = flat_bssn_variables(shape)
+    params = BSSNParameters(
+        dx=float(dx),
+        dt=1.0e-3,
+        nu=0.0,
+        kappa=0.0,
+        eta=0.0,
+        g=0.0,
+        zero_shift=1,
+    )
+
+    rhs = compute_einstein_maxwell_rhs(
+        EinsteinMaxwellVariables(bssn=bssn, em=em), params
+    )
+    dual_rhs = compute_einstein_maxwell_rhs(
+        EinsteinMaxwellVariables(bssn=bssn, em=_duality_transform(em)),
+        params,
+    )
+    expected_dual_em_rhs = _duality_transform(rhs.em)
+    jax.block_until_ready((rhs, dual_rhs))
+
+    for actual, expected in zip(dual_rhs.bssn, rhs.bssn):
+        np.testing.assert_allclose(
+            actual, expected, rtol=2.0e-13, atol=2.0e-13
+        )
+    for actual, expected in zip(dual_rhs.em, expected_dual_em_rhs):
+        np.testing.assert_allclose(
+            actual, expected, rtol=2.0e-13, atol=2.0e-13
+        )
+
+    # A nonzero trace-K source confirms that the invariant EM self-stress is
+    # present in the synchronized BSSN stage, rather than only in diagnostics.
+    assert float(jnp.max(jnp.abs(rhs.bssn.trace_K))) > 0.0

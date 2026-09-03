@@ -1,6 +1,4 @@
-"""Synchronized and prescribed-background Maxwell time integration."""
-
-from functools import partial
+"""Synchronized Einstein--Maxwell time integration."""
 
 import jax
 
@@ -111,100 +109,8 @@ def evolve_einstein_maxwell_steps(
     )
 
 
-def _prescribed_em_rhs(
-    em,
-    time,
-    params,
-    background_func,
-    background_params,
-):
-    bssn, bssn_rhs = background_func(time, em, background_params)
-    return compute_em_rhs(em, bssn, bssn_rhs, params)
-
-
-@partial(jax.jit, static_argnames=("background_func",))
-def prescribed_em_rk4_step(
-    em,
-    time,
-    params,
-    background_func,
-    background_params,
-):
-    """Advance Maxwell fields with prescribed geometry at every RK4 stage."""
-
-    dt = params.dt
-    k1 = _prescribed_em_rhs(
-        em, time, params, background_func, background_params
-    )
-
-    midpoint = _add_scaled(em, k1, 0.5 * dt)
-    k2 = _prescribed_em_rhs(
-        midpoint,
-        time + 0.5 * dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    midpoint = _add_scaled(em, k2, 0.5 * dt)
-    k3 = _prescribed_em_rhs(
-        midpoint,
-        time + 0.5 * dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    endpoint = _add_scaled(em, k3, dt)
-    k4 = _prescribed_em_rhs(
-        endpoint,
-        time + dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    increment = jax.tree_util.tree_map(
-        lambda rhs1, rhs2, rhs3, rhs4: (
-            rhs1 + 2.0 * rhs2 + 2.0 * rhs3 + rhs4
-        )
-        / 6.0,
-        k1,
-        k2,
-        k3,
-        k4,
-    )
-    return _add_scaled(em, increment, dt)
-
-
-@partial(jax.jit, static_argnames=("background_func",))
-def evolve_prescribed_em_steps(
-    em,
-    initial_time,
-    params,
-    background_func,
-    background_params,
-    num_steps,
-):
-    """Advance Maxwell fields without evolving the prescribed background."""
-
-    def step(step_index, current_em):
-        time = initial_time + step_index * params.dt
-        return prescribed_em_rk4_step(
-            current_em,
-            time,
-            params,
-            background_func,
-            background_params,
-        )
-
-    return jax.lax.fori_loop(0, num_steps, step, em)
-
-
 __all__ = [
     "compute_einstein_maxwell_rhs",
     "einstein_maxwell_rk4_step",
     "evolve_einstein_maxwell_steps",
-    "evolve_prescribed_em_steps",
-    "prescribed_em_rk4_step",
 ]

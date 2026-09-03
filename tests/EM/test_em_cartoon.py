@@ -12,33 +12,25 @@ from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 
 from JAX_BSSN.EM.cartoon.axisymmetry import (
     axisymmetric_einstein_maxwell_rk4_step,
-    axisymmetric_prescribed_wave_rk4_step,
     compact_axisymmetric_wave,
     compute_axisymmetric_constraint_divergences,
-    compute_axisymmetric_prescribed_rhs,
+    compute_axisymmetric_einstein_maxwell_rhs,
     expand_axisymmetric_wave_plane,
     fill_axisymmetric_wave_ghosts,
     reconstruct_axisymmetric_wave_support,
     validate_axisymmetric_wave_grid,
 )
 from JAX_BSSN.EM.cartoon.spherical_symmetry import (
-    cartoon_prescribed_wave_rk4_step,
     compact_cartoon_wave,
     compute_cartoon_constraint_divergences,
-    compute_cartoon_prescribed_rhs,
+    compute_spherical_einstein_maxwell_rhs,
     expand_cartoon_wave_axis,
     fill_cartoon_wave_ghosts,
     reconstruct_cartoon_wave_support,
     spherical_einstein_maxwell_rk4_step,
     validate_cartoon_wave_grid,
 )
-from JAX_BSSN.EM.equations import compute_em_rhs
-from JAX_BSSN.EM.schwarzschild import (
-    SchwarzschildParameters,
-    exact_wave_at_time,
-    schwarzschild_background,
-    schwarzschild_exact_template,
-)
+from JAX_BSSN.EM.evolve import compute_einstein_maxwell_rhs
 from JAX_BSSN.EM.variables import EMVariables, EinsteinMaxwellVariables
 
 
@@ -56,13 +48,6 @@ def _flat_bssn(shape, dtype=jnp.float64):
         lapse=jnp.ones(shape, dtype=dtype),
         shift=vector,
     )
-
-
-def _flat_background(time, em, unused):
-    del time, unused
-    bssn = _flat_bssn(em.electric_field.shape[-3:])
-    rhs = BSSNVariables(*(jnp.zeros_like(field) for field in bssn))
-    return bssn, rhs
 
 
 def _zero_em(shape):
@@ -225,7 +210,7 @@ def test_axisymmetric_reconstruction_rotates_azimuthal_and_axial_components():
     assert bool(jnp.all(jnp.isfinite(support.electric_field)))
 
 
-def test_spherical_compact_rhs_matches_cartesian_support_rhs():
+def test_spherical_coupled_rhs_matches_cartesian_support_rhs():
     num_radial_points, dx = 16, 0.1
     params = _spherical_params(dx)
     radius = (jnp.arange(num_radial_points) + 0.5) * dx
@@ -234,10 +219,14 @@ def test_spherical_compact_rhs_matches_cartesian_support_rhs():
     for profile in profiles:
         field = jnp.zeros((3, num_radial_points + 4, 1, 1))
         fields.append(field.at[0, 4:, 0, 0].set(profile))
-    compact = EMVariables(*fields)
+    compact = fill_cartoon_wave_ghosts(EMVariables(*fields))
 
-    compact_rhs = compute_cartoon_prescribed_rhs(
-        compact, 0.0, params, _flat_background, 0.0
+    compact_state = EinsteinMaxwellVariables(
+        bssn=_flat_bssn(compact.electric_field.shape[-3:]),
+        em=compact,
+    )
+    compact_rhs = compute_spherical_einstein_maxwell_rhs(
+        compact_state, params
     )
     x = (jnp.arange(num_radial_points + 4) - 3.5) * dx
     y = (jnp.arange(9) - 4.0) * dx
@@ -250,10 +239,14 @@ def test_spherical_compact_rhs_matches_cartesian_support_rhs():
         -2.0 * position,
         0.5 * position * radius_squared,
     )
-    bssn, bssn_rhs = _flat_background(0.0, full, 0.0)
-    full_rhs = compute_em_rhs(full, bssn, bssn_rhs, params)
+    full_state = EinsteinMaxwellVariables(
+        bssn=_flat_bssn(full.electric_field.shape[-3:]),
+        em=full,
+    )
+    full_rhs = compute_einstein_maxwell_rhs(full_state, params)
+    jax.block_until_ready((compact_rhs, full_rhs))
 
-    for compact_field, full_field in zip(compact_rhs, full_rhs):
+    for compact_field, full_field in zip(compact_rhs.em, full_rhs.em):
         np.testing.assert_allclose(
             compact_field[:, 4:-4, 0, 0],
             full_field[:, 4:-4, 4, 4],
@@ -262,7 +255,7 @@ def test_spherical_compact_rhs_matches_cartesian_support_rhs():
         )
 
 
-def test_axisymmetric_compact_rhs_matches_cartesian_support_rhs():
+def test_axisymmetric_coupled_rhs_matches_cartesian_support_rhs():
     num_rho, num_z, dx = 16, 17, 0.1
     params = _axisymmetric_params(num_z, dx)
     rho = (jnp.arange(num_rho) + 0.5) * dx
@@ -273,10 +266,14 @@ def test_axisymmetric_compact_rhs_matches_cartesian_support_rhs():
     for scale in (1.0, 0.5, -2.0, 0.25):
         field = jnp.zeros((3, num_rho + 4, 1, num_z))
         fields.append(field.at[:, 4:, 0, :].set(scale * reference))
-    compact = EMVariables(*fields)
+    compact = fill_axisymmetric_wave_ghosts(EMVariables(*fields))
 
-    compact_rhs = compute_axisymmetric_prescribed_rhs(
-        compact, 0.0, params, _flat_background, 0.0
+    compact_state = EinsteinMaxwellVariables(
+        bssn=_flat_bssn(compact.electric_field.shape[-3:]),
+        em=compact,
+    )
+    compact_rhs = compute_axisymmetric_einstein_maxwell_rhs(
+        compact_state, params
     )
     x = (jnp.arange(num_rho + 4) - 3.5) * dx
     y = (jnp.arange(9) - 4.0) * dx
@@ -288,42 +285,20 @@ def test_axisymmetric_compact_rhs_matches_cartesian_support_rhs():
         -2.0 * full_vector,
         0.25 * full_vector,
     )
-    bssn, bssn_rhs = _flat_background(0.0, full, 0.0)
-    full_rhs = compute_em_rhs(full, bssn, bssn_rhs, params)
+    full_state = EinsteinMaxwellVariables(
+        bssn=_flat_bssn(full.electric_field.shape[-3:]),
+        em=full,
+    )
+    full_rhs = compute_einstein_maxwell_rhs(full_state, params)
+    jax.block_until_ready((compact_rhs, full_rhs))
 
-    for compact_field, full_field in zip(compact_rhs, full_rhs):
+    for compact_field, full_field in zip(compact_rhs.em, full_rhs.em):
         np.testing.assert_allclose(
             compact_field[:, 4:-4, 0, 2:-2],
             full_field[:, 4:-4, 4, 2:-2],
             atol=2.0e-10,
             rtol=2.0e-10,
         )
-
-
-def test_prescribed_cartoon_rk4_paths_keep_zero_fields_stationary():
-    spherical_params = _spherical_params(0.2)
-    spherical = _zero_em((12, 1, 1))
-    spherical_evolved = cartoon_prescribed_wave_rk4_step(
-        spherical,
-        jnp.asarray(0.0),
-        spherical_params,
-        _flat_background,
-        0.0,
-    )
-
-    axisymmetric_params = _axisymmetric_params(11, 0.2)
-    axisymmetric = _zero_em((12, 1, 11))
-    axisymmetric_evolved = axisymmetric_prescribed_wave_rk4_step(
-        axisymmetric,
-        jnp.asarray(0.0),
-        axisymmetric_params,
-        _flat_background,
-        0.0,
-    )
-    jax.block_until_ready((spherical_evolved, axisymmetric_evolved))
-
-    for field in spherical_evolved + axisymmetric_evolved:
-        np.testing.assert_allclose(field, 0.0, atol=2.0e-13)
 
 
 def test_spherical_coupled_step_matches_bssn_cartoon_for_zero_maxwell():
@@ -362,48 +337,3 @@ def test_axisymmetric_coupled_step_matches_bssn_cartoon_for_zero_maxwell():
     )
     np.testing.assert_allclose(div_E, 0.0, atol=2.0e-13)
     np.testing.assert_allclose(div_B, 0.0, atol=2.0e-13)
-
-
-def test_reduced_axisymmetric_schwarzschild_evolution_is_finite():
-    num_rho, num_z = 8, 16
-    dx = 12.0 / num_rho
-    params = _axisymmetric_params(num_z, dx, dt=0.1)
-    background_params = SchwarzschildParameters(
-        mass=1.0,
-        dx=dx,
-        x_min=params.x_min,
-        y_min=params.y_min,
-        z_min=params.z_min,
-    )
-
-    signed_params = params._replace(
-        x_min=-(num_rho - 0.5) * dx,
-        y_min=0.0,
-    )
-    signed_background = background_params._replace(
-        x_min=signed_params.x_min,
-        y_min=0.0,
-    )
-    signed_template = schwarzschild_exact_template(
-        (2 * num_rho, 1, num_z),
-        signed_params,
-        signed_background,
-        omega=0.4,
-        ell=1,
-        m=0,
-    )
-    template = compact_axisymmetric_wave(signed_template)
-    initial = exact_wave_at_time(template, 0.0, 0.4)
-    validate_axisymmetric_wave_grid(initial, params)
-
-    evolved = axisymmetric_prescribed_wave_rk4_step(
-        initial,
-        jnp.asarray(0.0),
-        params,
-        schwarzschild_background,
-        background_params,
-    )
-    jax.block_until_ready(evolved)
-
-    for field in evolved:
-        assert bool(jnp.all(jnp.isfinite(field)))

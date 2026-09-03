@@ -1,7 +1,5 @@
 """Axisymmetric Cartoon reconstruction and evolution for Maxwell covectors."""
 
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 
@@ -282,83 +280,6 @@ def _add_scaled(state, rhs, scale):
     )
 
 
-@partial(jax.jit, static_argnames=("background_func",))
-def compute_axisymmetric_prescribed_rhs(
-    wave,
-    time,
-    params,
-    background_func,
-    background_params,
-):
-    """Evaluate a prescribed Maxwell RHS on axisymmetric support."""
-
-    support_em = reconstruct_axisymmetric_wave_support(wave, params)
-    support_bssn, support_bssn_rhs = background_func(
-        time, support_em, background_params
-    )
-    support_rhs = compute_em_rhs(
-        support_em, support_bssn, support_bssn_rhs, params
-    )
-    return project_axisymmetric_wave_rhs(support_rhs)
-
-
-@partial(jax.jit, static_argnames=("background_func",))
-def axisymmetric_prescribed_wave_rk4_step(
-    wave,
-    time,
-    params,
-    background_func,
-    background_params,
-):
-    """Advance compact axisymmetric Maxwell fields on prescribed geometry."""
-
-    dt = params.dt
-    wave = fill_axisymmetric_wave_ghosts(wave)
-    k1 = compute_axisymmetric_prescribed_rhs(
-        wave, time, params, background_func, background_params
-    )
-
-    midpoint = fill_axisymmetric_wave_ghosts(
-        _add_scaled(wave, k1, 0.5 * dt)
-    )
-    k2 = compute_axisymmetric_prescribed_rhs(
-        midpoint,
-        time + 0.5 * dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    midpoint = fill_axisymmetric_wave_ghosts(
-        _add_scaled(wave, k2, 0.5 * dt)
-    )
-    k3 = compute_axisymmetric_prescribed_rhs(
-        midpoint,
-        time + 0.5 * dt,
-        params,
-        background_func,
-        background_params,
-    )
-
-    endpoint = fill_axisymmetric_wave_ghosts(_add_scaled(wave, k3, dt))
-    k4 = compute_axisymmetric_prescribed_rhs(
-        endpoint,
-        time + dt,
-        params,
-        background_func,
-        background_params,
-    )
-    increment = jax.tree_util.tree_map(
-        lambda d1, d2, d3, d4: (d1 + 2.0 * d2 + 2.0 * d3 + d4)
-        / 6.0,
-        k1,
-        k2,
-        k3,
-        k4,
-    )
-    return fill_axisymmetric_wave_ghosts(_add_scaled(wave, increment, dt))
-
-
 def _prepare_coupled_stage(state):
     bssn = enforce_algebraic_constraints(state.bssn)
     return EinsteinMaxwellVariables(
@@ -433,11 +354,9 @@ def axisymmetric_einstein_maxwell_rk4_step(
 
 __all__ = [
     "axisymmetric_einstein_maxwell_rk4_step",
-    "axisymmetric_prescribed_wave_rk4_step",
     "compact_axisymmetric_wave",
     "compute_axisymmetric_constraint_divergences",
     "compute_axisymmetric_einstein_maxwell_rhs",
-    "compute_axisymmetric_prescribed_rhs",
     "expand_axisymmetric_wave_plane",
     "fill_axisymmetric_wave_ghosts",
     "project_axisymmetric_wave_rhs",
