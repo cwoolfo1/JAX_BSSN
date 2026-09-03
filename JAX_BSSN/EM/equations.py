@@ -31,7 +31,7 @@ def _raise_tensor2(
     )
 
 
-def _pstf_vector_gradient(
+def _tracefree_vector_gradient(
     field: jnp.ndarray,
     geometry: BSSNEMGeometry,
     params: BSSNParameters,
@@ -160,10 +160,10 @@ def curved_source_terms(
         dA,
     )
 
-    pstf_E = _pstf_vector_gradient(E, geometry, params)
-    pstf_H = _pstf_vector_gradient(H, geometry, params)
-    pstf_E_up_up = _raise_tensor2(pstf_E, inverse_metric)
-    pstf_H_up_up = _raise_tensor2(pstf_H, inverse_metric)
+    tf_E = _tracefree_vector_gradient(E, geometry, params)
+    tf_H = _tracefree_vector_gradient(H, geometry, params)
+    tf_E_up_up = _raise_tensor2(tf_E, inverse_metric)
+    tf_H_up_up = _raise_tensor2(tf_H, inverse_metric)
     curl_E_up = _raise_covector(
         _curl_covector(E, geometry, params), inverse_metric
     )
@@ -190,7 +190,7 @@ def curved_source_terms(
         )
         + 5.0 * K * P / 3.0
         - jnp.einsum("ij...,j...->i...", A, P_up)
-        + jnp.einsum("j...,ij...->i...", acceleration_up, pstf_E)
+        + jnp.einsum("j...,ij...->i...", acceleration_up, tf_E)
         - jnp.einsum("ij...,j...->i...", geometry.spatial_ricci, E_up)
         - jnp.einsum("ijk...,l...,jkl...->i...", epsilon, H, dA_up_up_up)
         - 2.5
@@ -216,7 +216,7 @@ def curved_source_terms(
         )
         + 2.0
         * jnp.einsum(
-            "ijk...,jl...,kl...->i...", epsilon, A_up_lower, pstf_H_up_up
+            "ijk...,jl...,kl...->i...", epsilon, A_up_lower, tf_H_up_up
         )
         - jnp.einsum("ij...,j...->i...", geometry.electric_weyl, E_up)
         + jnp.einsum("ij...,j...->i...", geometry.magnetic_weyl, H_up)
@@ -236,7 +236,7 @@ def curved_source_terms(
         )
         + 5.0 * K * Q / 3.0
         - jnp.einsum("ij...,j...->i...", A, Q_up)
-        + jnp.einsum("j...,ij...->i...", acceleration_up, pstf_H)
+        + jnp.einsum("j...,ij...->i...", acceleration_up, tf_H)
         - jnp.einsum("ij...,j...->i...", geometry.spatial_ricci, H_up)
         + jnp.einsum("ijk...,l...,jkl...->i...", epsilon, E, dA_up_up_up)
         - 2.5
@@ -262,7 +262,7 @@ def curved_source_terms(
         )
         - 2.0
         * jnp.einsum(
-            "ijk...,jl...,kl...->i...", epsilon, A_up_lower, pstf_E_up_up
+            "ijk...,jl...,kl...->i...", epsilon, A_up_lower, tf_E_up_up
         )
         - jnp.einsum("ij...,j...->i...", geometry.electric_weyl, H_up)
         - jnp.einsum("ij...,j...->i...", geometry.magnetic_weyl, E_up)
