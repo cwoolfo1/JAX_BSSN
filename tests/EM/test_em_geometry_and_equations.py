@@ -7,18 +7,18 @@ import numpy as np
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 
-from JAX_BSSN.EM.derivatives import (
+from JAX_BSSN.EM.second_order.derivatives import (
     covariant_derivative_covector,
     covariant_vector_laplacian,
 )
-from JAX_BSSN.EM.equations import curved_source_terms
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.second_order.equations import curved_source_terms
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
 from tests.EM.em_helpers import (
     flat_bssn_variables,
     zero_bssn_rhs,
     zero_em_variables,
 )
-from JAX_BSSN.EM.variables import EMVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables
 
 
 def test_minkowski_geometry_and_sources_vanish():

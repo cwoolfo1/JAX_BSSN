@@ -7,16 +7,16 @@ import numpy as np
 
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs_with_matter
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.equations import compute_em_rhs
-from JAX_BSSN.EM.evolve import (
+from JAX_BSSN.EM.second_order.equations import compute_em_rhs
+from JAX_BSSN.EM.second_order.evolve import (
     compute_einstein_maxwell_rhs,
     einstein_maxwell_rk4_step,
 )
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
-from JAX_BSSN.EM.variables import EinsteinMaxwellVariables, EMVariables
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
 from tests.EM.em_helpers import flat_bssn_variables, zero_bssn_rhs
 
 

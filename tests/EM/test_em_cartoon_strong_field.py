@@ -7,13 +7,13 @@ import numpy as np
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
-from JAX_BSSN.EM.cartoon.axisymmetry import (
+from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     compute_axisymmetric_constraint_divergences,
 )
-from JAX_BSSN.EM.cartoon.spherical_symmetry import (
+from JAX_BSSN.EM.second_order.cartoon.spherical_symmetry import (
     compute_cartoon_constraint_divergences,
 )
-from JAX_BSSN.EM.variables import EMVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables
 
 
 def _zero_W_state(shape):

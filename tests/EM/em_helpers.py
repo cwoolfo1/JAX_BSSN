@@ -4,7 +4,7 @@ import jax.numpy as jnp
 
 from JAX_BSSN.bssn import BSSNVariables
 
-from JAX_BSSN.EM.variables import EMVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables
 
 
 def flat_bssn_variables(shape, dtype=jnp.float64):

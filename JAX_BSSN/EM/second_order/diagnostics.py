@@ -1,6 +1,6 @@
 """Output helpers for Einstein--Maxwell states."""
 
-from JAX_BSSN.EM.variables import EMVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables
 
 
 def electromagnetic_output_fields(em: EMVariables) -> dict:

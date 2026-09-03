@@ -13,29 +13,29 @@ from JAX_BSSN.cartoon.spherical_symmetry import reconstruct_cartoon_support
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs_with_matter
 
-from JAX_BSSN.EM.cartoon.axisymmetry import (
+from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     axisymmetric_einstein_maxwell_rk4_step,
     compute_axisymmetric_constraint_divergences,
     fill_axisymmetric_wave_ghosts,
     project_axisymmetric_wave_rhs,
     reconstruct_axisymmetric_wave_support,
 )
-from JAX_BSSN.EM.cartoon.spherical_symmetry import (
+from JAX_BSSN.EM.second_order.cartoon.spherical_symmetry import (
     compute_cartoon_constraint_divergences,
     fill_cartoon_wave_ghosts,
     reconstruct_cartoon_wave_support,
     spherical_einstein_maxwell_rk4_step,
 )
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.equations import source_free_projected_field_dots
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
-from JAX_BSSN.EM.evolve import (
+from JAX_BSSN.EM.second_order.equations import source_free_projected_field_dots
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.second_order.evolve import (
     compute_einstein_maxwell_rhs,
     einstein_maxwell_rk4_step,
 )
-from JAX_BSSN.EM.variables import EMVariables, EinsteinMaxwellVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables, EinsteinMaxwellVariables
 from tests.EM.em_helpers import flat_bssn_variables
 
 

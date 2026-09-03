@@ -8,7 +8,7 @@ import numpy as np
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 
-from JAX_BSSN.EM.derivatives import first_derivative, second_derivative
+from JAX_BSSN.EM.second_order.derivatives import first_derivative, second_derivative
 
 
 def periodic_errors(grid_size):

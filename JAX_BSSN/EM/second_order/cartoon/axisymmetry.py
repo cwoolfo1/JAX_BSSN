@@ -27,15 +27,15 @@ from JAX_BSSN.bssn.tensor_algebra import (
 )
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
 
-from JAX_BSSN.EM.derivatives import (
+from JAX_BSSN.EM.second_order.derivatives import (
     covariant_derivative_covector,
     spatial_derivatives,
 )
-from JAX_BSSN.EM.equations import compute_em_rhs
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.equations import compute_em_rhs
+from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.variables import EinsteinMaxwellVariables, EMVariables
+from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
 
 
 VECTOR_RADIAL_REFLECTION_PARITY = (-1.0, -1.0, 1.0)

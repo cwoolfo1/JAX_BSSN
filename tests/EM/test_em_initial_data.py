@@ -7,7 +7,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from JAX_BSSN.EM.initial_data import (
+from JAX_BSSN.EM.second_order.initial_data import (
     conformal_vector_to_physical_covector,
     contract_conformal_electromagnetic_fields,
     electromagnetic_hamiltonian_residual,

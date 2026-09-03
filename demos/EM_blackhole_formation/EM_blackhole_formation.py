@@ -35,7 +35,7 @@ from JAX_BSSN.cartoon.axisymmetry.reconstruction import (
     _project_vector,
 )
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.EM.cartoon.axisymmetry import (
+from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     axisymmetric_einstein_maxwell_rk4_step,
     compact_axisymmetric_wave,
     compute_axisymmetric_constraint_divergences,
@@ -44,20 +44,20 @@ from JAX_BSSN.EM.cartoon.axisymmetry import (
     reconstruct_axisymmetric_wave_support,
     validate_axisymmetric_wave_grid,
 )
-from JAX_BSSN.EM.diagnostics import electromagnetic_output_fields
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.diagnostics import electromagnetic_output_fields
+from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
     compute_electromagnetic_stress_energy,
 )
-from JAX_BSSN.EM.equations import source_free_projected_field_dots
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
-from JAX_BSSN.EM.initial_data import (
+from JAX_BSSN.EM.second_order.equations import source_free_projected_field_dots
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.second_order.initial_data import (
     conformal_vector_to_physical_covector,
     contract_conformal_electromagnetic_fields,
     off_centered_toroidal_electric_seed,
     solve_electromagnetic_conformal_factor,
 )
-from JAX_BSSN.EM.variables import EinsteinMaxwellVariables, EMVariables
+from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs_with_matter
 

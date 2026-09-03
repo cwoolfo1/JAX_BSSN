@@ -7,12 +7,12 @@ import numpy as np
 import openpmd_api as io
 
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.EM.cartoon.axisymmetry import (
+from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     compact_axisymmetric_wave,
     expand_axisymmetric_wave_plane,
 )
-from JAX_BSSN.EM.diagnostics import electromagnetic_output_fields
-from JAX_BSSN.EM.variables import EMVariables
+from JAX_BSSN.EM.second_order.diagnostics import electromagnetic_output_fields
+from JAX_BSSN.EM.second_order.variables import EMVariables
 
 
 def test_openpmd_writes_only_E_and_B_with_axisymmetric_vector_parity(tmp_path):

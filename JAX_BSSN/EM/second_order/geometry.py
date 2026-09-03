@@ -11,13 +11,13 @@ from JAX_BSSN.bssn.tensor_algebra import (
     invert_3x3_metric,
 )
 
-from JAX_BSSN.EM.derivatives import (
+from JAX_BSSN.EM.second_order.derivatives import (
     covariant_derivative_covector,
     covariant_derivative_tensor2,
     lie_derivative_covector,
     spatial_derivatives,
 )
-from JAX_BSSN.EM.variables import BSSNEMGeometry
+from JAX_BSSN.EM.second_order.variables import BSSNEMGeometry
 
 
 LAPSE_FLOOR_VALUE = 1.0e-12

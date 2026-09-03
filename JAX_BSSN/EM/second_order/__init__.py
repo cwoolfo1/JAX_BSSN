@@ -1,6 +1,6 @@
 """Second-order Maxwell fields coupled to the JAX BSSN spacetime solver."""
 
-from JAX_BSSN.EM.cartoon import (
+from JAX_BSSN.EM.second_order.cartoon import (
     axisymmetric_einstein_maxwell_rk4_step,
     compact_axisymmetric_wave,
     compact_cartoon_wave,
@@ -20,22 +20,22 @@ from JAX_BSSN.EM.cartoon import (
     validate_axisymmetric_wave_grid,
     validate_cartoon_wave_grid,
 )
-from JAX_BSSN.EM.diagnostics import electromagnetic_output_fields
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.diagnostics import electromagnetic_output_fields
+from JAX_BSSN.EM.second_order.energy_momentum import (
     ElectromagneticStressEnergy,
     compute_electromagnetic_energy_momentum,
     compute_electromagnetic_stress_energy,
 )
-from JAX_BSSN.EM.equations import (
+from JAX_BSSN.EM.second_order.equations import (
     compute_em_rhs,
     source_free_projected_field_dots,
 )
-from JAX_BSSN.EM.evolve import (
+from JAX_BSSN.EM.second_order.evolve import (
     compute_einstein_maxwell_rhs,
     einstein_maxwell_rk4_step
 )
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
-from JAX_BSSN.EM.initial_data import (
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.second_order.initial_data import (
     conformal_vector_to_physical_covector,
     contract_conformal_electromagnetic_fields,
     electromagnetic_hamiltonian_residual,
@@ -45,7 +45,7 @@ from JAX_BSSN.EM.initial_data import (
     off_centered_toroidal_electric_seed,
     solve_electromagnetic_conformal_factor,
 )
-from JAX_BSSN.EM.variables import (
+from JAX_BSSN.EM.second_order.variables import (
     BSSNEMGeometry,
     EinsteinMaxwellVariables,
     EMVariables,

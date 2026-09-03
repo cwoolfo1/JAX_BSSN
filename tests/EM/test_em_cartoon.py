@@ -10,7 +10,7 @@ from JAX_BSSN.cartoon.axisymmetry import axisymmetric_rk4_step
 from JAX_BSSN.cartoon.spherical_symmetry import cartoon_rk4_step
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 
-from JAX_BSSN.EM.cartoon.axisymmetry import (
+from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     axisymmetric_einstein_maxwell_rk4_step,
     compact_axisymmetric_wave,
     compute_axisymmetric_constraint_divergences,
@@ -20,7 +20,7 @@ from JAX_BSSN.EM.cartoon.axisymmetry import (
     reconstruct_axisymmetric_wave_support,
     validate_axisymmetric_wave_grid,
 )
-from JAX_BSSN.EM.cartoon.spherical_symmetry import (
+from JAX_BSSN.EM.second_order.cartoon.spherical_symmetry import (
     compact_cartoon_wave,
     compute_cartoon_constraint_divergences,
     compute_spherical_einstein_maxwell_rhs,
@@ -30,8 +30,8 @@ from JAX_BSSN.EM.cartoon.spherical_symmetry import (
     spherical_einstein_maxwell_rk4_step,
     validate_cartoon_wave_grid,
 )
-from JAX_BSSN.EM.evolve import compute_einstein_maxwell_rhs
-from JAX_BSSN.EM.variables import EMVariables, EinsteinMaxwellVariables
+from JAX_BSSN.EM.second_order.evolve import compute_einstein_maxwell_rhs
+from JAX_BSSN.EM.second_order.variables import EMVariables, EinsteinMaxwellVariables
 
 
 def _flat_bssn(shape, dtype=jnp.float64):

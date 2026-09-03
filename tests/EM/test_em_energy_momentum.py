@@ -7,7 +7,7 @@ import numpy as np
 
 from JAX_BSSN.bssn import BSSNVariables
 from JAX_BSSN.bssn.tensor_algebra import invert_3x3_metric
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
     compute_electromagnetic_stress_energy,
 )

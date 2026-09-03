@@ -6,8 +6,8 @@ import jax.numpy as jnp
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolution.boundaries import SOMMERFELD_BC
 
-from JAX_BSSN.EM.derivatives import spatial_derivatives
-from JAX_BSSN.EM.variables import BSSNEMGeometry, EMVariables
+from JAX_BSSN.EM.second_order.derivatives import spatial_derivatives
+from JAX_BSSN.EM.second_order.variables import BSSNEMGeometry, EMVariables
 
 
 def _outward_boundary_covector(

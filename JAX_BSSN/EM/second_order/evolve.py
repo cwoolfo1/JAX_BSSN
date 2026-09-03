@@ -8,11 +8,11 @@ from JAX_BSSN.evolution.time_evolve import (
     enforce_algebraic_constraints,
 )
 
-from JAX_BSSN.EM.equations import compute_em_rhs
-from JAX_BSSN.EM.energy_momentum import (
+from JAX_BSSN.EM.second_order.equations import compute_em_rhs
+from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
+from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables
 
 
 def _euler_step(state, rhs, dt):

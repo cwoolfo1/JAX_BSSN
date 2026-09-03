@@ -1,6 +1,6 @@
 """Compact Cartoon symmetry support for Einstein--Maxwell evolution."""
 
-from JAX_BSSN.EM.cartoon.axisymmetry import (
+from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     axisymmetric_einstein_maxwell_rk4_step,
     compact_axisymmetric_wave,
     compute_axisymmetric_constraint_divergences,
@@ -11,7 +11,7 @@ from JAX_BSSN.EM.cartoon.axisymmetry import (
     reconstruct_axisymmetric_wave_support,
     validate_axisymmetric_wave_grid,
 )
-from JAX_BSSN.EM.cartoon.spherical_symmetry import (
+from JAX_BSSN.EM.second_order.cartoon.spherical_symmetry import (
     compact_cartoon_wave,
     compute_cartoon_constraint_divergences,
     compute_spherical_einstein_maxwell_rhs,

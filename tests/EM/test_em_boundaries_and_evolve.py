@@ -9,16 +9,16 @@ from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 from JAX_BSSN.evolution.time_evolve import rk4_step
 
-from JAX_BSSN.EM.boundaries import apply_planar_sommerfeld_boundaries
-from JAX_BSSN.EM.evolve import einstein_maxwell_rk4_step
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.second_order.boundaries import apply_planar_sommerfeld_boundaries
+from JAX_BSSN.EM.second_order.evolve import einstein_maxwell_rk4_step
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
 from tests.EM.em_helpers import (
     flat_bssn_variables,
     zero_bssn_rhs,
     zero_em_variables,
 )
 from tests.initial_data import periodic_gauge_wave_state
-from JAX_BSSN.EM.variables import EinsteinMaxwellVariables, EMVariables
+from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
 
 
 def test_planar_sommerfeld_uses_face_sign_lapse_and_shift():

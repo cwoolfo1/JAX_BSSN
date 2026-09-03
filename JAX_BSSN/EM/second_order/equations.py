@@ -5,16 +5,16 @@ import jax.numpy as jnp
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 
-from JAX_BSSN.EM.boundaries import apply_planar_sommerfeld_boundaries
-from JAX_BSSN.EM.derivatives import (
+from JAX_BSSN.EM.second_order.boundaries import apply_planar_sommerfeld_boundaries
+from JAX_BSSN.EM.second_order.derivatives import (
     covariant_derivative_covector,
     covariant_derivative_tensor2,
     covariant_vector_laplacian,
     lie_derivative_covector,
     spatial_derivatives,
 )
-from JAX_BSSN.EM.geometry import compute_bssn_em_geometry, tracefree
-from JAX_BSSN.EM.variables import BSSNEMGeometry, EMVariables
+from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry, tracefree
+from JAX_BSSN.EM.second_order.variables import BSSNEMGeometry, EMVariables
 
 
 def _raise_covector(
