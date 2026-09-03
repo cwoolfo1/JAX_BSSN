@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-from JAX_BSSN.bssn import BSSNParameters
+from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.bssn.variables import get_boundary_codes
 from JAX_BSSN.evolution.boundaries import SOMMERFELD_BC
 
@@ -11,7 +11,7 @@ from JAX_BSSN.EM.first_order.staggering import (
     DISPLACEMENT_FIELD_LOCATIONS,
     MAGNETIC_FIELD_LOCATIONS,
 )
-from JAX_BSSN.EM.first_order.variables import BSSNYeeGeometry
+from JAX_BSSN.EM.first_order.geometry import _metric_fields_on_yee_sites
 
 
 def _spatial_axis(field, direction):
@@ -96,13 +96,14 @@ def _apply_component_boundary(
     location,
     params,
 ):
+    W, lapse, shift, _, inverse_conformal_metric = metric
     shape = field.shape[-3:]
     boundary_covector = _outward_boundary_covector(
         shape, params, field.dtype
     )
     norm_squared = jnp.einsum(
         "ij...,i...,j...->...",
-        metric.W**2 * metric.inverse_conformal_metric,
+        W**2 * inverse_conformal_metric,
         boundary_covector,
         boundary_covector,
     )
@@ -110,12 +111,12 @@ def _apply_component_boundary(
     safe_norm = jnp.sqrt(jnp.where(mask, norm_squared, 1.0))
     outward_normal = jnp.einsum(
         "ij...,j...->i...",
-        metric.W**2 * metric.inverse_conformal_metric,
+        W**2 * inverse_conformal_metric,
         boundary_covector,
     ) / safe_norm
 
     gradient = _scalar_gradient(field, params)
-    characteristic_velocity = metric.shift - metric.lapse * outward_normal
+    characteristic_velocity = shift - lapse * outward_normal
     boundary_rhs = jnp.einsum(
         "i...,i...->...", characteristic_velocity, gradient
     )
@@ -124,28 +125,26 @@ def _apply_component_boundary(
     radius = _native_radius(shape, location, params, field.dtype)
     safe_radius = jnp.where(radius > params.dx, radius, 1.0)
     boundary_rhs -= jnp.where(
-        radius > params.dx, metric.lapse * field / safe_radius, 0.0
+        radius > params.dx, lapse * field / safe_radius, 0.0
     )
     return jnp.where(mask, boundary_rhs, rhs)
 
 
-@jax.jit
-def apply_densitized_sommerfeld_boundaries(
+def _apply_densitized_sommerfeld_boundaries_with_geometry(
     densitized_displacement,
     densitized_magnetic,
     displacement_rhs,
     magnetic_rhs,
-    geometry: BSSNYeeGeometry,
+    displacement_geometry,
+    magnetic_geometry,
     params: BSSNParameters,
 ):
-    """Replace active outer-face RHS values on each native Yee grid."""
-
     displacement_rhs = jnp.stack(
         tuple(
             _apply_component_boundary(
                 densitized_displacement[i],
                 displacement_rhs[i],
-                geometry.displacement[i],
+                displacement_geometry[i],
                 DISPLACEMENT_FIELD_LOCATIONS[i],
                 params,
             )
@@ -158,7 +157,7 @@ def apply_densitized_sommerfeld_boundaries(
             _apply_component_boundary(
                 densitized_magnetic[i],
                 magnetic_rhs[i],
-                geometry.magnetic[i],
+                magnetic_geometry[i],
                 MAGNETIC_FIELD_LOCATIONS[i],
                 params,
             )
@@ -167,6 +166,31 @@ def apply_densitized_sommerfeld_boundaries(
         axis=0,
     )
     return displacement_rhs, magnetic_rhs
+
+
+@jax.jit
+def apply_densitized_sommerfeld_boundaries(
+    densitized_displacement,
+    densitized_magnetic,
+    displacement_rhs,
+    magnetic_rhs,
+    bssn: BSSNVariables,
+    params: BSSNParameters,
+):
+    """Replace active outer-face RHS values using the current BSSN state."""
+
+    displacement_geometry, magnetic_geometry = _metric_fields_on_yee_sites(
+        bssn, params
+    )
+    return _apply_densitized_sommerfeld_boundaries_with_geometry(
+        densitized_displacement,
+        densitized_magnetic,
+        displacement_rhs,
+        magnetic_rhs,
+        displacement_geometry,
+        magnetic_geometry,
+        params,
+    )
 
 
 __all__ = ["apply_densitized_sommerfeld_boundaries"]

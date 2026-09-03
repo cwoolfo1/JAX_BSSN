@@ -11,11 +11,12 @@ from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolution.time_evolve import rk4_step
 
 from JAX_BSSN.EM.first_order import (
+    CENTER_LOCATION,
     DensitizedMaxwellState,
-    FirstOrderEinsteinMaxwellState,
+    EinsteinMaxwellVariables,
+    MAGNETIC_FIELD_LOCATIONS,
     bootstrap_densitized_maxwell_state,
     common_densitized_fields,
-    compute_bssn_yee_geometry,
     compute_covariant_E,
     compute_covariant_H,
     compute_densitized_electromagnetic_energy_momentum,
@@ -26,6 +27,7 @@ from JAX_BSSN.EM.first_order import (
     densitized_maxwell_rhs,
     first_order_einstein_maxwell_step,
     initialize_first_order_einstein_maxwell_state,
+    interpolate_between_locations,
     physical_fields_at_centers,
 )
 from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
@@ -34,6 +36,10 @@ from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
     expand_axisymmetric_densitized_state,
     fill_axisymmetric_densitized_ghosts,
     initialize_axisymmetric_first_order_state,
+)
+from JAX_BSSN.EM.first_order.cartoon.spherical_symmetry import (
+    initialize_spherical_first_order_state,
+    spherical_first_order_einstein_maxwell_step,
 )
 from JAX_BSSN.EM.first_order.staggering import (
     DISPLACEMENT_FIELD_LOCATIONS,
@@ -72,10 +78,12 @@ def test_density_factor_is_W_minus_three_not_metric_determinant():
     bssn = _constant_bssn(shape, 0.8, 2.0 * jnp.eye(3))
     physical_D = jnp.ones((3,) + shape)
     physical_B = 2.0 * jnp.ones((3,) + shape)
-    geometry = compute_bssn_yee_geometry(bssn, params)
 
-    for metric in geometry.displacement + geometry.magnetic:
-        np.testing.assert_allclose(metric.W**-3, 0.8**-3)
+    for location in DISPLACEMENT_FIELD_LOCATIONS + MAGNETIC_FIELD_LOCATIONS:
+        W = interpolate_between_locations(
+            bssn.conformal_factor, CENTER_LOCATION, location, params
+        )
+        np.testing.assert_allclose(W**-3, 0.8**-3)
 
     density_D = physical_D * 0.8**-3
     density_B = physical_B * 0.8**-3
@@ -103,9 +111,8 @@ def test_manufactured_constitutive_relations_with_shift_and_offdiagonal_metric()
     B_density = jnp.broadcast_to(
         B_density_values[:, None, None, None], (3,) + shape
     )
-    geometry = compute_bssn_yee_geometry(bssn, params)
-    E = compute_covariant_E(D_density, B_density, geometry, params)
-    H = compute_covariant_H(D_density, B_density, geometry, params)
+    E = compute_covariant_E(D_density, B_density, bssn, params)
+    H = compute_covariant_H(D_density, B_density, bssn, params)
 
     W = 0.75
     D_up = W**3 * D_density_values
@@ -199,8 +206,11 @@ def test_zero_fields_reduce_to_vacuum_bssn_step():
     zero = jnp.zeros((3,) + shape)
     em = DensitizedMaxwellState(zero, zero, zero, zero)
     coupled = first_order_einstein_maxwell_step(
-        FirstOrderEinsteinMaxwellState(bssn, em), params
+        EinsteinMaxwellVariables(bssn, em), params
     )
+    assert isinstance(coupled, EinsteinMaxwellVariables)
+    assert isinstance(coupled.bssn, BSSNVariables)
+    assert isinstance(coupled.em, DensitizedMaxwellState)
     vacuum = rk4_step(bssn, params)
     jax.block_until_ready((coupled, vacuum))
     for coupled_field, vacuum_field in zip(coupled.bssn, vacuum):
@@ -305,12 +315,33 @@ def test_initializer_samples_all_six_native_W_factors():
     state = initialize_first_order_einstein_maxwell_state(
         bssn, physical_D, physical_B, params
     )
-    geometry = compute_bssn_yee_geometry(state.bssn, params)
+    assert isinstance(state, EinsteinMaxwellVariables)
+    assert isinstance(state.bssn, BSSNVariables)
+    assert isinstance(state.em, DensitizedMaxwellState)
     expected_D = jnp.stack(
-        tuple(geometry.displacement[i].W**-3 for i in range(3))
+        tuple(
+            interpolate_between_locations(
+                state.bssn.conformal_factor,
+                CENTER_LOCATION,
+                location,
+                params,
+            )
+            ** -3
+            for location in DISPLACEMENT_FIELD_LOCATIONS
+        )
     )
     expected_B = jnp.stack(
-        tuple(2.0 * geometry.magnetic[i].W**-3 for i in range(3))
+        tuple(
+            2.0
+            * interpolate_between_locations(
+                state.bssn.conformal_factor,
+                CENTER_LOCATION,
+                location,
+                params,
+            )
+            ** -3
+            for location in MAGNETIC_FIELD_LOCATIONS
+        )
     )
     expected_D = jnp.broadcast_to(expected_D, physical_D.shape)
     expected_B = jnp.broadcast_to(expected_B, physical_B.shape)
@@ -426,6 +457,32 @@ def test_spherical_reconstruction_uses_native_radial_yee_grids():
         )
 
 
+def test_spherical_initializer_and_step_use_shared_coupled_state():
+    num_radial_points = 6
+    dx = 0.2
+    shape = (num_radial_points + 4, 1, 1)
+    params = BSSNParameters(
+        dx=dx,
+        dt=0.001,
+        nu=0.0,
+        zero_shift=1,
+        x_min=-3.5 * dx,
+        y_min=-4.0 * dx,
+        z_min=-4.0 * dx,
+        xr_bc=1,
+    )
+    field = jnp.zeros((3,) + shape)
+    state = initialize_spherical_first_order_state(
+        flat_bssn_variables(shape), field, field, params
+    )
+    state = spherical_first_order_einstein_maxwell_step(state, params)
+    jax.block_until_ready(state)
+
+    assert isinstance(state, EinsteinMaxwellVariables)
+    assert isinstance(state.bssn, BSSNVariables)
+    assert isinstance(state.em, DensitizedMaxwellState)
+
+
 def test_dynamic_metric_stage_updates_differ_from_frozen_metric_update():
     num_points = 24
     dx = 2.0 * math.pi / num_points
@@ -458,8 +515,8 @@ def test_dynamic_metric_stage_updates_differ_from_frozen_metric_update():
     # Reproduce only the electromagnetic doubled leapfrog while deliberately
     # freezing every constitutive evaluation to the t_n geometry.
     D_n, B_n = common_densitized_fields(initial.em)
-    frozen_geometry = compute_bssn_yee_geometry(initial.bssn, params)
-    _, B_rhs_n = densitized_maxwell_rhs(D_n, B_n, frozen_geometry, params)
+    frozen_bssn = initial.bssn
+    _, B_rhs_n = densitized_maxwell_rhs(D_n, B_n, frozen_bssn, params)
     B_left_half = 0.5 * (
         initial.em.magnetic_previous + initial.em.magnetic_current
     )
@@ -467,13 +524,13 @@ def test_dynamic_metric_stage_updates_differ_from_frozen_metric_update():
     D_rhs_mid, B_rhs_mid = densitized_maxwell_rhs(
         initial.em.displacement_right_half,
         B_right_half,
-        frozen_geometry,
+        frozen_bssn,
         params,
     )
     D_next = D_n + params.dt * D_rhs_mid
     B_next = B_n + params.dt * B_rhs_mid
     D_rhs_end, _ = densitized_maxwell_rhs(
-        D_next, B_next, frozen_geometry, params
+        D_next, B_next, frozen_bssn, params
     )
     frozen_right_half = (
         initial.em.displacement_right_half + params.dt * D_rhs_end
@@ -567,10 +624,14 @@ def test_axisymmetric_coupled_doubled_leapfrog_is_second_order_in_time():
         state = initialize_axisymmetric_first_order_state(
             flat_bssn_variables(shape), D, B, params
         )
+        assert isinstance(state, EinsteinMaxwellVariables)
+        assert isinstance(state.bssn, BSSNVariables)
+        assert isinstance(state.em, DensitizedMaxwellState)
         for _ in range(num_steps):
             state = axisymmetric_first_order_einstein_maxwell_step(
                 state, params
             )
+            assert isinstance(state, EinsteinMaxwellVariables)
         solutions.append(state)
     jax.block_until_ready(tuple(solutions))
 

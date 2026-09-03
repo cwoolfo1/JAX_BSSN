@@ -34,28 +34,21 @@ from JAX_BSSN.EM.first_order.evolve import (
     initialize_densitized_maxwell_state,
     initialize_first_order_einstein_maxwell_state,
 )
-from JAX_BSSN.EM.first_order.geometry import compute_bssn_yee_geometry
 from JAX_BSSN.EM.first_order.staggering import (
     CENTER_LOCATION,
     DISPLACEMENT_FIELD_LOCATIONS,
     MAGNETIC_FIELD_LOCATIONS,
     interpolate_between_locations,
 )
-from JAX_BSSN.EM.first_order.variables import (
-    BSSNYeeGeometry,
-    ConformalMetricFields,
-    DensitizedMaxwellState,
-    FirstOrderEinsteinMaxwellState,
-)
+from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 __all__ = [
-    "BSSNYeeGeometry",
     "CENTER_LOCATION",
-    "ConformalMetricFields",
     "DISPLACEMENT_FIELD_LOCATIONS",
     "DensitizedMaxwellState",
-    "FirstOrderEinsteinMaxwellState",
+    "EinsteinMaxwellVariables",
     "MAGNETIC_FIELD_LOCATIONS",
     "axisymmetric_first_order_einstein_maxwell_step",
     "axisymmetric_densitized_constraint_divergences",
@@ -63,7 +56,6 @@ __all__ = [
     "collocate_densitized_fields",
     "common_densitized_fields",
     "common_physical_fields",
-    "compute_bssn_yee_geometry",
     "compute_covariant_E",
     "compute_covariant_H",
     "compute_densitized_electromagnetic_energy_momentum",

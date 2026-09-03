@@ -1,6 +1,5 @@
-"""Interpolate projected BSSN fields onto the FPIC Yee locations."""
+"""Interpolate existing BSSN variables onto the FPIC Yee locations."""
 
-import jax
 import jax.numpy as jnp
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
@@ -13,17 +12,13 @@ from JAX_BSSN.EM.first_order.staggering import (
     MAGNETIC_FIELD_LOCATIONS,
     interpolate_between_locations,
 )
-from JAX_BSSN.EM.first_order.variables import (
-    BSSNYeeGeometry,
-    ConformalMetricFields,
-)
 
 
 def _metric_fields_at_location(
     bssn: BSSNVariables,
     location,
     params: BSSNParameters,
-) -> ConformalMetricFields:
+):
     W = interpolate_between_locations(
         bssn.conformal_factor, CENTER_LOCATION, location, params
     )
@@ -39,20 +34,19 @@ def _metric_fields_at_location(
 
     W = jnp.maximum(W, W_FLOOR_VALUE)
     inverse_conformal_metric = invert_3x3_metric(conformal_metric)
-    return ConformalMetricFields(
-        W=W,
-        lapse=lapse,
-        shift=shift,
-        conformal_metric=conformal_metric,
-        inverse_conformal_metric=inverse_conformal_metric,
+    return (
+        W,
+        lapse,
+        shift,
+        conformal_metric,
+        inverse_conformal_metric,
     )
 
 
-@jax.jit
-def compute_bssn_yee_geometry(
+def _metric_fields_on_yee_sites(
     bssn: BSSNVariables, params: BSSNParameters
-) -> BSSNYeeGeometry:
-    """Return BSSN geometry without numerically evaluating a determinant."""
+) -> tuple[tuple, tuple]:
+    """Return short-lived metric tuples on the six native field sites."""
 
     displacement = tuple(
         _metric_fields_at_location(bssn, location, params)
@@ -62,12 +56,31 @@ def compute_bssn_yee_geometry(
         _metric_fields_at_location(bssn, location, params)
         for location in MAGNETIC_FIELD_LOCATIONS
     )
-    center = _metric_fields_at_location(bssn, CENTER_LOCATION, params)
-    return BSSNYeeGeometry(
-        displacement=displacement,
-        magnetic=magnetic,
-        center=center,
+    return displacement, magnetic
+
+
+def _conformal_factors_at_locations(
+    bssn: BSSNVariables,
+    locations,
+    params: BSSNParameters,
+) -> jnp.ndarray:
+    """Return floored ``W`` at three native Yee locations."""
+
+    return jnp.stack(
+        tuple(
+            jnp.maximum(
+                interpolate_between_locations(
+                    bssn.conformal_factor,
+                    CENTER_LOCATION,
+                    location,
+                    params,
+                ),
+                W_FLOOR_VALUE,
+            )
+            for location in locations
+        ),
+        axis=0,
     )
 
 
-__all__ = ["compute_bssn_yee_geometry"]
+__all__ = []

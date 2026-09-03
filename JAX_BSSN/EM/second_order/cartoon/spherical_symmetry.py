@@ -33,7 +33,8 @@ from JAX_BSSN.EM.second_order.equations import compute_em_rhs
 from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 VECTOR_X_REFLECTION_PARITY = (-1.0, 1.0, 1.0)
@@ -118,20 +119,19 @@ def validate_cartoon_wave_grid(
         )
 
 
-def compact_cartoon_wave(wave: EMVariables) -> EMVariables:
-    """Compact a complete signed x-axis Maxwell state."""
+def compact_cartoon_wave(wave):
+    """Compact four vector fields on a complete signed x axis."""
 
-    full_nx = wave.electric_field.shape[1]
-    if wave.electric_field.shape[-2:] != (1, 1) or full_nx % 2:
+    reference = wave[0]
+    full_nx = reference.shape[1]
+    if reference.shape[-2:] != (1, 1) or full_nx % 2:
         raise ValueError(
             "Cartoon initialization requires an even signed x-axis"
         )
     positive = slice(full_nx // 2, None)
-    return EMVariables(
-        *(
-            _compact_vector(field[:, positive, 0, 0])
-            for field in wave
-        )
+    return jax.tree_util.tree_map(
+        lambda field: _compact_vector(field[:, positive, 0, 0]),
+        wave,
     )
 
 
@@ -141,11 +141,12 @@ def fill_cartoon_wave_ghosts(wave: EMVariables) -> EMVariables:
     return EMVariables(*(_compact_vector(_positive_axis(field)) for field in wave))
 
 
-def expand_cartoon_wave_axis(wave: EMVariables) -> EMVariables:
-    """Expand compact Maxwell fields onto the complete signed x-axis."""
+def expand_cartoon_wave_axis(wave):
+    """Expand four compact vector fields onto a complete signed x axis."""
 
-    return EMVariables(
-        *(_expanded_vector(_positive_axis(field)) for field in wave)
+    return jax.tree_util.tree_map(
+        lambda field: _expanded_vector(_positive_axis(field)),
+        wave,
     )
 
 

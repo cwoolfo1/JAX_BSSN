@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.cartoon.spherical_symmetry import (
     CARTOON_CENTER,
     CARTOON_GHOST_CELLS,
@@ -28,28 +28,19 @@ from JAX_BSSN.EM.first_order.equations import (
     densitized_magnetic_divergence,
     densitized_maxwell_rhs,
 )
-from JAX_BSSN.EM.first_order.geometry import compute_bssn_yee_geometry
+from JAX_BSSN.EM.first_order.geometry import (
+    _conformal_factors_at_locations,
+)
 from JAX_BSSN.EM.first_order.staggering import (
     DISPLACEMENT_FIELD_LOCATIONS,
     MAGNETIC_FIELD_LOCATIONS,
 )
-from JAX_BSSN.EM.first_order.variables import (
-    DensitizedMaxwellState,
-    FirstOrderEinsteinMaxwellState,
-)
+from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
 from JAX_BSSN.EM.second_order.cartoon.spherical_symmetry import (
     compact_cartoon_wave,
     expand_cartoon_wave_axis,
 )
-from JAX_BSSN.EM.second_order.variables import EMVariables
-
-
-def _as_wave(state: DensitizedMaxwellState) -> EMVariables:
-    return EMVariables(*state)
-
-
-def _as_densitized_state(wave: EMVariables) -> DensitizedMaxwellState:
-    return DensitizedMaxwellState(*wave)
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 def _native_offset(site):
@@ -176,7 +167,7 @@ def compact_spherical_densitized_state(
 ) -> DensitizedMaxwellState:
     """Compact a complete signed radial axis to positive-radius storage."""
 
-    return _as_densitized_state(compact_cartoon_wave(_as_wave(state)))
+    return compact_cartoon_wave(state)
 
 
 def fill_spherical_densitized_ghosts(
@@ -201,7 +192,7 @@ def expand_spherical_densitized_state(
 ) -> DensitizedMaxwellState:
     """Expand compact radial densities onto a complete signed axis."""
 
-    return _as_densitized_state(expand_cartoon_wave_axis(_as_wave(state)))
+    return expand_cartoon_wave_axis(state)
 
 
 def reconstruct_spherical_densitized_support(
@@ -251,7 +242,7 @@ def initialize_spherical_first_order_state(
     physical_displacement,
     physical_magnetic,
     params: BSSNParameters,
-) -> FirstOrderEinsteinMaxwellState:
+) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Bootstrap compact radial fields through Cartesian support."""
 
     compact_bssn = fill_cartoon_ghosts(enforce_algebraic_constraints(bssn))
@@ -270,24 +261,18 @@ def initialize_spherical_first_order_state(
     support_magnetic = _reconstruct_radial_vector(
         physical_magnetic, MAGNETIC_FIELD_LOCATIONS, params
     )
-    support_geometry = compute_bssn_yee_geometry(support_bssn, params)
-    displacement_density = jnp.stack(
-        tuple(
-            support_geometry.displacement[i].W**-3
-            * support_displacement[i]
-            for i in range(3)
-        )
+    displacement_W = _conformal_factors_at_locations(
+        support_bssn, DISPLACEMENT_FIELD_LOCATIONS, params
     )
-    magnetic_density = jnp.stack(
-        tuple(
-            support_geometry.magnetic[i].W**-3 * support_magnetic[i]
-            for i in range(3)
-        )
+    magnetic_W = _conformal_factors_at_locations(
+        support_bssn, MAGNETIC_FIELD_LOCATIONS, params
     )
+    displacement_density = displacement_W**-3 * support_displacement
+    magnetic_density = magnetic_W**-3 * support_magnetic
     displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
         displacement_density,
         magnetic_density,
-        support_geometry,
+        support_bssn,
         params,
     )
     half_step = 0.5 * params.dt
@@ -297,7 +282,7 @@ def initialize_spherical_first_order_state(
         displacement_density - half_step * displacement_rhs,
         displacement_density + half_step * displacement_rhs,
     )
-    return FirstOrderEinsteinMaxwellState(
+    return EinsteinMaxwellVariables(
         bssn=compact_bssn,
         em=_project_spherical_densitized_support(support_em),
     )
@@ -322,8 +307,10 @@ def spherical_densitized_constraint_divergences(
 
 
 def _add_bssn_scaled(bssn, rhs, scale):
-    return BSSNVariables(
-        *(field + scale * derivative for field, derivative in zip(bssn, rhs))
+    return jax.tree_util.tree_map(
+        lambda field, derivative: field + scale * derivative,
+        bssn,
+        rhs,
     )
 
 
@@ -371,11 +358,10 @@ def _compact_maxwell_rhs(bssn, displacement, magnetic, params):
     support_magnetic = _support_vector(
         magnetic, MAGNETIC_FIELD_LOCATIONS, params
     )
-    support_geometry = compute_bssn_yee_geometry(support_bssn, params)
     displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
         support_displacement,
         support_magnetic,
-        support_geometry,
+        support_bssn,
         params,
     )
     return (
@@ -386,9 +372,9 @@ def _compact_maxwell_rhs(bssn, displacement, magnetic, params):
 
 @jax.jit
 def spherical_first_order_einstein_maxwell_step(
-    state: FirstOrderEinsteinMaxwellState,
+    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
-) -> FirstOrderEinsteinMaxwellState:
+) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Advance compact spherical radial fields and BSSN by one timestep."""
 
     dt = params.dt
@@ -438,11 +424,13 @@ def spherical_first_order_einstein_maxwell_step(
     k4 = _compact_bssn_rhs(
         bssn_endpoint, displacement_next, magnetic_next, params
     )
-    bssn_increment = BSSNVariables(
-        *(
-            (d1 + 2.0 * d2 + 2.0 * d3 + d4) / 6.0
-            for d1, d2, d3, d4 in zip(k1, k2, k3, k4)
-        )
+    bssn_increment = jax.tree_util.tree_map(
+        lambda d1, d2, d3, d4: (d1 + 2.0 * d2 + 2.0 * d3 + d4)
+        / 6.0,
+        k1,
+        k2,
+        k3,
+        k4,
     )
     bssn_next = _prepare_bssn(
         _add_bssn_scaled(bssn_n, bssn_increment, dt)
@@ -454,7 +442,7 @@ def spherical_first_order_einstein_maxwell_step(
         em.displacement_right_half + dt * displacement_rhs_endpoint
     )
 
-    return FirstOrderEinsteinMaxwellState(
+    return EinsteinMaxwellVariables(
         bssn=bssn_next,
         em=fill_spherical_densitized_ghosts(
             DensitizedMaxwellState(

@@ -16,18 +16,24 @@ from JAX_BSSN.EM.first_order.energy_momentum import (
 from JAX_BSSN.EM.first_order.equations import (
     densitized_maxwell_rhs,
 )
-from JAX_BSSN.EM.first_order.geometry import compute_bssn_yee_geometry
-from JAX_BSSN.EM.first_order.variables import (
-    DensitizedMaxwellState,
-    FirstOrderEinsteinMaxwellState,
+from JAX_BSSN.EM.first_order.geometry import (
+    _conformal_factors_at_locations,
 )
+from JAX_BSSN.EM.first_order.staggering import (
+    DISPLACEMENT_FIELD_LOCATIONS,
+    MAGNETIC_FIELD_LOCATIONS,
+)
+from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 def _add_bssn_scaled(
     bssn: BSSNVariables, rhs: BSSNVariables, scale
 ) -> BSSNVariables:
-    return BSSNVariables(
-        *(field + scale * derivative for field, derivative in zip(bssn, rhs))
+    return jax.tree_util.tree_map(
+        lambda field, derivative: field + scale * derivative,
+        bssn,
+        rhs,
     )
 
 
@@ -68,7 +74,7 @@ def common_densitized_fields(
 
 @jax.jit
 def common_physical_fields(
-    state: FirstOrderEinsteinMaxwellState,
+    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Return cell-centered physical contravariant fields at the common time."""
@@ -117,11 +123,10 @@ def initialize_densitized_maxwell_state(
     """Bootstrap the doubled leapfrog from common-time density fields."""
 
     bssn = enforce_algebraic_constraints(bssn)
-    geometry = compute_bssn_yee_geometry(bssn, params)
     displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
         densitized_displacement,
         densitized_magnetic,
-        geometry,
+        bssn,
         params,
     )
     return bootstrap_densitized_maxwell_state(
@@ -139,39 +144,32 @@ def initialize_first_order_einstein_maxwell_state(
     physical_displacement: jnp.ndarray,
     physical_magnetic: jnp.ndarray,
     params: BSSNParameters,
-) -> FirstOrderEinsteinMaxwellState:
+) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Initialize from physical contravariant fields on their native Yee sites."""
 
     bssn = enforce_algebraic_constraints(bssn)
-    geometry = compute_bssn_yee_geometry(bssn, params)
-    densitized_displacement = jnp.stack(
-        tuple(
-            geometry.displacement[i].W**-3 * physical_displacement[i]
-            for i in range(3)
-        ),
-        axis=0,
+    displacement_W = _conformal_factors_at_locations(
+        bssn, DISPLACEMENT_FIELD_LOCATIONS, params
     )
-    densitized_magnetic = jnp.stack(
-        tuple(
-            geometry.magnetic[i].W**-3 * physical_magnetic[i]
-            for i in range(3)
-        ),
-        axis=0,
+    magnetic_W = _conformal_factors_at_locations(
+        bssn, MAGNETIC_FIELD_LOCATIONS, params
     )
+    densitized_displacement = displacement_W**-3 * physical_displacement
+    densitized_magnetic = magnetic_W**-3 * physical_magnetic
     em = initialize_densitized_maxwell_state(
         densitized_displacement,
         densitized_magnetic,
         bssn,
         params,
     )
-    return FirstOrderEinsteinMaxwellState(bssn=bssn, em=em)
+    return EinsteinMaxwellVariables(bssn=bssn, em=em)
 
 
 @jax.jit
 def first_order_einstein_maxwell_step(
-    state: FirstOrderEinsteinMaxwellState,
+    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
-) -> FirstOrderEinsteinMaxwellState:
+) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Advance one two-way coupled RK4/doubled-leapfrog timestep."""
 
     dt = params.dt
@@ -183,9 +181,8 @@ def first_order_einstein_maxwell_step(
     k1 = _bssn_rhs_from_densities(
         bssn_n, displacement_n, magnetic_n, params
     )
-    geometry_n = compute_bssn_yee_geometry(bssn_n, params)
     _, magnetic_rhs_n = densitized_maxwell_rhs(
-        displacement_n, magnetic_n, geometry_n, params
+        displacement_n, magnetic_n, bssn_n, params
     )
     magnetic_left_half = 0.5 * (
         em.magnetic_previous + em.magnetic_current
@@ -213,13 +210,10 @@ def first_order_einstein_maxwell_step(
         magnetic_right_half,
         params,
     )
-    midpoint_geometry = compute_bssn_yee_geometry(
-        bssn_midpoint_2, params
-    )
     displacement_rhs_midpoint, magnetic_rhs_midpoint = densitized_maxwell_rhs(
         em.displacement_right_half,
         magnetic_right_half,
-        midpoint_geometry,
+        bssn_midpoint_2,
         params,
     )
     magnetic_next = magnetic_n + dt * magnetic_rhs_midpoint
@@ -231,29 +225,30 @@ def first_order_einstein_maxwell_step(
     k4 = _bssn_rhs_from_densities(
         bssn_endpoint, displacement_next, magnetic_next, params
     )
-    bssn_increment = BSSNVariables(
-        *(
-            (d1 + 2.0 * d2 + 2.0 * d3 + d4) / 6.0
-            for d1, d2, d3, d4 in zip(k1, k2, k3, k4)
-        )
+    bssn_increment = jax.tree_util.tree_map(
+        lambda d1, d2, d3, d4: (d1 + 2.0 * d2 + 2.0 * d3 + d4)
+        / 6.0,
+        k1,
+        k2,
+        k3,
+        k4,
     )
     bssn_next = enforce_algebraic_constraints(
         _add_bssn_scaled(bssn_n, bssn_increment, dt)
     )
 
     # Finish the second electric leapfrog with the final projected spacetime.
-    endpoint_geometry = compute_bssn_yee_geometry(bssn_next, params)
     displacement_rhs_endpoint, _ = densitized_maxwell_rhs(
         displacement_next,
         magnetic_next,
-        endpoint_geometry,
+        bssn_next,
         params,
     )
     displacement_next_half = em.displacement_right_half + dt * (
         displacement_rhs_endpoint
     )
 
-    return FirstOrderEinsteinMaxwellState(
+    return EinsteinMaxwellVariables(
         bssn=bssn_next,
         em=DensitizedMaxwellState(
             magnetic_previous=magnetic_n,

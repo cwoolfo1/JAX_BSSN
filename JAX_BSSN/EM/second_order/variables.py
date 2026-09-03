@@ -4,7 +4,7 @@ from typing import NamedTuple
 
 import jax.numpy as jnp
 
-from JAX_BSSN.bssn import BSSNVariables
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 class EMVariables(NamedTuple):
@@ -31,10 +31,3 @@ class BSSNEMGeometry(NamedTuple):
     spatial_ricci: jnp.ndarray
     electric_weyl: jnp.ndarray
     magnetic_weyl: jnp.ndarray
-
-
-class EinsteinMaxwellVariables(NamedTuple):
-    """Coupled BSSN and electromagnetic state."""
-
-    bssn: BSSNVariables
-    em: EMVariables

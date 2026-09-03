@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.cartoon.axisymmetry import (
     fill_axisymmetric_ghosts,
     project_axisymmetric_rhs,
@@ -31,30 +31,19 @@ from JAX_BSSN.EM.first_order.equations import (
     densitized_magnetic_divergence,
     densitized_maxwell_rhs,
 )
-from JAX_BSSN.EM.first_order.geometry import compute_bssn_yee_geometry
+from JAX_BSSN.EM.first_order.geometry import (
+    _conformal_factors_at_locations,
+)
 from JAX_BSSN.EM.first_order.staggering import (
     DISPLACEMENT_FIELD_LOCATIONS,
     MAGNETIC_FIELD_LOCATIONS,
 )
-from JAX_BSSN.EM.first_order.variables import (
-    DensitizedMaxwellState,
-    FirstOrderEinsteinMaxwellState,
-)
+from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
 from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     compact_axisymmetric_wave,
     expand_axisymmetric_wave_plane,
 )
-from JAX_BSSN.EM.second_order.variables import EMVariables
-
-
-def _as_wave(state: DensitizedMaxwellState) -> EMVariables:
-    # Cartoon uses proper rotations.  Their determinant is one, so a
-    # weight-one vector density transforms with the same rotation matrix.
-    return EMVariables(*state)
-
-
-def _as_densitized_state(wave: EMVariables) -> DensitizedMaxwellState:
-    return DensitizedMaxwellState(*wave)
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 def _native_offset(site):
@@ -242,7 +231,9 @@ def compact_axisymmetric_densitized_state(
 ) -> DensitizedMaxwellState:
     """Compact a complete signed rho-z plane to positive-rho storage."""
 
-    return _as_densitized_state(compact_axisymmetric_wave(_as_wave(state)))
+    # A weight-one vector density transforms as a vector under the proper
+    # rotations used by Cartoon, so the existing vector-state helper applies.
+    return compact_axisymmetric_wave(state)
 
 
 def fill_axisymmetric_densitized_ghosts(
@@ -267,9 +258,7 @@ def expand_axisymmetric_densitized_state(
 ) -> DensitizedMaxwellState:
     """Expand compact densities onto the complete signed reference plane."""
 
-    return _as_densitized_state(
-        expand_axisymmetric_wave_plane(_as_wave(state))
-    )
+    return expand_axisymmetric_wave_plane(state)
 
 
 def reconstruct_axisymmetric_densitized_support(
@@ -319,7 +308,7 @@ def initialize_axisymmetric_first_order_state(
     physical_displacement,
     physical_magnetic,
     params: BSSNParameters,
-) -> FirstOrderEinsteinMaxwellState:
+) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Bootstrap compact axisymmetric fields through Cartesian support."""
 
     compact_bssn = fill_axisymmetric_ghosts(
@@ -340,24 +329,18 @@ def initialize_axisymmetric_first_order_state(
     support_magnetic = _reconstruct_vector(
         physical_magnetic, MAGNETIC_FIELD_LOCATIONS, params
     )
-    support_geometry = compute_bssn_yee_geometry(support_bssn, params)
-    displacement_density = jnp.stack(
-        tuple(
-            support_geometry.displacement[i].W**-3
-            * support_displacement[i]
-            for i in range(3)
-        )
+    displacement_W = _conformal_factors_at_locations(
+        support_bssn, DISPLACEMENT_FIELD_LOCATIONS, params
     )
-    magnetic_density = jnp.stack(
-        tuple(
-            support_geometry.magnetic[i].W**-3 * support_magnetic[i]
-            for i in range(3)
-        )
+    magnetic_W = _conformal_factors_at_locations(
+        support_bssn, MAGNETIC_FIELD_LOCATIONS, params
     )
+    displacement_density = displacement_W**-3 * support_displacement
+    magnetic_density = magnetic_W**-3 * support_magnetic
     displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
         displacement_density,
         magnetic_density,
-        support_geometry,
+        support_bssn,
         params,
     )
     half_step = 0.5 * params.dt
@@ -367,7 +350,7 @@ def initialize_axisymmetric_first_order_state(
         displacement_density - half_step * displacement_rhs,
         displacement_density + half_step * displacement_rhs,
     )
-    return FirstOrderEinsteinMaxwellState(
+    return EinsteinMaxwellVariables(
         bssn=compact_bssn,
         em=_project_axisymmetric_densitized_support(support_em),
     )
@@ -392,8 +375,10 @@ def axisymmetric_densitized_constraint_divergences(
 
 
 def _add_bssn_scaled(bssn, rhs, scale):
-    return BSSNVariables(
-        *(field + scale * derivative for field, derivative in zip(bssn, rhs))
+    return jax.tree_util.tree_map(
+        lambda field, derivative: field + scale * derivative,
+        bssn,
+        rhs,
     )
 
 
@@ -441,11 +426,10 @@ def _compact_maxwell_rhs(bssn, displacement, magnetic, params):
     support_magnetic = _support_vector(
         magnetic, MAGNETIC_FIELD_LOCATIONS, params
     )
-    support_geometry = compute_bssn_yee_geometry(support_bssn, params)
     displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
         support_displacement,
         support_magnetic,
-        support_geometry,
+        support_bssn,
         params,
     )
     return (
@@ -456,9 +440,9 @@ def _compact_maxwell_rhs(bssn, displacement, magnetic, params):
 
 @jax.jit
 def axisymmetric_first_order_einstein_maxwell_step(
-    state: FirstOrderEinsteinMaxwellState,
+    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
-) -> FirstOrderEinsteinMaxwellState:
+) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Advance compact axisymmetric BSSN and densitized Maxwell data."""
 
     dt = params.dt
@@ -508,11 +492,13 @@ def axisymmetric_first_order_einstein_maxwell_step(
     k4 = _compact_bssn_rhs(
         bssn_endpoint, displacement_next, magnetic_next, params
     )
-    bssn_increment = BSSNVariables(
-        *(
-            (d1 + 2.0 * d2 + 2.0 * d3 + d4) / 6.0
-            for d1, d2, d3, d4 in zip(k1, k2, k3, k4)
-        )
+    bssn_increment = jax.tree_util.tree_map(
+        lambda d1, d2, d3, d4: (d1 + 2.0 * d2 + 2.0 * d3 + d4)
+        / 6.0,
+        k1,
+        k2,
+        k3,
+        k4,
     )
     bssn_next = _prepare_bssn(
         _add_bssn_scaled(bssn_n, bssn_increment, dt)
@@ -524,7 +510,7 @@ def axisymmetric_first_order_einstein_maxwell_step(
         em.displacement_right_half + dt * displacement_rhs_endpoint
     )
 
-    return FirstOrderEinsteinMaxwellState(
+    return EinsteinMaxwellVariables(
         bssn=bssn_next,
         em=fill_axisymmetric_densitized_ghosts(
             DensitizedMaxwellState(

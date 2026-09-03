@@ -35,7 +35,8 @@ from JAX_BSSN.EM.second_order.equations import compute_em_rhs
 from JAX_BSSN.EM.second_order.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
+from JAX_BSSN.EM.second_order.variables import EMVariables
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 VECTOR_RADIAL_REFLECTION_PARITY = (-1.0, -1.0, 1.0)
@@ -114,20 +115,19 @@ def validate_axisymmetric_wave_grid(
         raise ValueError("axisymmetric Cartoon requires y_min=-4*dx")
 
 
-def compact_axisymmetric_wave(wave: EMVariables) -> EMVariables:
-    """Compact a complete signed x-z Maxwell plane to positive rho."""
+def compact_axisymmetric_wave(wave):
+    """Compact four vector fields on a signed x-z plane to positive rho."""
 
-    full_nx = wave.electric_field.shape[1]
-    if wave.electric_field.shape[2] != 1 or full_nx % 2:
+    reference = wave[0]
+    full_nx = reference.shape[1]
+    if reference.shape[2] != 1 or full_nx % 2:
         raise ValueError(
             "axisymmetric initialization requires an even signed x plane"
         )
     positive = slice(full_nx // 2, None)
-    return EMVariables(
-        *(
-            _compact_vector(field[:, positive, 0, :])
-            for field in wave
-        )
+    return jax.tree_util.tree_map(
+        lambda field: _compact_vector(field[:, positive, 0, :]),
+        wave,
     )
 
 
@@ -139,11 +139,12 @@ def fill_axisymmetric_wave_ghosts(wave: EMVariables) -> EMVariables:
     )
 
 
-def expand_axisymmetric_wave_plane(wave: EMVariables) -> EMVariables:
-    """Expand compact Maxwell fields onto the complete signed x-z plane."""
+def expand_axisymmetric_wave_plane(wave):
+    """Expand four compact vector fields onto a signed x-z plane."""
 
-    return EMVariables(
-        *(_expanded_vector(_positive_plane(field)) for field in wave)
+    return jax.tree_util.tree_map(
+        lambda field: _expanded_vector(_positive_plane(field)),
+        wave,
     )
 
 

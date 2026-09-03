@@ -12,12 +12,13 @@ from JAX_BSSN.EM.first_order.evolve import (
     common_densitized_fields,
     common_physical_fields,
 )
-from JAX_BSSN.EM.first_order.variables import FirstOrderEinsteinMaxwellState
+from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 @jax.jit
 def first_order_constraint_divergences(
-    state: FirstOrderEinsteinMaxwellState,
+    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
 ):
     """Return the source-free densitized Gauss constraints."""
@@ -32,7 +33,7 @@ def first_order_constraint_divergences(
 
 
 def electromagnetic_output_fields(
-    state: FirstOrderEinsteinMaxwellState,
+    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
 ) -> dict:
     """Return cell-centered physical contravariant D and B components."""
