@@ -32,8 +32,7 @@ from JAX_BSSN.EM.equations import (
 )
 from JAX_BSSN.EM.evolve import (
     compute_einstein_maxwell_rhs,
-    einstein_maxwell_rk4_step,
-    evolve_einstein_maxwell_steps,
+    einstein_maxwell_rk4_step
 )
 from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
 from JAX_BSSN.EM.initial_data import (
@@ -76,7 +75,6 @@ __all__ = [
     "electromagnetic_hamiltonian_residual",
     "electromagnetic_hamiltonian_source",
     "electromagnetic_output_fields",
-    "evolve_einstein_maxwell_steps",
     "expand_axisymmetric_wave_plane",
     "expand_cartoon_wave_axis",
     "fill_axisymmetric_wave_ghosts",

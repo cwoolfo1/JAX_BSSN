@@ -15,15 +15,16 @@ from JAX_BSSN.EM.energy_momentum import (
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
-def _add_scaled(state, rhs, scale):
+def _euler_step(state, rhs, dt):
     return jax.tree_util.tree_map(
-        lambda value, derivative: value + scale * derivative,
+        lambda value, derivative: value + dt * derivative,
         state,
         rhs,
     )
 
 
 def _project_bssn(state: EinsteinMaxwellVariables) -> EinsteinMaxwellVariables:
+    # enforce algebraic constraints on the BSSN variables after each RK4 stage
     return EinsteinMaxwellVariables(
         bssn=enforce_algebraic_constraints(state.bssn),
         em=state.em,
@@ -70,13 +71,13 @@ def einstein_maxwell_rk4_step(
     state = _project_bssn(state)
 
     k1 = compute_einstein_maxwell_rhs(state, params)
-    midpoint = _project_bssn(_add_scaled(state, k1, 0.5 * dt))
+    midpoint = _project_bssn(_euler_step(state, k1, 0.5 * dt))
 
     k2 = compute_einstein_maxwell_rhs(midpoint, params)
-    midpoint = _project_bssn(_add_scaled(state, k2, 0.5 * dt))
+    midpoint = _project_bssn(_euler_step(state, k2, 0.5 * dt))
 
     k3 = compute_einstein_maxwell_rhs(midpoint, params)
-    endpoint = _project_bssn(_add_scaled(state, k3, dt))
+    endpoint = _project_bssn(_euler_step(state, k3, dt))
 
     k4 = compute_einstein_maxwell_rhs(endpoint, params)
     increment = jax.tree_util.tree_map(
@@ -90,27 +91,10 @@ def einstein_maxwell_rk4_step(
         k4,
     )
 
-    return _project_bssn(_add_scaled(state, increment, dt))
-
-
-@jax.jit
-def evolve_einstein_maxwell_steps(
-    state: EinsteinMaxwellVariables,
-    params: BSSNParameters,
-    num_steps: int,
-) -> EinsteinMaxwellVariables:
-    """Advance a fixed number of coupled steps without storing the trajectory."""
-
-    return jax.lax.fori_loop(
-        0,
-        num_steps,
-        lambda _, current: einstein_maxwell_rk4_step(current, params),
-        state,
-    )
+    return _project_bssn(_euler_step(state, increment, dt))
 
 
 __all__ = [
     "compute_einstein_maxwell_rhs",
     "einstein_maxwell_rk4_step",
-    "evolve_einstein_maxwell_steps",
 ]

@@ -30,8 +30,11 @@ from JAX_BSSN.EM.energy_momentum import (
     compute_electromagnetic_energy_momentum,
 )
 from JAX_BSSN.EM.equations import source_free_projected_field_dots
-from JAX_BSSN.EM.evolve import evolve_einstein_maxwell_steps
 from JAX_BSSN.EM.geometry import compute_bssn_em_geometry
+from JAX_BSSN.EM.evolve import (
+    compute_einstein_maxwell_rhs,
+    einstein_maxwell_rk4_step,
+)
 from JAX_BSSN.EM.variables import EMVariables, EinsteinMaxwellVariables
 from tests.EM.em_helpers import flat_bssn_variables
 
@@ -387,9 +390,15 @@ def test_cartesian_coupled_rk4_temporal_self_convergence():
     for dt in timesteps:
         params = _cartesian_params(grid_size, dt)
         initial = _cartesian_initial_state(grid_size, params)
-        state = evolve_einstein_maxwell_steps(
-            initial, params, round(final_time / dt)
+
+        state = jax.lax.fori_loop(
+            0,
+            round(final_time / dt),
+            lambda _, current: einstein_maxwell_rk4_step(current, params),
+            initial,
         )
+        # evolve the bssn and em variables for the given number of steps
+
         evolved.append(state)
         constraints.append(_cartesian_matter_constraints(state, params))
     jax.block_until_ready((evolved, constraints))
@@ -529,7 +538,15 @@ def test_cartesian_backreacting_spatial_self_convergence():
         num_steps = grid_size // 2
         params = _cartesian_params(grid_size, final_time / num_steps)
         initial = _cartesian_initial_state(grid_size, params)
-        state = evolve_einstein_maxwell_steps(initial, params, num_steps)
+
+        state = jax.lax.fori_loop(
+            0,
+            num_steps,
+            lambda _, current: einstein_maxwell_rk4_step(current, params),
+            initial,
+        )
+        # advance the bssn and em variables for the given number of steps
+
         evolved.append(state)
         constraints.append(_cartesian_matter_constraints(state, params))
     jax.block_until_ready((evolved, constraints))
