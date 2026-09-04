@@ -32,6 +32,8 @@ The supported physical examples are:
 4. Spherical Cartoon puncture
 5. Axisymmetric Cartoon puncture
 6. Axisymmetric boosted Bowen--York puncture
+7. First-order Einstein--Maxwell black-hole formation candidate
+8. Second-order Einstein--Maxwell black-hole formation candidate
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -79,6 +81,21 @@ cd demos/axisymmetric_bowen_york
 python axisymmetric_bowen_york.py
 python make_movies.py  # optional; requires ffmpeg
 ```
+
+Run the same constraint-solved electromagnetic dipole data with either the
+first-order staggered Yee solver or the second-order cell-centered wave solver:
+
+```bash
+python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py
+python demos/EM_blackhole_formation_second_order/EM_blackhole_formation_second_order.py
+```
+
+Each demo owns an identical local copy of the physical initial-data routines
+and writes to an `output/` directory beside its script by default. The
+first-order openPMD output contains physical `D` and `B`; the second-order
+output contains `E` and `B`. These amplitudes are literature-informed
+supercritical candidates, but neither demo has been calibrated in this code
+and neither contains an apparent-horizon finder.
 
 The initial-data phase solves the three-dimensional Cartesian Hamiltonian
 constraint before extracting its exact `y=0` plane for Cartoon evolution. It

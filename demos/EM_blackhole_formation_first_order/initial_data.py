@@ -81,6 +81,22 @@ def conformal_vector_to_physical_covector(
 
 
 @jax.jit
+def conformal_vector_to_physical_contravariant(
+    conformal_vector: jnp.ndarray,
+    psi: jnp.ndarray,
+) -> jnp.ndarray:
+    """Convert ``bar(V)^i`` to the physical vector ``V^i``.
+
+    The source-free Maxwell conformal scaling is
+    ``V^i = psi^-6 bar(V)^i``.  This form is used to initialize the
+    contravariant displacement and magnetic fields on the first-order Yee
+    grid.
+    """
+
+    return psi[None, ...] ** -6 * conformal_vector
+
+
+@jax.jit
 def electromagnetic_hamiltonian_source(
     psi: jnp.ndarray,
     conformal_field_squared: jnp.ndarray,
@@ -232,6 +248,7 @@ def solve_electromagnetic_conformal_factor(
 
 __all__ = [
     "conformal_vector_to_physical_covector",
+    "conformal_vector_to_physical_contravariant",
     "contract_conformal_electromagnetic_fields",
     "electromagnetic_hamiltonian_residual",
     "electromagnetic_hamiltonian_source",

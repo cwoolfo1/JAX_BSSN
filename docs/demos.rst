@@ -143,3 +143,27 @@ zero on the finite outer grid layers. This approximates asymptotic flatness
 and should be checked by enlarging the domain. Because the initial solve is
 fully three-dimensional, its memory use is much larger than the compact
 Cartoon evolution that follows.
+
+Einstein--Maxwell black-hole formation candidates
+--------------------------------------------------
+
+The electromagnetic formation example is available with both Maxwell
+formulations. Both demos solve the same three-dimensional Hamiltonian
+constraint for the off-centered toroidal dipole family before extracting the
+exact ``y=0`` plane for compact axisymmetric Cartoon evolution:
+
+.. code-block:: bash
+
+   python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py
+   python demos/EM_blackhole_formation_second_order/EM_blackhole_formation_second_order.py
+
+The first-order demo evolves staggered densitized displacement and magnetic
+fields with the doubled-leapfrog Yee solver and writes physical ``D`` and
+``B`` records. The second-order demo evolves cell-centered field and projected
+field-derivative variables with RK4 and writes ``E`` and ``B`` records. Each
+directory contains its own identical ``initial_data.py`` and writes to its own
+local ``output/`` directory unless ``--output-dir`` is supplied.
+
+The default amplitude is a literature-informed supercritical candidate only.
+Neither configuration has been calibrated in this code, and the demos do not
+contain an apparent-horizon finder.

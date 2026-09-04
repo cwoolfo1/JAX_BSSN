@@ -1,4 +1,4 @@
-"""Evolve constraint-solved, self-gravitating electromagnetic dipole data.
+"""Evolve electromagnetic dipole data with the first-order Yee solver.
 
 The default is the off-centered time-symmetric family of Baumgarte,
 Gundlach, and Hilditch.  Its amplitude is a literature-informed
@@ -31,35 +31,32 @@ from JAX_BSSN.cartoon.axisymmetry import (
     validate_axisymmetric_grid,
 )
 from JAX_BSSN.cartoon.axisymmetry.reconstruction import (
+    _expand_axisymmetric_vector,
     _project_scalar,
     _project_vector,
 )
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
-    axisymmetric_einstein_maxwell_rk4_step,
-    compact_axisymmetric_wave,
-    compute_axisymmetric_constraint_divergences,
-    expand_axisymmetric_wave_plane,
-    project_axisymmetric_wave_rhs,
-    reconstruct_axisymmetric_wave_support,
-    validate_axisymmetric_wave_grid,
+from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
+    axisymmetric_densitized_constraint_divergences,
+    axisymmetric_first_order_einstein_maxwell_step,
+    initialize_axisymmetric_first_order_state,
+    reconstruct_axisymmetric_densitized_support,
 )
-from JAX_BSSN.EM.second_order.diagnostics import electromagnetic_output_fields
-from JAX_BSSN.EM.second_order.energy_momentum import (
-    compute_electromagnetic_energy_momentum,
-    compute_electromagnetic_stress_energy,
+from JAX_BSSN.EM.first_order.energy_momentum import (
+    compute_densitized_electromagnetic_energy_momentum,
 )
-from JAX_BSSN.EM.second_order.equations import source_free_projected_field_dots
-from JAX_BSSN.EM.second_order.geometry import compute_bssn_em_geometry
-from JAX_BSSN.EM.second_order.initial_data import (
-    conformal_vector_to_physical_covector,
+from JAX_BSSN.EM.first_order.evolve import (
+    common_densitized_fields,
+    common_physical_fields,
+)
+from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
+from initial_data import (
+    conformal_vector_to_physical_contravariant,
     contract_conformal_electromagnetic_fields,
     off_centered_toroidal_electric_seed,
     solve_electromagnetic_conformal_factor,
 )
-from JAX_BSSN.EM.second_order.variables import EinsteinMaxwellVariables, EMVariables
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
-from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs_with_matter
 
 
 AMPLITUDE = 0.08
@@ -174,7 +171,7 @@ def constrained_einstein_maxwell_data(
     max_cg_iterations: int = MAX_CG_ITERATIONS,
     verbose: bool = False,
 ):
-    """Solve the constraints and return compact synchronized EM/BSSN data."""
+    """Solve the constraints and bootstrap compact Yee-grid EM/BSSN data."""
 
     grid, center_y = electromagnetic_cartesian_grid(
         num_radial_points, num_z_points, dx
@@ -207,54 +204,29 @@ def constrained_einstein_maxwell_data(
         _flat_conformal_bssn_plane(psi_plane)
     )
 
-    electric_covector = conformal_vector_to_physical_covector(
+    physical_displacement_plane = conformal_vector_to_physical_contravariant(
         conformal_electric_plane, psi_plane
     )
-    magnetic_covector = jnp.zeros_like(electric_covector)
-    zero = jnp.zeros_like(electric_covector)
-    em = compact_axisymmetric_wave(
-        EMVariables(
-            electric_field=electric_covector,
-            electric_field_dot=zero,
-            magnetic_field=magnetic_covector,
-            magnetic_field_dot=zero,
-        )
+    physical_displacement = jnp.zeros(
+        (3, num_radial_points + 4, 1, num_z_points),
+        dtype=physical_displacement_plane.dtype,
+    ).at[:, 4:, 0, :].set(
+        physical_displacement_plane[:, num_radial_points:, 0, :]
     )
+    physical_magnetic = jnp.zeros_like(physical_displacement)
 
-    # The wave variables store Eulerian projected derivatives.  Time symmetry
-    # makes dot(E)=0, but dot(B) follows from the first-order Maxwell system.
-    support_bssn = reconstruct_axisymmetric_support(bssn, params)
-    support_em = reconstruct_axisymmetric_wave_support(em, params)
-    stress_energy = compute_electromagnetic_energy_momentum(
-        support_em.electric_field,
-        support_em.magnetic_field,
-        support_bssn,
-    )
-    support_bssn_rhs = compute_bssn_rhs_with_matter(
-        support_bssn, params, *stress_energy
-    )
-    geometry = compute_bssn_em_geometry(
-        support_bssn,
-        support_bssn_rhs,
-        params,
-        backreaction_sources=stress_energy,
-    )
-    electric_dot, magnetic_dot = source_free_projected_field_dots(
-        support_em.electric_field,
-        support_em.magnetic_field,
-        support_bssn,
-        geometry,
+    # The toroidal seed has only D^y on the y=0 reference plane.  Its native
+    # Yee location is centered in rho and z, so the elliptic cell-center sample
+    # is already located correctly.  The initializer fills parity ghosts,
+    # densitizes the physical fields, and constructs the leapfrog history.
+    state = initialize_axisymmetric_first_order_state(
+        bssn,
+        physical_displacement,
+        physical_magnetic,
         params,
     )
-    support_em = EMVariables(
-        electric_field=support_em.electric_field,
-        electric_field_dot=electric_dot,
-        magnetic_field=support_em.magnetic_field,
-        magnetic_field_dot=magnetic_dot,
-    )
-    em = project_axisymmetric_wave_rhs(support_em)
 
-    return EinsteinMaxwellVariables(bssn=bssn, em=em), u, residual_history
+    return state, u, residual_history
 
 
 @jax.jit
@@ -265,17 +237,21 @@ def compute_matter_aware_axisymmetric_constraints(
     """Return compact Einstein constraints including electromagnetic matter."""
 
     support_bssn = reconstruct_axisymmetric_support(state.bssn, params)
-    support_em = reconstruct_axisymmetric_wave_support(state.em, params)
-    stress_energy = compute_electromagnetic_stress_energy(
-        support_em.electric_field,
-        support_em.magnetic_field,
-        support_bssn,
+    support_em = reconstruct_axisymmetric_densitized_support(state.em, params)
+    displacement, magnetic = common_densitized_fields(support_em)
+    energy_density, momentum_density, _ = (
+        compute_densitized_electromagnetic_energy_momentum(
+            displacement,
+            magnetic,
+            support_bssn,
+            params,
+        )
     )
     support = compute_all_constraints_with_matter(
         support_bssn,
         params,
-        stress_energy.energy_density,
-        stress_energy.momentum_density,
+        energy_density,
+        momentum_density,
     )
     return ConstraintViolations(
         hamiltonian=_project_scalar(support.hamiltonian),
@@ -294,13 +270,15 @@ def compute_axisymmetric_em_energy_density(
     """Return compact rho_EM evaluated on reconstructed Cartesian support."""
 
     support_bssn = reconstruct_axisymmetric_support(state.bssn, params)
-    support_em = reconstruct_axisymmetric_wave_support(state.em, params)
-    stress_energy = compute_electromagnetic_stress_energy(
-        support_em.electric_field,
-        support_em.magnetic_field,
+    support_em = reconstruct_axisymmetric_densitized_support(state.em, params)
+    displacement, magnetic = common_densitized_fields(support_em)
+    energy_density, _, _ = compute_densitized_electromagnetic_energy_momentum(
+        displacement,
+        magnetic,
         support_bssn,
+        params,
     )
-    return _project_scalar(stress_energy.energy_density)
+    return _project_scalar(energy_density)
 
 
 def _axisymmetric_scalar_norms(field):
@@ -314,7 +292,7 @@ def _axisymmetric_scalar_norms(field):
     return l2_norm, linf_norm
 
 
-def _output_fields(state, violations):
+def _output_fields(state, violations, params):
     fields = axisymmetric_plane_output_fields(
         state.bssn,
         violations.hamiltonian,
@@ -323,12 +301,19 @@ def _output_fields(state, violations):
         violations.trace_A,
         violations.gamma_condition,
     )
-    expanded_em = expand_axisymmetric_wave_plane(state.em)
-    fields.update(electromagnetic_output_fields(expanded_em))
+    displacement, magnetic = common_physical_fields(state, params)
+    displacement = _expand_axisymmetric_vector(displacement)
+    magnetic = _expand_axisymmetric_vector(magnetic)
+    fields.update(
+        {
+            "D": tuple(displacement[i] for i in range(3)),
+            "B": tuple(magnetic[i] for i in range(3)),
+        }
+    )
     return fields
 
 
-def run_em_blackhole_formation(
+def run_em_blackhole_formation_first_order(
     amplitude: float = AMPLITUDE,
     width: float = WIDTH,
     radial_center: float = RADIAL_CENTER,
@@ -338,14 +323,14 @@ def run_em_blackhole_formation(
     cfl: float = CFL,
     final_time: float = FINAL_TIME,
     snapshot_count: int = SNAPSHOT_COUNT,
-    output_dir: str | Path = "output",
+    output_dir: str | Path | None = None,
     newton_tolerance: float = NEWTON_TOLERANCE,
     max_newton_iterations: int = MAX_NEWTON_ITERATIONS,
     cg_tolerance: float = CG_TOLERANCE,
     max_cg_iterations: int = MAX_CG_ITERATIONS,
     show_progress: bool = True,
 ):
-    """Build and evolve the literature-informed supercritical candidate."""
+    """Build and evolve the candidate with the first-order Yee solver."""
 
     dx = domain_half_width / num_radial_points
     num_steps = max(1, math.ceil(final_time / (cfl * dx)))
@@ -368,10 +353,12 @@ def run_em_blackhole_formation(
         verbose=show_progress,
     )
     validate_axisymmetric_grid(state.bssn, params)
-    validate_axisymmetric_wave_grid(state.em, params)
     jax.block_until_ready(state)
 
-    output_dir = Path(output_dir)
+    if output_dir is None:
+        output_dir = Path(__file__).resolve().parent / "output"
+    else:
+        output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     residual_path = output_dir / "hamiltonian_residual.txt"
     constraint_path = output_dir / "constraint_norms.txt"
@@ -393,8 +380,8 @@ def run_em_blackhole_formation(
         "trace_A_linf",
         "gamma_l2",
         "gamma_linf",
-        "electric_divergence_l2",
-        "electric_divergence_linf",
+        "displacement_divergence_l2",
+        "displacement_divergence_linf",
         "magnetic_divergence_l2",
         "magnetic_divergence_linf",
         "max_rho_EM",
@@ -410,14 +397,14 @@ def run_em_blackhole_formation(
         ).tolist()
     )
     advance = jax.jit(
-        lambda current: axisymmetric_einstein_maxwell_rk4_step(
+        lambda current: axisymmetric_first_order_einstein_maxwell_step(
             current, params
         )
     )
     progress = tqdm(
         range(num_steps + 1),
         disable=not show_progress,
-        desc="Einstein-Maxwell",
+        desc="First-order Einstein-Maxwell",
     )
 
     writer = OpenPMDWriter(
@@ -440,13 +427,13 @@ def run_em_blackhole_formation(
                     state, params
                 )
                 norms = compute_axisymmetric_constraint_norms(violations)
-                electric_divergence, magnetic_divergence = (
-                    compute_axisymmetric_constraint_divergences(
-                        state.em, state.bssn, params
+                displacement_divergence, magnetic_divergence = (
+                    axisymmetric_densitized_constraint_divergences(
+                        state.em, params
                     )
                 )
-                electric_l2, electric_linf = _axisymmetric_scalar_norms(
-                    electric_divergence
+                displacement_l2, displacement_linf = _axisymmetric_scalar_norms(
+                    displacement_divergence
                 )
                 magnetic_l2, magnetic_linf = _axisymmetric_scalar_norms(
                     magnetic_divergence
@@ -455,8 +442,8 @@ def run_em_blackhole_formation(
                 physical = (slice(4, None), 0, slice(None))
                 norms.update(
                     {
-                        "electric_divergence_l2": electric_l2,
-                        "electric_divergence_linf": electric_linf,
+                        "displacement_divergence_l2": displacement_l2,
+                        "displacement_divergence_linf": displacement_linf,
                         "magnetic_divergence_l2": magnetic_l2,
                         "magnetic_divergence_linf": magnetic_linf,
                         "max_rho_EM": jnp.max(rho_em[physical]),
@@ -467,7 +454,9 @@ def run_em_blackhole_formation(
                     }
                 )
                 jax.block_until_ready((violations, norms))
-                writer.write(_output_fields(state, violations), step, step * dt)
+                writer.write(
+                    _output_fields(state, violations, params), step, step * dt
+                )
                 values = " ".join(
                     f"{float(norms[name]):.16e}" for name in norm_names
                 )
@@ -494,7 +483,7 @@ def parse_args():
     parser.add_argument("--cfl", type=float, default=CFL)
     parser.add_argument("--final-time", type=float, default=FINAL_TIME)
     parser.add_argument("--snapshots", type=int, default=SNAPSHOT_COUNT)
-    parser.add_argument("--output-dir", default="output")
+    parser.add_argument("--output-dir")
     parser.add_argument("--newton-tolerance", type=float, default=NEWTON_TOLERANCE)
     parser.add_argument("--cg-tolerance", type=float, default=CG_TOLERANCE)
     parser.add_argument("--no-progress", action="store_true")
@@ -503,7 +492,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    run_em_blackhole_formation(
+    run_em_blackhole_formation_first_order(
         amplitude=args.amplitude,
         width=args.width,
         radial_center=args.radial_center,

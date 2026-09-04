@@ -1,4 +1,6 @@
+import importlib.util
 import math
+from pathlib import Path
 
 import jax
 
@@ -6,25 +8,41 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
 import numpy as np
-
-from JAX_BSSN.EM.second_order.initial_data import (
-    conformal_vector_to_physical_covector,
-    contract_conformal_electromagnetic_fields,
-    electromagnetic_hamiltonian_residual,
-    electromagnetic_hamiltonian_source,
-    linearized_electromagnetic_hamiltonian_source,
-    off_centered_toroidal_electric_seed,
-    solve_electromagnetic_conformal_factor,
-)
+import pytest
 
 
-def test_literature_seed_uses_hl_normalization_and_cartesian_azimuthal_basis():
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_initial_data(formulation):
+    path = (
+        ROOT
+        / "demos"
+        / f"EM_blackhole_formation_{formulation}"
+        / "initial_data.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        f"em_blackhole_{formulation}_initial_data", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(params=("first_order", "second_order"))
+def initial_data(request):
+    return _load_initial_data(request.param)
+
+
+def test_literature_seed_uses_hl_normalization_and_cartesian_azimuthal_basis(
+    initial_data,
+):
     amplitude = 0.08
     width = 1.2
     radial_center = 3.0
     grid = jnp.asarray([[[[2.0, 0.0, -0.5], [1.0, 2.0, 0.25]]]])
 
-    conformal_electric = off_centered_toroidal_electric_seed(
+    conformal_electric = initial_data.off_centered_toroidal_electric_seed(
         grid,
         amplitude=amplitude,
         width=width,
@@ -56,7 +74,7 @@ def test_literature_seed_uses_hl_normalization_and_cartesian_azimuthal_basis():
 
     # E_HL=E_G/sqrt(4pi) must give the same physical energy density.
     psi = jnp.full(radius.shape, 1.35)
-    electric_covector = conformal_vector_to_physical_covector(
+    electric_covector = initial_data.conformal_vector_to_physical_covector(
         conformal_electric, psi
     )
     inverse_metric = (
@@ -66,6 +84,12 @@ def test_literature_seed_uses_hl_normalization_and_cartesian_azimuthal_basis():
     electric_up = jnp.einsum(
         "ij...,j...->i...", inverse_metric, electric_covector
     )
+    physical_contravariant = (
+        initial_data.conformal_vector_to_physical_contravariant(
+            conformal_electric, psi
+        )
+    )
+    np.testing.assert_allclose(physical_contravariant, electric_up)
     hl_energy = 0.5 * jnp.einsum(
         "i...,i...->...", electric_covector, electric_up
     )
@@ -89,21 +113,21 @@ def test_literature_seed_uses_hl_normalization_and_cartesian_azimuthal_basis():
     np.testing.assert_allclose(hl_energy, gaussian_energy, rtol=3.0e-15)
 
 
-def test_electromagnetic_hamiltonian_source_linearization():
+def test_electromagnetic_hamiltonian_source_linearization(initial_data):
     psi = jnp.linspace(1.05, 1.35, 24).reshape((2, 3, 4))
     field_squared = jnp.linspace(0.01, 0.2, 24).reshape((2, 3, 4))
     delta_u = jnp.cos(jnp.arange(24)).reshape((2, 3, 4))
     epsilon = 1.0e-6
 
     finite_difference = (
-        electromagnetic_hamiltonian_source(
+        initial_data.electromagnetic_hamiltonian_source(
             psi + epsilon * delta_u, field_squared
         )
-        - electromagnetic_hamiltonian_source(
+        - initial_data.electromagnetic_hamiltonian_source(
             psi - epsilon * delta_u, field_squared
         )
     ) / (2.0 * epsilon)
-    expected = linearized_electromagnetic_hamiltonian_source(
+    expected = initial_data.linearized_electromagnetic_hamiltonian_source(
         delta_u, psi, field_squared
     )
 
@@ -115,10 +139,12 @@ def test_electromagnetic_hamiltonian_source_linearization():
     )
 
 
-def test_zero_field_returns_exact_flat_conformal_factor():
+def test_zero_field_returns_exact_flat_conformal_factor(initial_data):
     field_squared = jnp.zeros((8, 9, 10), dtype=jnp.float64)
-    psi, u, residual_history = solve_electromagnetic_conformal_factor(
-        field_squared, dx=0.25
+    psi, u, residual_history = (
+        initial_data.solve_electromagnetic_conformal_factor(
+            field_squared, dx=0.25
+        )
     )
 
     np.testing.assert_array_equal(psi, jnp.ones_like(psi))
@@ -146,20 +172,24 @@ def _manufactured_hamiltonian_data(num_points):
     return psi, field_squared, dx
 
 
-def test_hamiltonian_solve_is_second_order_for_manufactured_solution():
+def test_hamiltonian_solve_is_second_order_for_manufactured_solution(
+    initial_data,
+):
     errors = []
     residuals = []
     for num_points in (9, 17, 33):
         expected_psi, field_squared, dx = _manufactured_hamiltonian_data(
             num_points
         )
-        psi, u, residual_history = solve_electromagnetic_conformal_factor(
-            field_squared,
-            dx,
-            newton_tolerance=1.0e-11,
-            cg_tolerance=1.0e-12,
+        psi, u, residual_history = (
+            initial_data.solve_electromagnetic_conformal_factor(
+                field_squared,
+                dx,
+                newton_tolerance=1.0e-11,
+                cg_tolerance=1.0e-12,
+            )
         )
-        residual = electromagnetic_hamiltonian_residual(
+        residual = initial_data.electromagnetic_hamiltonian_residual(
             u, field_squared, dx
         )
 
@@ -194,14 +224,14 @@ def test_hamiltonian_solve_is_second_order_for_manufactured_solution():
     assert min(orders) > 1.8
 
 
-def test_toroidal_seed_produces_nonnegative_conformal_energy():
+def test_toroidal_seed_produces_nonnegative_conformal_energy(initial_data):
     axis = jnp.linspace(-4.0, 4.0, 9)
     X, Y, Z = jnp.meshgrid(axis, axis, axis, indexing="ij")
     grid = jnp.stack((X, Y, Z), axis=-1)
-    conformal_electric = off_centered_toroidal_electric_seed(grid)
+    conformal_electric = initial_data.off_centered_toroidal_electric_seed(grid)
     conformal_magnetic = jnp.zeros_like(conformal_electric)
 
-    field_squared = contract_conformal_electromagnetic_fields(
+    field_squared = initial_data.contract_conformal_electromagnetic_fields(
         conformal_electric, conformal_magnetic
     )
 
