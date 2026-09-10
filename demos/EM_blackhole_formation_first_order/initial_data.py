@@ -4,8 +4,6 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.sparse.linalg import cg
 
-from JAX_BSSN.utilities.bowen_york_solver import laplacian
-
 
 @jax.jit
 def off_centered_toroidal_electric_seed(
@@ -130,7 +128,33 @@ def linearized_electromagnetic_hamiltonian_operator(
     conformal_field_squared: jnp.ndarray,
     dx: float,
 ) -> jnp.ndarray:
-    """Apply the Newton variation ``delta F = Laplacian(delta_u)+delta S``."""
+    """Apply the symmetric cylindrical Newton operator on active cells.
+
+    ``delta_u`` contains ``rho=dx/2,...,rho_max-3dx/2`` and excludes the two
+    fixed-z boundary rows.  Multiplication of the continuum equation by rho
+    puts the radial Laplacian in flux form and makes this cell-centred
+    discretization symmetric under the ordinary Euclidean inner product.
+    """
+
+    num_radial_active = delta_u.shape[0]
+    rho = (jnp.arange(num_radial_active, dtype=delta_u.dtype) + 0.5) * dx
+    rho_minus = jnp.arange(num_radial_active, dtype=delta_u.dtype) * dx
+    rho_plus = rho_minus + dx
+
+    full_delta_u = jnp.pad(delta_u, ((0, 1), (1, 1)))
+    center = full_delta_u[:-1, 1:-1]
+    radial_forward = full_delta_u[1:, 1:-1]
+    radial_backward = jnp.concatenate((center[:1], center[:-1]), axis=0)
+
+    radial_flux_divergence = (
+        rho_plus[:, None] * (radial_forward - center)
+        - rho_minus[:, None] * (center - radial_backward)
+    ) / dx**2
+    z_flux_divergence = rho[:, None] * (
+        full_delta_u[:-1, 2:]
+        - 2.0 * center
+        + full_delta_u[:-1, :-2]
+    ) / dx**2
 
     linearized_source = linearized_electromagnetic_hamiltonian_source(
         delta_u,
@@ -138,7 +162,11 @@ def linearized_electromagnetic_hamiltonian_operator(
         conformal_field_squared,
     )
 
-    return laplacian(delta_u, dx) + linearized_source
+    return (
+        radial_flux_divergence
+        + z_flux_divergence
+        + rho[:, None] * linearized_source
+    )
 
 
 @jax.jit
@@ -147,16 +175,24 @@ def electromagnetic_hamiltonian_residual(
     conformal_field_squared: jnp.ndarray,
     dx: float,
 ) -> jnp.ndarray:
-    """Evaluate ``Delta psi + pi bar(E^2+B^2) psi^-3`` in the interior."""
+    """Evaluate the conservative cylindrical residual on active cells."""
 
-    u_interior = u[1:-1, 1:-1, 1:-1]
+    u_interior = u[:-1, 1:-1]
     psi_interior = 1.0 + u_interior
-    field_squared_interior = conformal_field_squared[1:-1, 1:-1, 1:-1]
+    field_squared_interior = conformal_field_squared[:-1, 1:-1]
     source = electromagnetic_hamiltonian_source(
         psi_interior, field_squared_interior
     )
+    zero_field = jnp.zeros_like(field_squared_interior)
+    differential_operator = linearized_electromagnetic_hamiltonian_operator(
+        u_interior,
+        jnp.ones_like(psi_interior),
+        zero_field,
+        dx,
+    )
+    rho = (jnp.arange(u_interior.shape[0], dtype=u.dtype) + 0.5) * dx
 
-    return laplacian(u_interior, dx) + source
+    return differential_operator + rho[:, None] * source
 
 
 def solve_electromagnetic_conformal_factor(
@@ -176,31 +212,40 @@ def solve_electromagnetic_conformal_factor(
 
     ``Delta psi + pi (bar(E)^2 + bar(B)^2) psi^-3 = 0``.
 
-    The numerical unknown is ``u = psi - 1`` with ``u=0`` on all six outer
-    grid layers.  Each Newton correction uses matrix-free conjugate gradients
-    on the negative linearized operator, following the existing Bowen--York
-    solver.
+    The input and returned fields live directly on the positive-rho,
+    cell-centred Cartoon plane.  The numerical unknown is ``u = psi - 1``.
+    Its outer-rho row and both outer-z rows are fixed to zero, while the axis
+    has the regular zero-flux condition.  Each Newton correction uses CG on
+    the negative, rho-weighted conservative operator.
 
     Returns
     -------
     psi : jax.Array
-        The conformal factor on the full Cartesian grid.
+        The conformal factor on the positive-rho cylindrical grid.
     u : jax.Array
-        The regular correction, including its zero-valued outer boundary.
+        The regular correction, including its zero-valued outer boundaries.
     residual_history : list[float]
         Interior RMS residual before each correction and after convergence.
     """
 
-    field_squared_interior = conformal_field_squared[1:-1, 1:-1, 1:-1]
+    field_squared_interior = conformal_field_squared[:-1, 1:-1]
     u_n = jnp.zeros_like(field_squared_interior)
     residual_history = []
+    rho = (jnp.arange(u_n.shape[0], dtype=u_n.dtype) + 0.5) * dx
 
     for iteration in range(max_newton_iterations + 1):
         psi_n = 1.0 + u_n
         source_n = electromagnetic_hamiltonian_source(
             psi_n, field_squared_interior
         )
-        residual_n = laplacian(u_n, dx) + source_n
+        zero_field = jnp.zeros_like(field_squared_interior)
+        differential_operator = linearized_electromagnetic_hamiltonian_operator(
+            u_n,
+            jnp.ones_like(psi_n),
+            zero_field,
+            dx,
+        )
+        residual_n = differential_operator + rho[:, None] * source_n
 
         residual_rms = float(jnp.sqrt(jnp.mean(residual_n**2)))
         residual_history.append(residual_rms)
@@ -240,7 +285,7 @@ def solve_electromagnetic_conformal_factor(
         u_n = u_n + delta_u
         jax.block_until_ready(u_n)
 
-    u = jnp.pad(u_n, 1)
+    u = jnp.pad(u_n, ((0, 1), (1, 1)))
     psi = 1.0 + u
 
     return psi, u, residual_history

@@ -140,7 +140,7 @@ def test_electromagnetic_hamiltonian_source_linearization(initial_data):
 
 
 def test_zero_field_returns_exact_flat_conformal_factor(initial_data):
-    field_squared = jnp.zeros((8, 9, 10), dtype=jnp.float64)
+    field_squared = jnp.zeros((8, 16), dtype=jnp.float64)
     psi, u, residual_history = (
         initial_data.solve_electromagnetic_conformal_factor(
             field_squared, dx=0.25
@@ -153,20 +153,23 @@ def test_zero_field_returns_exact_flat_conformal_factor(initial_data):
 
 
 def _manufactured_hamiltonian_data(num_points):
-    half_width = 1.0
-    axis = jnp.linspace(-half_width, half_width, num_points)
-    dx = float(axis[1] - axis[0])
-    X, Y, Z = jnp.meshgrid(axis, axis, axis, indexing="ij")
+    dx = 1.0 / (num_points - 0.5)
+    rho = (jnp.arange(num_points) + 0.5) * dx
+    z = (jnp.arange(2 * num_points) - (num_points - 0.5)) * dx
+    RHO, Z = jnp.meshgrid(rho, z, indexing="ij")
 
     amplitude = 0.04
-    wavenumber = jnp.pi / (2.0 * half_width)
-    mode = (
-        jnp.cos(wavenumber * X)
-        * jnp.cos(wavenumber * Y)
-        * jnp.cos(wavenumber * Z)
-    )
+    wavenumber = jnp.pi / 2.0
+    radial_mode = jnp.cos(wavenumber * RHO)
+    z_mode = jnp.cos(wavenumber * Z)
+    mode = radial_mode * z_mode
     psi = 1.0 + amplitude * mode
-    continuum_laplacian = -3.0 * wavenumber**2 * amplitude * mode
+    radial_laplacian = amplitude * z_mode * (
+        -wavenumber**2 * radial_mode
+        - wavenumber * jnp.sin(wavenumber * RHO) / RHO
+    )
+    z_laplacian = -wavenumber**2 * amplitude * mode
+    continuum_laplacian = radial_laplacian + z_laplacian
     field_squared = -continuum_laplacian * psi**3 / jnp.pi
 
     return psi, field_squared, dx
@@ -193,10 +196,7 @@ def test_hamiltonian_solve_is_second_order_for_manufactured_solution(
             u, field_squared, dx
         )
 
-        interior_error = (
-            psi[1:-1, 1:-1, 1:-1]
-            - expected_psi[1:-1, 1:-1, 1:-1]
-        )
+        interior_error = psi[:-1, 1:-1] - expected_psi[:-1, 1:-1]
         errors.append(
             float(jnp.sqrt(jnp.mean(interior_error**2)))
         )
@@ -205,14 +205,7 @@ def test_hamiltonian_solve_is_second_order_for_manufactured_solution(
         assert bool(jnp.all(jnp.isfinite(psi)))
         assert float(jnp.min(psi)) >= 1.0
         assert residual_history[-1] <= 1.0e-11
-        for face in (
-            u[0],
-            u[-1],
-            u[:, 0],
-            u[:, -1],
-            u[:, :, 0],
-            u[:, :, -1],
-        ):
+        for face in (u[-1], u[:, 0], u[:, -1]):
             np.testing.assert_array_equal(face, jnp.zeros_like(face))
 
     orders = [
@@ -222,6 +215,28 @@ def test_hamiltonian_solve_is_second_order_for_manufactured_solution(
 
     assert max(residuals) <= 1.0e-11
     assert min(orders) > 1.8
+
+
+def test_cylindrical_linearized_operator_is_symmetric(initial_data):
+    shape = (12, 22)
+    psi = jnp.linspace(1.01, 1.2, np.prod(shape)).reshape(shape)
+    field_squared = jnp.linspace(0.0, 0.1, np.prod(shape)).reshape(shape)
+    left = jnp.sin(jnp.arange(np.prod(shape))).reshape(shape)
+    right = jnp.cos(jnp.arange(np.prod(shape))).reshape(shape)
+
+    operator_left = initial_data.linearized_electromagnetic_hamiltonian_operator(
+        left, psi, field_squared, 0.1
+    )
+    operator_right = initial_data.linearized_electromagnetic_hamiltonian_operator(
+        right, psi, field_squared, 0.1
+    )
+
+    np.testing.assert_allclose(
+        jnp.vdot(left, operator_right),
+        jnp.vdot(operator_left, right),
+        rtol=2.0e-14,
+        atol=2.0e-14,
+    )
 
 
 def test_toroidal_seed_produces_nonnegative_conformal_energy(initial_data):

@@ -2,8 +2,8 @@
 
 The default is the off-centered time-symmetric family of Baumgarte,
 Gundlach, and Hilditch.  Its amplitude is a literature-informed
-supercritical candidate, but this demo has not been run or calibrated in this
-code and does not contain an apparent-horizon finder.
+supercritical candidate.  The evolution diagnoses apparent-horizon formation
+and exterior settling directly.
 """
 
 import argparse
@@ -35,6 +35,22 @@ from JAX_BSSN.cartoon.axisymmetry.reconstruction import (
     _project_vector,
 )
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
+from JAX_BSSN.diagnostics.apparent_horizon import (
+    find_axisymmetric_apparent_horizon,
+)
+from JAX_BSSN.EM.collapse import (
+    atomic_write_json,
+    compact_lapse_and_W,
+    exterior_electromagnetic_energy,
+    horizon_from_dict,
+    horizon_to_dict,
+    load_collapse_checkpoint,
+    parameters_to_dict,
+    run_schwarzschild_reference,
+    settling_criteria,
+    state_is_finite,
+    write_collapse_checkpoint,
+)
 from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     axisymmetric_einstein_maxwell_rk4_step,
     compact_axisymmetric_wave,
@@ -65,12 +81,14 @@ from JAX_BSSN.evolution.time_evolve import compute_bssn_rhs_with_matter
 AMPLITUDE = 0.08
 WIDTH = 1.0
 RADIAL_CENTER = 3.0
-DOMAIN_HALF_WIDTH = 16.0
-NUM_RADIAL_POINTS = 96
-NUM_Z_POINTS = 192
+DOMAIN_HALF_WIDTH = 24.0
+NUM_RADIAL_POINTS = 192
+NUM_Z_POINTS = 384
 CFL = 0.2
-FINAL_TIME = 12.0
-SNAPSHOT_COUNT = 120
+FINAL_TIME = 40.0
+SNAPSHOT_COUNT = 40
+DIAGNOSTIC_INTERVAL = 0.5
+CHECKPOINT_INTERVAL = 1.0
 
 NEWTON_TOLERANCE = 1.0e-10
 MAX_NEWTON_ITERATIONS = 12
@@ -106,7 +124,7 @@ def axisymmetric_parameters(
         g=GAMMA_DRIVER,
         dx=dx,
         dt=dt,
-        zero_shift=1,
+        zero_shift=0,
         gauge=1,
         xl_bc=PERIODIC_BC,
         xr_bc=SOMMERFELD_BC,
@@ -121,23 +139,21 @@ def axisymmetric_parameters(
     )
 
 
-def electromagnetic_cartesian_grid(
+def electromagnetic_cylindrical_grid(
     num_radial_points: int,
     num_z_points: int,
     dx: float,
 ):
-    """Return the full elliptic grid and its exact central ``y=0`` index."""
+    """Return the positive-rho, full-z cell-centred elliptic grid."""
 
-    num_x = 2 * num_radial_points
-    num_y = 2 * num_radial_points + 1
-    x = (jnp.arange(num_x, dtype=jnp.float64) - (num_x - 1) / 2.0) * dx
-    y = (jnp.arange(num_y, dtype=jnp.float64) - (num_y - 1) / 2.0) * dx
+    rho = (jnp.arange(num_radial_points, dtype=jnp.float64) + 0.5) * dx
     z = (
         jnp.arange(num_z_points, dtype=jnp.float64)
         - (num_z_points - 1) / 2.0
     ) * dx
-    X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
-    return jnp.stack((X, Y, Z), axis=-1), num_y // 2
+    RHO, Z = jnp.meshgrid(rho, z, indexing="ij")
+    grid = jnp.stack((RHO, jnp.zeros_like(RHO), Z), axis=-1)
+    return grid[:, None, :, :]
 
 
 def _flat_conformal_bssn_plane(psi_plane):
@@ -176,7 +192,7 @@ def constrained_einstein_maxwell_data(
 ):
     """Solve the constraints and return compact synchronized EM/BSSN data."""
 
-    grid, center_y = electromagnetic_cartesian_grid(
+    grid = electromagnetic_cylindrical_grid(
         num_radial_points, num_z_points, dx
     )
     conformal_electric = off_centered_toroidal_electric_seed(
@@ -188,7 +204,7 @@ def constrained_einstein_maxwell_data(
     conformal_magnetic = jnp.zeros_like(conformal_electric)
     conformal_field_squared = contract_conformal_electromagnetic_fields(
         conformal_electric, conformal_magnetic
-    )
+    )[:, 0, :]
     psi, u, residual_history = solve_electromagnetic_conformal_factor(
         conformal_field_squared,
         dx,
@@ -199,16 +215,22 @@ def constrained_einstein_maxwell_data(
         verbose=verbose,
     )
 
-    psi_plane = psi[:, center_y : center_y + 1, :]
-    conformal_electric_plane = conformal_electric[
-        :, :, center_y : center_y + 1, :
-    ]
+    psi_plane = psi[:, None, :]
+    signed_psi_plane = jnp.concatenate(
+        (jnp.flip(psi_plane, axis=0), psi_plane), axis=0
+    )
     bssn = compact_axisymmetric_state(
-        _flat_conformal_bssn_plane(psi_plane)
+        _flat_conformal_bssn_plane(signed_psi_plane)
     )
 
     electric_covector = conformal_vector_to_physical_covector(
-        conformal_electric_plane, psi_plane
+        conformal_electric, psi_plane
+    )
+    parity = jnp.asarray((-1.0, -1.0, 1.0), dtype=electric_covector.dtype)
+    parity = parity[:, None, None, None]
+    electric_covector = jnp.concatenate(
+        (jnp.flip(electric_covector, axis=1) * parity, electric_covector),
+        axis=1,
     )
     magnetic_covector = jnp.zeros_like(electric_covector)
     zero = jnp.zeros_like(electric_covector)
@@ -344,46 +366,126 @@ def run_em_blackhole_formation_second_order(
     cg_tolerance: float = CG_TOLERANCE,
     max_cg_iterations: int = MAX_CG_ITERATIONS,
     show_progress: bool = True,
+    restart: str | Path | None = None,
+    checkpoint_interval: float = CHECKPOINT_INTERVAL,
+    diagnostic_interval: float = DIAGNOSTIC_INTERVAL,
+    run_schwarzschild: bool = True,
 ):
-    """Build and evolve the candidate with the second-order wave solver."""
+    """Evolve until exterior settling or the hard final-time ceiling."""
 
-    dx = domain_half_width / num_radial_points
-    num_steps = max(1, math.ceil(final_time / (cfl * dx)))
-    dt = final_time / num_steps
-    params = axisymmetric_parameters(
-        num_radial_points, num_z_points, domain_half_width, dt
-    )
-    state, u, residual_history = constrained_einstein_maxwell_data(
-        amplitude,
-        width,
-        radial_center,
-        num_radial_points,
-        num_z_points,
-        dx,
-        params,
-        newton_tolerance=newton_tolerance,
-        max_newton_iterations=max_newton_iterations,
-        cg_tolerance=cg_tolerance,
-        max_cg_iterations=max_cg_iterations,
-        verbose=show_progress,
-    )
+    restart_path = Path(restart) if restart is not None else None
+    if output_dir is None:
+        output_dir = (
+            restart_path.parent
+            if restart_path is not None
+            else Path(__file__).resolve().parent / "output"
+        )
+    output_dir = Path(output_dir)
+    residual_path = output_dir / "hamiltonian_residual.txt"
+    constraint_path = output_dir / "constraint_norms.txt"
+    horizon_path = output_dir / "horizon_diagnostics.txt"
+    checkpoint_path = output_dir / "rolling_checkpoint.npz"
+    summary_path = output_dir / "run_summary.json"
+
+    requested_configuration = {
+        "amplitude": float(amplitude),
+        "width": float(width),
+        "radial_center": float(radial_center),
+        "domain_half_width": float(domain_half_width),
+        "num_radial_points": int(num_radial_points),
+        "num_z_points": int(num_z_points),
+        "cfl": float(cfl),
+        "diagnostic_interval": float(diagnostic_interval),
+        "checkpoint_interval": float(checkpoint_interval),
+    }
+    previous_summary = {}
+    if restart_path is None:
+        protected_paths = (
+            residual_path,
+            constraint_path,
+            horizon_path,
+            checkpoint_path,
+            summary_path,
+            output_dir / "EM_blackhole_formation.h5",
+        )
+        if any(path.exists() for path in protected_paths):
+            raise FileExistsError(
+                f"refusing to overwrite an existing collapse campaign in {output_dir}"
+            )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dx = domain_half_width / num_radial_points
+        dt = cfl * dx
+        params = axisymmetric_parameters(
+            num_radial_points, num_z_points, domain_half_width, dt
+        )
+        state, u, residual_history = constrained_einstein_maxwell_data(
+            amplitude,
+            width,
+            radial_center,
+            num_radial_points,
+            num_z_points,
+            dx,
+            params,
+            newton_tolerance=newton_tolerance,
+            max_newton_iterations=max_newton_iterations,
+            cg_tolerance=cg_tolerance,
+            max_cg_iterations=max_cg_iterations,
+            verbose=show_progress,
+        )
+        start_step = 0
+        runtime_configuration = requested_configuration.copy()
+        with residual_path.open("w", encoding="utf-8") as residual_file:
+            residual_file.write("# iteration interior_residual_rms\n")
+            for iteration, residual in enumerate(residual_history):
+                residual_file.write(f"{iteration:d} {residual:.16e}\n")
+    else:
+        state, u, residual_history, checkpoint_metadata = load_collapse_checkpoint(
+            restart_path, "second_order"
+        )
+        runtime_configuration = checkpoint_metadata["configuration"]
+        for name in (
+            "amplitude",
+            "width",
+            "radial_center",
+            "domain_half_width",
+            "num_radial_points",
+            "num_z_points",
+            "cfl",
+        ):
+            requested_configuration[name] = runtime_configuration[name]
+        num_radial_points = int(runtime_configuration["num_radial_points"])
+        num_z_points = int(runtime_configuration["num_z_points"])
+        params = BSSNParameters(**checkpoint_metadata["parameters"])
+        start_step = int(checkpoint_metadata["step"])
+        dx = float(params.dx)
+        if summary_path.exists():
+            import json
+
+            with summary_path.open("r", encoding="utf-8") as summary_file:
+                previous_summary = json.load(summary_file)
+
     validate_axisymmetric_grid(state.bssn, params)
     validate_axisymmetric_wave_grid(state.em, params)
     jax.block_until_ready(state)
+    dt = float(params.dt)
+    num_steps = int(math.floor(final_time / float(params.dt) + 1.0e-12))
+    if start_step > num_steps:
+        raise ValueError("restart checkpoint is later than the final-time ceiling")
 
-    if output_dir is None:
-        output_dir = Path(__file__).resolve().parent / "output"
+    if restart_path is None:
+        openpmd_path = output_dir / "EM_blackhole_formation.h5"
     else:
-        output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    residual_path = output_dir / "hamiltonian_residual.txt"
-    constraint_path = output_dir / "constraint_norms.txt"
-    openpmd_path = output_dir / "EM_blackhole_formation.h5"
-
-    with residual_path.open("w", encoding="utf-8") as residual_file:
-        residual_file.write("# iteration interior_residual_rms\n")
-        for iteration, residual in enumerate(residual_history):
-            residual_file.write(f"{iteration:d} {residual:.16e}\n")
+        segment = 0
+        openpmd_path = output_dir / (
+            f"EM_blackhole_formation_restart_{start_step:08d}_{segment:02d}.h5"
+        )
+        while openpmd_path.exists():
+            segment += 1
+            openpmd_path = output_dir / (
+                f"EM_blackhole_formation_restart_{start_step:08d}_{segment:02d}.h5"
+            )
+    if openpmd_path.exists():
+        raise FileExistsError(f"refusing to overwrite {openpmd_path}")
 
     norm_names = (
         "hamiltonian_l2",
@@ -404,21 +506,16 @@ def run_em_blackhole_formation_second_order(
         "min_lapse",
         "min_W",
     )
-    output_steps = set(
-        np.linspace(
-            0,
-            num_steps,
-            min(snapshot_count, num_steps) + 1,
-            dtype=int,
-        ).tolist()
-    )
+    snapshot_steps = max(1, math.ceil(max(num_steps, 1) / max(snapshot_count, 1)))
+    diagnostic_steps = max(1, int(round(diagnostic_interval / float(params.dt))))
+    checkpoint_steps = max(1, int(round(checkpoint_interval / float(params.dt))))
     advance = jax.jit(
         lambda current: axisymmetric_einstein_maxwell_rk4_step(
             current, params
         )
     )
     progress = tqdm(
-        range(num_steps + 1),
+        range(start_step, num_steps + 1),
         disable=not show_progress,
         desc="Second-order Einstein-Maxwell",
     )
@@ -435,52 +532,241 @@ def run_em_blackhole_formation_second_order(
         dt=dt,
         ghost_cells=0,
     )
-    with writer, constraint_path.open("w", encoding="utf-8") as norm_file:
-        norm_file.write("# step time " + " ".join(norm_names) + "\n")
-        for step in progress:
-            if step in output_steps:
-                violations = compute_matter_aware_axisymmetric_constraints(
-                    state, params
-                )
-                norms = compute_axisymmetric_constraint_norms(violations)
-                electric_divergence, magnetic_divergence = (
-                    compute_axisymmetric_constraint_divergences(
-                        state.em, state.bssn, params
-                    )
-                )
-                electric_l2, electric_linf = _axisymmetric_scalar_norms(
-                    electric_divergence
-                )
-                magnetic_l2, magnetic_linf = _axisymmetric_scalar_norms(
-                    magnetic_divergence
-                )
-                rho_em = compute_axisymmetric_em_energy_density(state, params)
-                physical = (slice(4, None), 0, slice(None))
-                norms.update(
-                    {
-                        "electric_divergence_l2": electric_l2,
-                        "electric_divergence_linf": electric_linf,
-                        "magnetic_divergence_l2": magnetic_l2,
-                        "magnetic_divergence_linf": magnetic_linf,
-                        "max_rho_EM": jnp.max(rho_em[physical]),
-                        "min_lapse": jnp.min(state.bssn.lapse[physical]),
-                        "min_W": jnp.min(
-                            state.bssn.conformal_factor[physical]
-                        ),
-                    }
-                )
-                jax.block_until_ready((violations, norms))
-                writer.write(_output_fields(state, violations), step, step * dt)
-                values = " ".join(
-                    f"{float(norms[name]):.16e}" for name in norm_names
-                )
-                norm_file.write(f"{step:d} {step * dt:.16e} {values}\n")
-                norm_file.flush()
+    mode = "a" if restart_path is not None else "w"
+    previous_coefficients = runtime_configuration.get("last_horizon_coefficients")
+    if previous_coefficients is not None:
+        previous_coefficients = np.asarray(previous_coefficients)
+    persistence_start_time = runtime_configuration.get(
+        "persistent_horizon_start_time"
+    )
+    horizon_samples = []
+    diagnostic_records = list(previous_summary.get("diagnostics", []))
+    written_steps = set()
+    previously_settled = previous_summary.get("status") == "settled"
+    previous_horizon = horizon_from_dict(previous_summary.get("horizon"))
+    final_horizon = previous_horizon
+    final_criteria = settling_criteria([], 0.0, params)
+    status = "settled" if previously_settled else "incomplete"
+    final_step = start_step
 
+    def checkpoint_configuration():
+        configuration = requested_configuration.copy()
+        configuration["last_horizon_coefficients"] = (
+            None
+            if previous_coefficients is None
+            else np.asarray(previous_coefficients).tolist()
+        )
+        configuration["persistent_horizon_start_time"] = persistence_start_time
+        return configuration
+
+    def diagnose(step, norm_file, horizon_file, write_fields):
+        nonlocal previous_coefficients
+        nonlocal persistence_start_time
+        nonlocal horizon_samples
+        nonlocal final_horizon
+        nonlocal final_criteria
+
+        time = step * float(params.dt)
+        finite = state_is_finite(state)
+        horizon = None
+        if finite:
+            horizon = find_axisymmetric_apparent_horizon(
+                state.bssn, params, previous_coefficients
+            )
+        rho_em = compute_axisymmetric_em_energy_density(state, params)
+        exterior_energy = np.nan
+        final_horizon = horizon
+        if horizon is None:
+            persistence_start_time = None
+            horizon_samples = []
+            final_criteria = settling_criteria([], 0.0, params)
+        else:
+            previous_coefficients = horizon.coefficients
+            if persistence_start_time is None:
+                persistence_start_time = time
+            exterior_energy = exterior_electromagnetic_energy(
+                rho_em, state.bssn, horizon, params
+            )
+            horizon_samples.append(
+                {
+                    "time": time,
+                    "diagnostic_interval": diagnostic_steps * float(params.dt),
+                    "horizon": horizon,
+                    "exterior_em_energy": exterior_energy,
+                    "fields": compact_lapse_and_W(state.bssn),
+                }
+            )
+            final_criteria = settling_criteria(
+                horizon_samples, persistence_start_time, params
+            )
+            keep_after = time - 6.0 * horizon.irreducible_mass
+            horizon_samples = [
+                sample for sample in horizon_samples if sample["time"] >= keep_after
+            ]
+
+        diagnostic_records.append(
+            {
+                "step": int(step),
+                "time": time,
+                "finite": finite,
+                "horizon": horizon_to_dict(horizon),
+                "exterior_em_energy": (
+                    None if not np.isfinite(exterior_energy) else float(exterior_energy)
+                ),
+            }
+        )
+        if horizon is None:
+            horizon_file.write(f"{step:d} {time:.16e} 0 nan nan nan nan\n")
+        else:
+            horizon_file.write(
+                f"{step:d} {time:.16e} 1 {horizon.irreducible_mass:.16e} "
+                f"{horizon.area:.16e} {horizon.expansion_linf:.16e} "
+                f"{horizon.circumference_ratio:.16e}\n"
+            )
+        horizon_file.flush()
+
+        violations = compute_matter_aware_axisymmetric_constraints(state, params)
+        norms = compute_axisymmetric_constraint_norms(violations)
+        electric_divergence, magnetic_divergence = (
+            compute_axisymmetric_constraint_divergences(
+                state.em, state.bssn, params
+            )
+        )
+        electric_l2, electric_linf = _axisymmetric_scalar_norms(
+            electric_divergence
+        )
+        magnetic_l2, magnetic_linf = _axisymmetric_scalar_norms(
+            magnetic_divergence
+        )
+        physical = (slice(4, None), 0, slice(None))
+        norms.update(
+            {
+                "electric_divergence_l2": electric_l2,
+                "electric_divergence_linf": electric_linf,
+                "magnetic_divergence_l2": magnetic_l2,
+                "magnetic_divergence_linf": magnetic_linf,
+                "max_rho_EM": jnp.max(rho_em[physical]),
+                "min_lapse": jnp.min(state.bssn.lapse[physical]),
+                "min_W": jnp.min(state.bssn.conformal_factor[physical]),
+            }
+        )
+        jax.block_until_ready((violations, norms))
+        values = " ".join(f"{float(norms[name]):.16e}" for name in norm_names)
+        norm_file.write(f"{step:d} {time:.16e} {values}\n")
+        norm_file.flush()
+        if write_fields:
+            writer.write(_output_fields(state, violations), step, time)
+            written_steps.add(step)
+        return finite
+
+    with writer, constraint_path.open(mode, encoding="utf-8") as norm_file, horizon_path.open(
+        mode, encoding="utf-8"
+    ) as horizon_file:
+        if restart_path is None:
+            norm_file.write("# step time " + " ".join(norm_names) + "\n")
+            horizon_file.write(
+                "# step time found irreducible_mass area expansion_linf circumference_ratio\n"
+            )
+        for step in progress:
+            diagnostic_due = step == start_step or step % diagnostic_steps == 0
+            snapshot_due = step == start_step or step % snapshot_steps == 0
+            if diagnostic_due or snapshot_due:
+                finite = diagnose(step, norm_file, horizon_file, snapshot_due)
+                final_step = step
+                if not finite:
+                    status = "failed_nonfinite"
+                    break
+                if previously_settled:
+                    status = "settled"
+                    break
+                if final_criteria["settled"]:
+                    status = "settled"
+                    break
             if step < num_steps:
                 state = advance(state)
+                final_step = step + 1
+                if final_step % checkpoint_steps == 0:
+                    jax.block_until_ready(state)
+                    write_collapse_checkpoint(
+                        checkpoint_path,
+                        state,
+                        u,
+                        residual_history,
+                        "second_order",
+                        final_step,
+                        final_step * float(params.dt),
+                        params,
+                        checkpoint_configuration(),
+                    )
+
+        if final_step not in written_steps:
+            diagnose(final_step, norm_file, horizon_file, True)
 
     jax.block_until_ready(state)
+    if previously_settled and status != "failed_nonfinite":
+        status = "settled"
+        final_criteria = previous_summary["settling_criteria"]
+        if final_horizon is None:
+            final_horizon = previous_horizon
+    elif status == "incomplete" and final_criteria["settled"]:
+        status = "settled"
+    write_collapse_checkpoint(
+        checkpoint_path,
+        state,
+        u,
+        residual_history,
+        "second_order",
+        final_step,
+        final_step * float(params.dt),
+        params,
+        checkpoint_configuration(),
+    )
+    output_segments = list(previous_summary.get("output_segments", []))
+    output_segments.append(str(openpmd_path))
+    summary = {
+        "formulation": "second_order",
+        "status": status,
+        "final_step": int(final_step),
+        "final_time": float(final_step * float(params.dt)),
+        "final_time_ceiling": float(final_time),
+        "configuration": requested_configuration,
+        "parameters": parameters_to_dict(params),
+        "initial_hamiltonian_residual_history": residual_history,
+        "horizon": horizon_to_dict(final_horizon),
+        "settling_criteria": final_criteria,
+        "diagnostics": diagnostic_records,
+        "checkpoint_path": str(checkpoint_path),
+        "output_segments": output_segments,
+        "schwarzschild_reference": None,
+    }
+    atomic_write_json(summary_path, summary)
+
+    if status == "settled" and run_schwarzschild and final_horizon is not None:
+        reference_dir = output_dir / "schwarzschild_reference"
+        reference_summary_path = reference_dir / "run_summary.json"
+        if reference_summary_path.exists():
+            import json
+
+            with reference_summary_path.open("r", encoding="utf-8") as reference_file:
+                reference_summary = json.load(reference_file)
+        if (
+            not reference_summary_path.exists()
+            or reference_summary.get("status") != "settled"
+        ):
+            reference_summary = run_schwarzschild_reference(
+                final_horizon.irreducible_mass,
+                params,
+                num_radial_points,
+                num_z_points,
+                final_time,
+                reference_dir,
+                diagnostic_interval=diagnostic_interval,
+                snapshot_interval=max(final_time / max(snapshot_count, 1), float(params.dt)),
+                show_progress=show_progress,
+            )
+        summary["schwarzschild_reference"] = reference_summary
+        atomic_write_json(summary_path, summary)
+
     return state, u, residual_history
 
 
@@ -500,6 +786,14 @@ def parse_args():
     parser.add_argument("--output-dir")
     parser.add_argument("--newton-tolerance", type=float, default=NEWTON_TOLERANCE)
     parser.add_argument("--cg-tolerance", type=float, default=CG_TOLERANCE)
+    parser.add_argument("--restart", type=Path)
+    parser.add_argument(
+        "--checkpoint-interval", type=float, default=CHECKPOINT_INTERVAL
+    )
+    parser.add_argument(
+        "--diagnostic-interval", type=float, default=DIAGNOSTIC_INTERVAL
+    )
+    parser.add_argument("--no-schwarzschild-reference", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     return parser.parse_args()
 
@@ -520,4 +814,8 @@ if __name__ == "__main__":
         newton_tolerance=args.newton_tolerance,
         cg_tolerance=args.cg_tolerance,
         show_progress=not args.no_progress,
+        restart=args.restart,
+        checkpoint_interval=args.checkpoint_interval,
+        diagnostic_interval=args.diagnostic_interval,
+        run_schwarzschild=not args.no_schwarzschild_reference,
     )

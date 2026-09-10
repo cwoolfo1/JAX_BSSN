@@ -93,19 +93,44 @@ python demos/EM_blackhole_formation_second_order/EM_blackhole_formation_second_o
 Each demo owns an identical local copy of the physical initial-data routines
 and writes to an `output/` directory beside its script by default. The
 first-order openPMD output contains physical `D` and `B`; the second-order
-output contains `E` and `B`. These amplitudes are literature-informed
-supercritical candidates, but neither demo has been calibrated in this code
-and neither contains an apparent-horizon finder.
+output contains `E` and `B`. The default amplitude remains a
+literature-informed candidate until the medium/high campaign is completed.
 
-The initial-data phase solves the three-dimensional Cartesian Hamiltonian
-constraint before extracting its exact `y=0` plane for Cartoon evolution. It
-therefore uses substantially more memory than the subsequent axisymmetric
-time evolution. The regular conformal correction is fixed to zero on the
-finite outer grid layers, so enlarge the initial-data domain when studying
-finite-boundary error.
+The initial-data phase solves the rho-weighted Hamiltonian constraint directly
+on the positive-rho, full-z Cartoon plane. It uses a conservative radial flux,
+regular zero flux at the axis, and fixed `u=0` outer-rho and outer-z rows. Both
+demos evolve the Gamma-driver shift, write rolling restart checkpoints, and
+test a converged even-Legendre apparent horizon for persistence and exterior
+settling. Existing campaign files are never overwritten; choose a fresh
+`--output-dir` or continue `--restart path/to/rolling_checkpoint.npz`.
 
-The default three-dimensional runs compile substantial JAX kernels. The
+After a settled formation run, the demo evolves a mass-matched Schwarzschild
+puncture with the same gauge and grid. Compare the final lapse and conformal
+factor with:
+
+```bash
+python demos/plot_em_blackhole_schwarzschild.py \
+  --formation path/to/collapse_high \
+  --reference path/to/collapse_high/schwarzschild_reference \
+  --metadata path/to/collapse_high/run_summary.json \
+  --output path/to/collapse_high/schwarzschild_comparison.png
+```
+
+The default production runs compile substantial JAX kernels. The
 [demo guide](docs/demos.rst) includes smaller smoke configurations.
+
+Once all four medium/high runs and their automatic Schwarzschild controls are
+settled, generate every overlay, the CSV/Markdown summary table, and the
+machine-readable acceptance report together:
+
+```bash
+python demos/plot_em_blackhole_campaign.py \
+  --first-medium path/to/first_order/collapse_medium \
+  --first-high path/to/first_order/collapse_high \
+  --second-medium path/to/second_order/collapse_medium \
+  --second-high path/to/second_order/collapse_high \
+  --output-dir path/to/campaign_plots
+```
 
 ## Package structure
 

@@ -140,17 +140,15 @@ symmetry axis.
 
 The elliptic solve is second-order and fixes the regular correction ``u`` to
 zero on the finite outer grid layers. This approximates asymptotic flatness
-and should be checked by enlarging the domain. Because the initial solve is
-fully three-dimensional, its memory use is much larger than the compact
-Cartoon evolution that follows.
+and should be checked by enlarging the domain.
 
 Einstein--Maxwell black-hole formation candidates
 --------------------------------------------------
 
 The electromagnetic formation example is available with both Maxwell
-formulations. Both demos solve the same three-dimensional Hamiltonian
-constraint for the off-centered toroidal dipole family before extracting the
-exact ``y=0`` plane for compact axisymmetric Cartoon evolution:
+formulations. Both demos solve the same rho-weighted cylindrical Hamiltonian
+constraint for the off-centered toroidal dipole family directly on the
+positive-rho, full-z compact Cartoon plane:
 
 .. code-block:: bash
 
@@ -164,6 +162,59 @@ field-derivative variables with RK4 and writes ``E`` and ``B`` records. Each
 directory contains its own identical ``initial_data.py`` and writes to its own
 local ``output/`` directory unless ``--output-dir`` is supplied.
 
-The default amplitude is a literature-informed supercritical candidate only.
-Neither configuration has been calibrated in this code, and the demos do not
-contain an apparent-horizon finder.
+The Gamma-driver shift is active. At each diagnostic time the demos solve the
+outgoing-expansion equation for an even-Legendre surface, record its area,
+irreducible mass, expansion residual, and circumference ratio, and stop only
+after the persistent-horizon and five-mass exterior-settling criteria pass.
+The rolling ``rolling_checkpoint.npz`` contains the complete native Maxwell
+and BSSN state. Continue it with ``--restart``; omit the automatic gauge-matched
+vacuum control with ``--no-schwarzschild-reference``.
+
+Use fresh campaign directories. For example, the planned medium first-order
+run is:
+
+.. code-block:: bash
+
+   python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py \
+       --amplitude 0.08 --domain-half-width 24 --num-rho 192 --num-z 384 \
+       --final-time 40 --output-dir demos/EM_blackhole_formation_first_order/output/collapse_medium
+
+After a settled run, overlay the final lapse and conformal factor ``W`` with
+the evolved Schwarzschild control:
+
+.. code-block:: bash
+
+   python demos/plot_em_blackhole_schwarzschild.py \
+       --formation path/to/collapse_high \
+       --reference path/to/collapse_high/schwarzschild_reference \
+       --metadata path/to/collapse_high/run_summary.json \
+       --output path/to/collapse_high/schwarzschild_comparison.png
+
+To process both formulations and both resolutions in one pass, use:
+
+.. code-block:: bash
+
+   python demos/plot_em_blackhole_campaign.py \
+       --first-medium path/to/first_order/collapse_medium \
+       --first-high path/to/first_order/collapse_high \
+       --second-medium path/to/second_order/collapse_medium \
+       --second-high path/to/second_order/collapse_high \
+       --output-dir path/to/campaign_plots
+
+This writes four PNG/PDF overlays, per-run exterior-error JSON files, a
+CSV/Markdown campaign table, and ``acceptance.json``. The acceptance report
+checks settled formation and reference runs, finite histories, initially
+horizon-free data, horizon formation before the ceiling, six-cell medium-grid
+horizon resolution, decreasing medium-to-high exterior errors, and the five
+percent high-resolution remnant-mass agreement.
+
+The electromagnetic family, conformal scaling, energy density, and
+Hamiltonian equation are equations (4)--(6) of Baumgarte, Gundlach, and
+Hilditch, `Critical phenomena in the gravitational collapse of
+electromagnetic waves <https://arxiv.org/abs/1909.00850>`_. Multiplying their
+axisymmetric flat Laplacian by ``rho`` gives the conservative cylindrical form
+used here. The star-shaped ``r=h(angle)`` apparent-horizon construction follows
+the formulations described by Gundlach, `Pseudo-spectral apparent horizon
+finders <https://arxiv.org/abs/gr-qc/9707050>`_, and Thornburg, `A Fast
+Apparent-Horizon Finder for 3-Dimensional Cartesian Grids in Numerical
+Relativity <https://arxiv.org/abs/gr-qc/0306056>`_.
