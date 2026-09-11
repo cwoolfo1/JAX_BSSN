@@ -162,59 +162,60 @@ field-derivative variables with RK4 and writes ``E`` and ``B`` records. Each
 directory contains its own identical ``initial_data.py`` and writes to its own
 local ``output/`` directory unless ``--output-dir`` is supplied.
 
-The Gamma-driver shift is active. At each diagnostic time the demos solve the
-outgoing-expansion equation for an even-Legendre surface, record its area,
-irreducible mass, expansion residual, and circumference ratio, and stop only
-after the persistent-horizon and five-mass exterior-settling criteria pass.
-The rolling ``rolling_checkpoint.npz`` contains the complete native Maxwell
-and BSSN state. Continue it with ``--restart``; omit the automatic gauge-matched
-vacuum control with ``--no-schwarzschild-reference``.
+The Gamma-driver shift is active. The demos record constraint norms and field
+snapshots and evolve for a fixed duration: 500 simulation units by default for
+the first-order solver and 40 for the second-order solver. ``--final-time``
+overrides the duration. The final step is the last whole timestep at or before
+that time. A finite run reports ``complete``; a nonfinite state reports
+``failed_nonfinite``. Completion alone does not establish physical settling.
 
-Use fresh campaign directories. For example, the planned medium first-order
-run is:
+The rolling ``rolling_checkpoint.npz`` contains the complete native Maxwell
+and BSSN state. Continue it with ``--restart``. Legacy checkpoints and runs
+previously marked ``settled`` continue toward the requested end time.
+Use a fresh output directory for a new run:
 
 .. code-block:: bash
 
    python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py \
        --amplitude 0.08 --domain-half-width 24 --num-rho 192 --num-z 384 \
-       --final-time 40 --output-dir demos/EM_blackhole_formation_first_order/output/collapse_medium
+       --final-time 500 --output-dir path/to/collapse
 
-After a settled run, overlay the final lapse and conformal factor ``W`` with
-the evolved Schwarzschild control:
+Run the optional vacuum comparison separately, supplying a finite, positive
+puncture mass explicitly. The example mass below is an input, not a measurement.
+The reference uses the first-order checkpoint's grid, gauge, boundaries, and
+elapsed time:
+
+.. code-block:: bash
+
+   python demos/EM_blackhole_formation_first_order/compare_schwarzschild.py \
+       --input-dir path/to/collapse --mass 1.0 \
+       --output-dir path/to/new_comparison
+
+This writes the final reference state and 16 BSSN comparison figures. Regenerate
+figures using ``--plot-only`` with the same input and output directories; the
+mass is read from the saved reference. Matching gauge parameters does not
+imply matching gauge histories.
+
+Each formation folder is self-contained, with its own ``collapse_io.py`` for
+checkpoint and summary handling. The first-order folder also contains
+``schwarzschild_reference.py``. Its ``run_schwarzschild_reference`` helper
+accepts an explicit mass and final time, writes openPMD snapshots, and supports
+rolling-checkpoint restarts. These are demo-local workflows, outside the
+installed production package. For existing openPMD formation and reference data:
 
 .. code-block:: bash
 
    python demos/plot_em_blackhole_schwarzschild.py \
-       --formation path/to/collapse_high \
-       --reference path/to/collapse_high/schwarzschild_reference \
-       --metadata path/to/collapse_high/run_summary.json \
-       --output path/to/collapse_high/schwarzschild_comparison.png
+       --formation path/to/collapse --reference path/to/reference \
+       --mass 1.0 --output path/to/comparison.png
 
-To process both formulations and both resolutions in one pass, use:
-
-.. code-block:: bash
-
-   python demos/plot_em_blackhole_campaign.py \
-       --first-medium path/to/first_order/collapse_medium \
-       --first-high path/to/first_order/collapse_high \
-       --second-medium path/to/second_order/collapse_medium \
-       --second-high path/to/second_order/collapse_high \
-       --output-dir path/to/campaign_plots
-
-This writes four PNG/PDF overlays, per-run exterior-error JSON files, a
-CSV/Markdown campaign table, and ``acceptance.json``. The acceptance report
-checks settled formation and reference runs, finite histories, initially
-horizon-free data, horizon formation before the ceiling, six-cell medium-grid
-horizon resolution, decreasing medium-to-high exterior errors, and the five
-percent high-resolution remnant-mass agreement.
+This writes PNG/PDF profiles and error norms over a fixed coordinate interval,
+from two formation-grid spacings to 65% of the common radial extent. These are
+profile errors, without an inferred exterior boundary or settling test.
 
 The electromagnetic family, conformal scaling, energy density, and
 Hamiltonian equation are equations (4)--(6) of Baumgarte, Gundlach, and
 Hilditch, `Critical phenomena in the gravitational collapse of
 electromagnetic waves <https://arxiv.org/abs/1909.00850>`_. Multiplying their
 axisymmetric flat Laplacian by ``rho`` gives the conservative cylindrical form
-used here. The star-shaped ``r=h(angle)`` apparent-horizon construction follows
-the formulations described by Gundlach, `Pseudo-spectral apparent horizon
-finders <https://arxiv.org/abs/gr-qc/9707050>`_, and Thornburg, `A Fast
-Apparent-Horizon Finder for 3-Dimensional Cartesian Grids in Numerical
-Relativity <https://arxiv.org/abs/gr-qc/0306056>`_.
+used here.

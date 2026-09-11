@@ -2,8 +2,8 @@
 
 The default is the off-centered time-symmetric family of Baumgarte,
 Gundlach, and Hilditch.  Its amplitude is a literature-informed
-supercritical candidate.  The evolution diagnoses apparent-horizon formation
-and exterior settling directly.
+supercritical candidate.  The evolution runs to a fixed final time and
+records field snapshots and constraint diagnostics.
 """
 
 import argparse
@@ -15,7 +15,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
-import numpy as np
 from tqdm import tqdm
 
 from JAX_BSSN.bssn.constraints import (
@@ -36,19 +35,10 @@ from JAX_BSSN.cartoon.axisymmetry.reconstruction import (
     _project_vector,
 )
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.diagnostics.apparent_horizon import (
-    find_axisymmetric_apparent_horizon,
-)
-from JAX_BSSN.EM.collapse import (
+from collapse_io import (
     atomic_write_json,
-    compact_lapse_and_W,
-    exterior_electromagnetic_energy,
-    horizon_from_dict,
-    horizon_to_dict,
     load_collapse_checkpoint,
     parameters_to_dict,
-    run_schwarzschild_reference,
-    settling_criteria,
     state_is_finite,
     write_collapse_checkpoint,
 )
@@ -79,10 +69,10 @@ AMPLITUDE = 0.08
 WIDTH = 1.0
 RADIAL_CENTER = 3.0
 DOMAIN_HALF_WIDTH = 24.0
-NUM_RADIAL_POINTS = 192
-NUM_Z_POINTS = 384
+NUM_RADIAL_POINTS = 300
+NUM_Z_POINTS = 600
 CFL = 0.2
-FINAL_TIME = 40.0
+FINAL_TIME = 500.0
 SNAPSHOT_COUNT = 40
 DIAGNOSTIC_INTERVAL = 0.5
 CHECKPOINT_INTERVAL = 1.0
@@ -348,9 +338,8 @@ def run_em_blackhole_formation_first_order(
     restart: str | Path | None = None,
     checkpoint_interval: float = CHECKPOINT_INTERVAL,
     diagnostic_interval: float = DIAGNOSTIC_INTERVAL,
-    run_schwarzschild: bool = True,
 ):
-    """Evolve until exterior settling or the hard final-time ceiling."""
+    """Evolve to the last whole timestep at or before final_time."""
 
     restart_path = Path(restart) if restart is not None else None
     if output_dir is None:
@@ -362,7 +351,6 @@ def run_em_blackhole_formation_first_order(
     output_dir = Path(output_dir)
     residual_path = output_dir / "hamiltonian_residual.txt"
     constraint_path = output_dir / "constraint_norms.txt"
-    horizon_path = output_dir / "horizon_diagnostics.txt"
     checkpoint_path = output_dir / "rolling_checkpoint.npz"
     summary_path = output_dir / "run_summary.json"
 
@@ -382,7 +370,6 @@ def run_em_blackhole_formation_first_order(
         protected_paths = (
             residual_path,
             constraint_path,
-            horizon_path,
             checkpoint_path,
             summary_path,
             output_dir / "EM_blackhole_formation.h5",
@@ -511,99 +498,21 @@ def run_em_blackhole_formation_first_order(
         ghost_cells=0,
     )
     mode = "a" if restart_path is not None else "w"
-    previous_coefficients = runtime_configuration.get("last_horizon_coefficients")
-    if previous_coefficients is not None:
-        previous_coefficients = np.asarray(previous_coefficients)
-    persistence_start_time = runtime_configuration.get(
-        "persistent_horizon_start_time"
-    )
-    horizon_samples = []
-    diagnostic_records = list(previous_summary.get("diagnostics", []))
-    written_steps = set()
-    previously_settled = previous_summary.get("status") == "settled"
-    previous_horizon = horizon_from_dict(previous_summary.get("horizon"))
-    final_horizon = previous_horizon
-    final_criteria = settling_criteria([], 0.0, params)
-    status = "settled" if previously_settled else "incomplete"
+    diagnostic_records = [
+        {name: record[name] for name in ("step", "time", "finite")}
+        for record in previous_summary.get("diagnostics", [])
+        if record["step"] < start_step
+    ]
+    status = "complete"
     final_step = start_step
 
-    def checkpoint_configuration():
-        configuration = requested_configuration.copy()
-        configuration["last_horizon_coefficients"] = (
-            None
-            if previous_coefficients is None
-            else np.asarray(previous_coefficients).tolist()
-        )
-        configuration["persistent_horizon_start_time"] = persistence_start_time
-        return configuration
-
-    def diagnose(step, norm_file, horizon_file, write_fields):
-        nonlocal previous_coefficients
-        nonlocal persistence_start_time
-        nonlocal horizon_samples
-        nonlocal final_horizon
-        nonlocal final_criteria
-
+    def diagnose(step, norm_file, write_fields):
         time = step * float(params.dt)
         finite = state_is_finite(state)
-        horizon = None
-        if finite:
-            horizon = find_axisymmetric_apparent_horizon(
-                state.bssn, params, previous_coefficients
-            )
         rho_em = compute_axisymmetric_em_energy_density(state, params)
-        exterior_energy = np.nan
-        final_horizon = horizon
-        if horizon is None:
-            persistence_start_time = None
-            horizon_samples = []
-            final_criteria = settling_criteria([], 0.0, params)
-        else:
-            previous_coefficients = horizon.coefficients
-            final_horizon = horizon
-            if persistence_start_time is None:
-                persistence_start_time = time
-            exterior_energy = exterior_electromagnetic_energy(
-                rho_em, state.bssn, horizon, params
-            )
-            horizon_samples.append(
-                {
-                    "time": time,
-                    "diagnostic_interval": diagnostic_steps * float(params.dt),
-                    "horizon": horizon,
-                    "exterior_em_energy": exterior_energy,
-                    "fields": compact_lapse_and_W(state.bssn),
-                }
-            )
-            final_criteria = settling_criteria(
-                horizon_samples, persistence_start_time, params
-            )
-            keep_after = time - 6.0 * horizon.irreducible_mass
-            horizon_samples = [
-                sample for sample in horizon_samples if sample["time"] >= keep_after
-            ]
-
-        horizon_values = horizon_to_dict(horizon)
         diagnostic_records.append(
-            {
-                "step": int(step),
-                "time": time,
-                "finite": finite,
-                "horizon": horizon_values,
-                "exterior_em_energy": (
-                    None if not np.isfinite(exterior_energy) else float(exterior_energy)
-                ),
-            }
+            {"step": int(step), "time": time, "finite": finite}
         )
-        if horizon is None:
-            horizon_file.write(f"{step:d} {time:.16e} 0 nan nan nan nan\n")
-        else:
-            horizon_file.write(
-                f"{step:d} {time:.16e} 1 {horizon.irreducible_mass:.16e} "
-                f"{horizon.area:.16e} {horizon.expansion_linf:.16e} "
-                f"{horizon.circumference_ratio:.16e}\n"
-            )
-        horizon_file.flush()
 
         violations = compute_matter_aware_axisymmetric_constraints(state, params)
         norms = compute_axisymmetric_constraint_norms(violations)
@@ -632,33 +541,28 @@ def run_em_blackhole_formation_first_order(
         values = " ".join(f"{float(norms[name]):.16e}" for name in norm_names)
         norm_file.write(f"{step:d} {time:.16e} {values}\n")
         norm_file.flush()
-        if write_fields:
+        if write_fields or not finite:
             writer.write(_output_fields(state, violations, params), step, time)
-            written_steps.add(step)
         return finite
 
-    with writer, constraint_path.open(mode, encoding="utf-8") as norm_file, horizon_path.open(
-        mode, encoding="utf-8"
-    ) as horizon_file:
-        if restart_path is None:
+    constraint_has_header = (
+        constraint_path.exists() and constraint_path.stat().st_size > 0
+    )
+    with writer, constraint_path.open(mode, encoding="utf-8") as norm_file:
+        if not constraint_has_header:
             norm_file.write("# step time " + " ".join(norm_names) + "\n")
-            horizon_file.write(
-                "# step time found irreducible_mass area expansion_linf circumference_ratio\n"
-            )
         for step in progress:
-            diagnostic_due = step == start_step or step % diagnostic_steps == 0
-            snapshot_due = step == start_step or step % snapshot_steps == 0
+            diagnostic_due = (
+                step in (start_step, num_steps) or step % diagnostic_steps == 0
+            )
+            snapshot_due = (
+                step in (start_step, num_steps) or step % snapshot_steps == 0
+            )
             if diagnostic_due or snapshot_due:
-                finite = diagnose(step, norm_file, horizon_file, snapshot_due)
+                finite = diagnose(step, norm_file, snapshot_due)
                 final_step = step
                 if not finite:
                     status = "failed_nonfinite"
-                    break
-                if previously_settled:
-                    status = "settled"
-                    break
-                if final_criteria["settled"]:
-                    status = "settled"
                     break
             if step < num_steps:
                 state = advance(state)
@@ -674,19 +578,8 @@ def run_em_blackhole_formation_first_order(
                         final_step,
                         final_step * float(params.dt),
                         params,
-                        checkpoint_configuration(),
+                        requested_configuration.copy(),
                     )
-
-        if final_step not in written_steps:
-            diagnose(final_step, norm_file, horizon_file, True)
-
-    if previously_settled and status != "failed_nonfinite":
-        status = "settled"
-        final_criteria = previous_summary["settling_criteria"]
-        if final_horizon is None:
-            final_horizon = previous_horizon
-    elif status == "incomplete" and final_criteria["settled"]:
-        status = "settled"
 
     jax.block_until_ready(state)
     write_collapse_checkpoint(
@@ -698,7 +591,7 @@ def run_em_blackhole_formation_first_order(
         final_step,
         final_step * float(params.dt),
         params,
-        checkpoint_configuration(),
+        requested_configuration.copy(),
     )
     output_segments = list(previous_summary.get("output_segments", []))
     output_segments.append(str(openpmd_path))
@@ -711,40 +604,11 @@ def run_em_blackhole_formation_first_order(
         "configuration": requested_configuration,
         "parameters": parameters_to_dict(params),
         "initial_hamiltonian_residual_history": residual_history,
-        "horizon": horizon_to_dict(final_horizon),
-        "settling_criteria": final_criteria,
         "diagnostics": diagnostic_records,
         "checkpoint_path": str(checkpoint_path),
         "output_segments": output_segments,
-        "schwarzschild_reference": None,
     }
     atomic_write_json(summary_path, summary)
-
-    if status == "settled" and run_schwarzschild and final_horizon is not None:
-        reference_dir = output_dir / "schwarzschild_reference"
-        reference_summary_path = reference_dir / "run_summary.json"
-        if reference_summary_path.exists():
-            import json
-
-            with reference_summary_path.open("r", encoding="utf-8") as reference_file:
-                reference_summary = json.load(reference_file)
-        if (
-            not reference_summary_path.exists()
-            or reference_summary.get("status") != "settled"
-        ):
-            reference_summary = run_schwarzschild_reference(
-                final_horizon.irreducible_mass,
-                params,
-                num_radial_points,
-                num_z_points,
-                final_time,
-                reference_dir,
-                diagnostic_interval=diagnostic_interval,
-                snapshot_interval=max(final_time / max(snapshot_count, 1), float(params.dt)),
-                show_progress=show_progress,
-            )
-        summary["schwarzschild_reference"] = reference_summary
-        atomic_write_json(summary_path, summary)
 
     return state, u, residual_history
 
@@ -772,7 +636,6 @@ def parse_args():
     parser.add_argument(
         "--diagnostic-interval", type=float, default=DIAGNOSTIC_INTERVAL
     )
-    parser.add_argument("--no-schwarzschild-reference", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     return parser.parse_args()
 
@@ -796,5 +659,4 @@ if __name__ == "__main__":
         restart=args.restart,
         checkpoint_interval=args.checkpoint_interval,
         diagnostic_interval=args.diagnostic_interval,
-        run_schwarzschild=not args.no_schwarzschild_reference,
     )

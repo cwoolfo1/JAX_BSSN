@@ -1,7 +1,4 @@
-import importlib.util
 import json
-from pathlib import Path
-import sys
 
 import jax
 
@@ -10,40 +7,15 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import openpmd_api as io
 
 from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
 from JAX_BSSN.EM.second_order.variables import EMVariables
-
-
-ROOT = Path(__file__).resolve().parents[2]
+from tests.EM.demo_helpers import load_em_demo_module
 
 
 def _load_demo(formulation):
-    demo_dir = ROOT / "demos" / f"EM_blackhole_formation_{formulation}"
-
-    initial_data_spec = importlib.util.spec_from_file_location(
-        "initial_data", demo_dir / "initial_data.py"
-    )
-    initial_data = importlib.util.module_from_spec(initial_data_spec)
-    initial_data_spec.loader.exec_module(initial_data)
-
-    module_name = f"em_blackhole_formation_{formulation}"
-    demo_spec = importlib.util.spec_from_file_location(
-        module_name, demo_dir / f"EM_blackhole_formation_{formulation}.py"
-    )
-    demo = importlib.util.module_from_spec(demo_spec)
-
-    previous_initial_data = sys.modules.get("initial_data")
-    sys.modules["initial_data"] = initial_data
-    try:
-        demo_spec.loader.exec_module(demo)
-    finally:
-        if previous_initial_data is None:
-            del sys.modules["initial_data"]
-        else:
-            sys.modules["initial_data"] = previous_initial_data
-
-    return demo
+    return load_em_demo_module(formulation, f"EM_blackhole_formation_{formulation}")
 
 
 @pytest.fixture(scope="module", params=("first_order", "second_order"))
@@ -145,30 +117,8 @@ def test_formation_step_evolves_gamma_driver_shift(initialized_demo):
     assert float(shift_change) > 0.0
 
 
-def test_restart_preserves_an_already_settled_formation(
-    initialized_demo, tmp_path
-):
+def _restart_fixture(initialized_demo, tmp_path, step=0):
     formulation, demo, params, state, u, residual_history = initialized_demo
-    checkpoint_path = tmp_path / "rolling_checkpoint.npz"
-    horizon = {
-        "coefficients": [0.5, 0.0, 0.0, 0.0],
-        "expansion_l2": 0.0,
-        "expansion_linf": 0.0,
-        "area": 16.0 * np.pi,
-        "irreducible_mass": 1.0,
-        "circumference_ratio": 1.0,
-        "polar_radius": 0.5,
-        "equatorial_radius": 0.5,
-    }
-    settling = {
-        "persistent_horizon": True,
-        "mass_fractional_range": 0.0,
-        "maximum_circumference_distortion": 0.0,
-        "maximum_exterior_em_energy_fraction": 0.0,
-        "lapse_relative_l2_change": 0.0,
-        "W_relative_l2_change": 0.0,
-        "settled": True,
-    }
     configuration = {
         "amplitude": 0.005,
         "width": 0.75,
@@ -179,44 +129,105 @@ def test_restart_preserves_an_already_settled_formation(
         "cfl": float(params.dt / params.dx),
         "diagnostic_interval": 0.5,
         "checkpoint_interval": 1.0,
-        "last_horizon_coefficients": horizon["coefficients"],
+        "last_horizon_coefficients": [0.5, 0.0, 0.0, 0.0],
         "persistent_horizon_start_time": 0.0,
     }
+    checkpoint = tmp_path / "rolling_checkpoint.npz"
     demo.write_collapse_checkpoint(
-        checkpoint_path,
-        state,
-        u,
-        residual_history,
-        formulation,
-        0,
-        0.0,
-        params,
-        configuration,
+        checkpoint, state, u, residual_history, formulation,
+        step, step * float(params.dt), params, configuration,
     )
-    (tmp_path / "run_summary.json").write_text(
-        json.dumps(
-            {
-                "status": "settled",
-                "horizon": horizon,
-                "settling_criteria": settling,
-                "diagnostics": [],
-                "output_segments": [],
-            }
-        ),
-        encoding="utf-8",
-    )
+    return checkpoint
 
+
+def _assert_final_output(demo, directory, expected_step, expected_time, status):
+    summary = json.loads((directory / "run_summary.json").read_text())
+    assert summary["status"] == status
+    assert summary["final_step"] == expected_step
+    assert summary["final_time"] == pytest.approx(expected_time)
+    assert summary["diagnostics"][-1]["finite"] == (status == "complete")
+    assert "horizon" not in json.dumps(summary)
+    assert "settling" not in json.dumps(summary)
+    assert "schwarzschild_reference" not in summary
+    assert not (directory / "horizon_diagnostics.txt").exists()
+    assert not (directory / "schwarzschild_reference").exists()
+    _, _, _, metadata = demo.load_collapse_checkpoint(directory / "rolling_checkpoint.npz")
+    assert metadata["step"] == expected_step
+    assert metadata["time"] == pytest.approx(expected_time)
+    assert "horizon" not in json.dumps(metadata)
+    series = io.Series(summary["output_segments"][-1], io.Access.read_only)
+    try:
+        assert max(series.iterations) == expected_step
+        assert series.iterations[expected_step].time == pytest.approx(expected_time)
+    finally:
+        series.close()
+    return summary
+
+
+def test_legacy_settled_restart_advances_to_fixed_time(initialized_demo, tmp_path):
+    formulation, demo, params, state, _, _ = initialized_demo
+    checkpoint = _restart_fixture(initialized_demo, tmp_path, step=1)
+    (tmp_path / "run_summary.json").write_text(json.dumps({
+        "status": "settled", "horizon": {"irreducible_mass": 1.0},
+        "settling_criteria": {"settled": True},
+        "diagnostics": [{"step": 0, "time": 0.0, "finite": True,
+                         "horizon": {}, "exterior_em_energy": 0.1}],
+        "output_segments": ["previous.h5"],
+    }))
+    dt = float(params.dt)
     run = getattr(demo, f"run_em_blackhole_formation_{formulation}")
-    run(
-        output_dir=tmp_path,
-        restart=checkpoint_path,
-        final_time=0.0,
-        snapshot_count=1,
-        show_progress=False,
-        run_schwarzschild=False,
+    final, _, _ = run(
+        restart=checkpoint, output_dir=tmp_path, final_time=2.5 * dt,
+        snapshot_count=1, diagnostic_interval=10 * dt,
+        checkpoint_interval=dt, show_progress=False,
     )
-    summary = json.loads((tmp_path / "run_summary.json").read_text())
+    summary = _assert_final_output(demo, tmp_path, 2, 2 * dt, "complete")
+    assert summary["final_time_ceiling"] == pytest.approx(2.5 * dt)
+    assert summary["output_segments"][0] == "previous.h5"
+    assert summary["diagnostics"][0] == {"step": 0, "time": 0.0, "finite": True}
+    assert not np.array_equal(np.asarray(final.bssn.lapse), np.asarray(state.bssn.lapse))
 
-    assert summary["status"] == "settled"
-    assert summary["settling_criteria"]["settled"]
-    assert summary["horizon"]["irreducible_mass"] == 1.0
+
+def test_new_run_completes_and_preserves_outputs(initialized_demo, tmp_path):
+    formulation, demo, _, _, _, _ = initialized_demo
+    assert demo.FINAL_TIME == (500.0 if formulation == "first_order" else 40.0)
+    run = getattr(demo, f"run_em_blackhole_formation_{formulation}")
+    options = dict(
+        amplitude=0.005, width=0.75, radial_center=1.0,
+        domain_half_width=3.0, num_radial_points=6, num_z_points=12,
+        final_time=0.0, output_dir=tmp_path, snapshot_count=1, show_progress=False,
+    )
+    run(**options)
+    _assert_final_output(demo, tmp_path, 0, 0.0, "complete")
+    with pytest.raises(FileExistsError):
+        run(**options)
+
+
+@pytest.mark.parametrize("diagnostic_step", [1, 4])
+def test_nonfinite_failure_including_final_step(
+    initialized_demo, tmp_path, monkeypatch, diagnostic_step
+):
+    formulation, demo, params, _, _, _ = initialized_demo
+    checkpoint = _restart_fixture(initialized_demo, tmp_path)
+
+    def invalid_step(current, params):
+        return current._replace(bssn=current.bssn._replace(
+            lapse=jnp.full_like(current.bssn.lapse, jnp.nan)
+        ))
+
+    step_name = (
+        "axisymmetric_first_order_einstein_maxwell_step"
+        if formulation == "first_order"
+        else "axisymmetric_einstein_maxwell_rk4_step"
+    )
+    monkeypatch.setattr(demo, step_name, invalid_step)
+    dt = float(params.dt)
+    run = getattr(demo, f"run_em_blackhole_formation_{formulation}")
+    run(restart=checkpoint, output_dir=tmp_path, final_time=2 * dt,
+        snapshot_count=1, diagnostic_interval=diagnostic_step * dt,
+        show_progress=False)
+    final_step = 1 if diagnostic_step == 1 else 2
+    summary = _assert_final_output(
+        demo, tmp_path, final_step, final_step * dt, "failed_nonfinite"
+    )
+    assert [row["step"] for row in summary["diagnostics"]] == [0, final_step]

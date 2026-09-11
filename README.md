@@ -94,43 +94,56 @@ Each demo owns an identical local copy of the physical initial-data routines
 and writes to an `output/` directory beside its script by default. The
 first-order openPMD output contains physical `D` and `B`; the second-order
 output contains `E` and `B`. The default amplitude remains a
-literature-informed candidate until the medium/high campaign is completed.
+literature-informed candidate.
 
 The initial-data phase solves the rho-weighted Hamiltonian constraint directly
 on the positive-rho, full-z Cartoon plane. It uses a conservative radial flux,
 regular zero flux at the axis, and fixed `u=0` outer-rho and outer-z rows. Both
 demos evolve the Gamma-driver shift, write rolling restart checkpoints, and
-test a converged even-Legendre apparent horizon for persistence and exterior
-settling. Existing campaign files are never overwritten; choose a fresh
-`--output-dir` or continue `--restart path/to/rolling_checkpoint.npz`.
+record constraint diagnostics and field snapshots. The first-order default
+end time is 500 simulation units; the second-order default remains 40. Override
+either with `--final-time`. Evolution stops at the last whole timestep at or
+before that time, or reports `failed_nonfinite` if the state becomes nonfinite.
+A `complete` run has reached its requested step count; this does not certify
+black-hole formation or physical settling.
 
-After a settled formation run, the demo evolves a mass-matched Schwarzschild
-puncture with the same gauge and grid. Compare the final lapse and conformal
-factor with:
+Existing run files are never overwritten by a fresh run; choose a fresh
+`--output-dir` or continue `--restart path/to/rolling_checkpoint.npz`. Older
+checkpoints remain readable, including runs previously marked `settled`.
+
+Run a separate Schwarzschild comparison with an explicitly chosen positive
+mass (1.0 is an example, not a measured remnant mass). It uses the first-order
+checkpoint's grid, gauge, and elapsed time, and writes 16 BSSN comparison plots:
+
+```bash
+python demos/EM_blackhole_formation_first_order/compare_schwarzschild.py \
+  --input-dir path/to/collapse --mass 1.0 \
+  --output-dir path/to/new_comparison
+```
+
+Regenerate those plots with `--plot-only --input-dir path/to/collapse
+--output-dir path/to/new_comparison`; the saved reference supplies the mass.
+For a separately evolved openPMD reference, compare lapse and conformal factor:
 
 ```bash
 python demos/plot_em_blackhole_schwarzschild.py \
-  --formation path/to/collapse_high \
-  --reference path/to/collapse_high/schwarzschild_reference \
-  --metadata path/to/collapse_high/run_summary.json \
-  --output path/to/collapse_high/schwarzschild_comparison.png
+  --formation path/to/collapse \
+  --reference path/to/reference --mass 1.0 \
+  --output path/to/comparison.png
 ```
+
+Each formation folder contains its own `collapse_io.py` for checkpoints and
+summaries, alongside its local initial-data helpers. The first-order folder
+also contains `schwarzschild_reference.py`; its `run_schwarzschild_reference`
+helper accepts an explicit mass, grid parameters, and final time, and retains
+restart support. These workflows live entirely in the demos and are not part
+of the installed production package.
+Profile error norms use a fixed interval from two formation-grid spacings to
+65% of the common radial extent. They do not identify a black-hole exterior.
+Coordinate profiles depend on gauge history even with matching gauge settings.
 
 The default production runs compile substantial JAX kernels. The
-[demo guide](docs/demos.rst) includes smaller smoke configurations.
-
-Once all four medium/high runs and their automatic Schwarzschild controls are
-settled, generate every overlay, the CSV/Markdown summary table, and the
-machine-readable acceptance report together:
-
-```bash
-python demos/plot_em_blackhole_campaign.py \
-  --first-medium path/to/first_order/collapse_medium \
-  --first-high path/to/first_order/collapse_high \
-  --second-medium path/to/second_order/collapse_medium \
-  --second-high path/to/second_order/collapse_high \
-  --output-dir path/to/campaign_plots
-```
+[demo guide](docs/demos.rst) describes the evolution and comparison options.
 
 ## Package structure
 
