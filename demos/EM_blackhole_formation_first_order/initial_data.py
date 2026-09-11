@@ -10,7 +10,7 @@ def off_centered_toroidal_electric_seed(
     grid: jnp.ndarray,
     amplitude: float = 0.08,
     width: float = 1.0,
-    radial_center: float = 3.0,
+    radial_center: float = 1.0,
 ) -> jnp.ndarray:
     """Return the conformal electric vector for the BGH dipole family.
 

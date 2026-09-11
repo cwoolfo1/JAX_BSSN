@@ -159,8 +159,19 @@ The first-order demo evolves staggered densitized displacement and magnetic
 fields with the doubled-leapfrog Yee solver and writes physical ``D`` and
 ``B`` records. The second-order demo evolves cell-centered field and projected
 field-derivative variables with RK4 and writes ``E`` and ``B`` records. Each
-directory contains its own identical ``initial_data.py`` and writes to its own
+directory contains its own ``initial_data.py`` and writes to its own
 local ``output/`` directory unless ``--output-dir`` is supplied.
+
+The first-order default has pulse-center parameter ``r0=1``, width 1, and
+amplitude 0.08; black-hole formation at these settings is unverified. Its
+150-by-150 grid covers ``0 <= rho <= 12`` and ``-6 <= z <= 6`` at cell edges,
+with common spacing 0.08 and timestep 0.016. Radial cell centers range from
+0.04 to 11.96 and z centers from -5.96 to 5.96. ``--domain-half-width`` sets
+the positive-rho extent, while ``--num-z`` sets the full z length in units of
+that spacing. Equal radial and z point counts therefore cover half as far
+along positive z as along rho; doubling ``--num-z`` restores equal reach
+without changing spacing. The second-order default retains ``r0=3`` and
+its existing grid configuration.
 
 The Gamma-driver shift is active. The demos record constraint norms and field
 snapshots and evolve for a fixed duration: 500 simulation units by default for
@@ -169,15 +180,20 @@ overrides the duration. The final step is the last whole timestep at or before
 that time. A finite run reports ``complete``; a nonfinite state reports
 ``failed_nonfinite``. Completion alone does not establish physical settling.
 
-The rolling ``rolling_checkpoint.npz`` contains the complete native Maxwell
-and BSSN state. Continue it with ``--restart``. Legacy checkpoints and runs
-previously marked ``settled`` continue toward the requested end time.
-Use a fresh output directory for a new run:
+The first-order demo always starts fresh. It writes the complete native
+Maxwell and BSSN state once, to ``final_checkpoint.npz``, on completion or
+detected nonfinite termination. It has no restart or periodic-checkpoint
+options, so interrupted runs cannot be resumed through this driver. Field
+snapshots and constraint diagnostics retain their independent cadences.
+
+The second-order demo retains ``rolling_checkpoint.npz`` and ``--restart``.
+Its legacy checkpoints and runs previously marked ``settled`` continue
+toward the requested end time. Use a fresh output directory for a new run:
 
 .. code-block:: bash
 
    python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py \
-       --amplitude 0.08 --domain-half-width 24 --num-rho 192 --num-z 384 \
+       --amplitude 0.08 --radial-center 1 --domain-half-width 12 --num-rho 150 --num-z 150 \
        --final-time 500 --output-dir path/to/collapse
 
 Run the optional vacuum comparison separately, supplying a finite, positive
@@ -195,6 +211,12 @@ This writes the final reference state and 16 BSSN comparison figures. Regenerate
 figures using ``--plot-only`` with the same input and output directories; the
 mass is read from the saved reference. Matching gauge parameters does not
 imply matching gauge histories.
+
+The comparison reads the checkpoint named in ``run_summary.json`` beside
+that summary, so copied runs remain usable. Legacy summaries without a
+checkpoint path use ``rolling_checkpoint.npz``. Moving the pulse and outer
+boundaries changes the initial data and evolution; long-time accuracy and
+black-hole formation require separate checks.
 
 Each formation folder is self-contained, with its own ``collapse_io.py`` for
 checkpoint and summary handling. The first-order folder also contains

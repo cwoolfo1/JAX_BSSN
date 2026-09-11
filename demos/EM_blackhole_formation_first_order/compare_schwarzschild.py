@@ -186,9 +186,14 @@ def main():
             parser.error(str(error))
 
     input_dir = args.input_dir.resolve()
-    em, checkpoint = load_bssn(input_dir / "rolling_checkpoint.npz")
     with (input_dir / "run_summary.json").open(encoding="utf-8") as stream:
         summary = json.load(stream)
+    # Use the file beside the summary even when a copied run records an old
+    # absolute path. Older summaries may omit the checkpoint path entirely.
+    checkpoint_path = input_dir / Path(
+        summary.get("checkpoint_path", "rolling_checkpoint.npz")
+    ).name
+    em, checkpoint = load_bssn(checkpoint_path)
     params = BSSNParameters(**checkpoint["parameters"])
     config = {
         name: checkpoint["configuration"][name]
@@ -237,7 +242,7 @@ def main():
         metadata = {
             "mass": mass,
             "mass_source": "user_specified",
-            "em_checkpoint": str(input_dir / "rolling_checkpoint.npz"),
+            "em_checkpoint": str(checkpoint_path),
             "em_time": checkpoint["time"], "em_step": checkpoint["step"],
             "reference_time": checkpoint["time"], "reference_step": checkpoint["step"],
             "parameters": checkpoint["parameters"],

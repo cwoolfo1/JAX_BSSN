@@ -1,9 +1,9 @@
 """Evolve electromagnetic dipole data with the first-order Yee solver.
 
-The default is the off-centered time-symmetric family of Baumgarte,
-Gundlach, and Hilditch.  Its amplitude is a literature-informed
-supercritical candidate.  The evolution runs to a fixed final time and
-records field snapshots and constraint diagnostics.
+The default uses the time-symmetric family of Baumgarte, Gundlach, and
+Hilditch with pulse-center parameter r0=1.  Black-hole formation at this
+amplitude is unverified.  Each fresh run records field snapshots and
+constraint diagnostics to a fixed final time, then saves its final state.
 """
 
 import argparse
@@ -37,7 +37,6 @@ from JAX_BSSN.cartoon.axisymmetry.reconstruction import (
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
 from collapse_io import (
     atomic_write_json,
-    load_collapse_checkpoint,
     parameters_to_dict,
     state_is_finite,
     write_collapse_checkpoint,
@@ -67,15 +66,14 @@ from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 
 AMPLITUDE = 0.08
 WIDTH = 1.0
-RADIAL_CENTER = 3.0
-DOMAIN_HALF_WIDTH = 24.0
-NUM_RADIAL_POINTS = 300
-NUM_Z_POINTS = 600
+RADIAL_CENTER = 1.0
+DOMAIN_HALF_WIDTH = 12.0
+NUM_RADIAL_POINTS = 150
+NUM_Z_POINTS = 150
 CFL = 0.2
 FINAL_TIME = 500.0
 SNAPSHOT_COUNT = 40
 DIAGNOSTIC_INTERVAL = 0.5
-CHECKPOINT_INTERVAL = 1.0
 
 NEWTON_TOLERANCE = 1.0e-10
 MAX_NEWTON_ITERATIONS = 12
@@ -88,20 +86,27 @@ NU = 0.02
 GAMMA_DRIVER = 0.75
 
 
+def _grid_spacing(num_radial_points, num_z_points, domain_half_width):
+    """Validate the cell counts and return the common rho/z spacing."""
+
+    if num_radial_points < 6:
+        raise ValueError("num_radial_points must be at least six")
+    if num_z_points < 10 or num_z_points % 2:
+        raise ValueError("num_z_points must be even and at least ten")
+    if not math.isfinite(domain_half_width) or domain_half_width <= 0:
+        raise ValueError("domain_half_width must be finite and positive")
+    return domain_half_width / num_radial_points
+
+
 def axisymmetric_parameters(
     num_radial_points: int,
     num_z_points: int,
     domain_half_width: float,
     dt: float,
 ) -> BSSNParameters:
-    """Return the compact Cartoon parameters used by the formation demo."""
+    """Use rho extent domain_half_width and z half-extent num_z_points*dx/2."""
 
-    dx = domain_half_width / num_radial_points
-    dz = 2.0 * domain_half_width / num_z_points
-    if not jnp.isclose(dx, dz):
-        raise ValueError("axisymmetric Cartoon requires equal rho and z spacing")
-    if num_z_points % 2:
-        raise ValueError("num_z_points must be even")
+    dx = _grid_spacing(num_radial_points, num_z_points, domain_half_width)
 
     z_min = -(num_z_points - 1) * dx / 2.0
     return BSSNParameters(
@@ -335,26 +340,42 @@ def run_em_blackhole_formation_first_order(
     cg_tolerance: float = CG_TOLERANCE,
     max_cg_iterations: int = MAX_CG_ITERATIONS,
     show_progress: bool = True,
-    restart: str | Path | None = None,
-    checkpoint_interval: float = CHECKPOINT_INTERVAL,
     diagnostic_interval: float = DIAGNOSTIC_INTERVAL,
 ):
-    """Evolve to the last whole timestep at or before final_time."""
+    """Start fresh and evolve to the last whole step at or before final_time."""
 
-    restart_path = Path(restart) if restart is not None else None
-    if output_dir is None:
-        output_dir = (
-            restart_path.parent
-            if restart_path is not None
-            else Path(__file__).resolve().parent / "output"
-        )
-    output_dir = Path(output_dir)
+    dx = _grid_spacing(num_radial_points, num_z_points, domain_half_width)
+    if not math.isfinite(cfl) or cfl <= 0:
+        raise ValueError("cfl must be finite and positive")
+    if not math.isfinite(final_time) or final_time < 0:
+        raise ValueError("final_time must be finite and nonnegative")
+    if not math.isfinite(diagnostic_interval) or diagnostic_interval <= 0:
+        raise ValueError("diagnostic_interval must be finite and positive")
+    dt = cfl * dx
+    params = axisymmetric_parameters(
+        num_radial_points, num_z_points, domain_half_width, dt
+    )
+    num_steps = int(math.floor(final_time / dt + 1.0e-12))
+
+    output_dir = (
+        Path(output_dir) if output_dir is not None
+        else Path(__file__).resolve().parent / "output"
+    )
     residual_path = output_dir / "hamiltonian_residual.txt"
     constraint_path = output_dir / "constraint_norms.txt"
-    checkpoint_path = output_dir / "rolling_checkpoint.npz"
+    checkpoint_path = output_dir / "final_checkpoint.npz"
     summary_path = output_dir / "run_summary.json"
+    openpmd_path = output_dir / "EM_blackhole_formation.h5"
+    protected_paths = (
+        residual_path, constraint_path, checkpoint_path, summary_path,
+        openpmd_path, output_dir / "rolling_checkpoint.npz",
+    )
+    if any(path.exists() for path in protected_paths):
+        raise FileExistsError(
+            f"refusing to overwrite an existing collapse run in {output_dir}"
+        )
 
-    requested_configuration = {
+    configuration = {
         "amplitude": float(amplitude),
         "width": float(width),
         "radial_center": float(radial_center),
@@ -363,94 +384,29 @@ def run_em_blackhole_formation_first_order(
         "num_z_points": int(num_z_points),
         "cfl": float(cfl),
         "diagnostic_interval": float(diagnostic_interval),
-        "checkpoint_interval": float(checkpoint_interval),
     }
-    previous_summary = {}
-    if restart_path is None:
-        protected_paths = (
-            residual_path,
-            constraint_path,
-            checkpoint_path,
-            summary_path,
-            output_dir / "EM_blackhole_formation.h5",
-        )
-        if any(path.exists() for path in protected_paths):
-            raise FileExistsError(
-                f"refusing to overwrite an existing collapse campaign in {output_dir}"
-            )
-        output_dir.mkdir(parents=True, exist_ok=True)
-        dx = domain_half_width / num_radial_points
-        dt = cfl * dx
-        params = axisymmetric_parameters(
-            num_radial_points, num_z_points, domain_half_width, dt
-        )
-        state, u, residual_history = constrained_einstein_maxwell_data(
-            amplitude,
-            width,
-            radial_center,
-            num_radial_points,
-            num_z_points,
-            dx,
-            params,
-            newton_tolerance=newton_tolerance,
-            max_newton_iterations=max_newton_iterations,
-            cg_tolerance=cg_tolerance,
-            max_cg_iterations=max_cg_iterations,
-            verbose=show_progress,
-        )
-        start_step = 0
-        runtime_configuration = requested_configuration.copy()
-        with residual_path.open("w", encoding="utf-8") as residual_file:
-            residual_file.write("# iteration interior_residual_rms\n")
-            for iteration, residual in enumerate(residual_history):
-                residual_file.write(f"{iteration:d} {residual:.16e}\n")
-    else:
-        state, u, residual_history, checkpoint_metadata = load_collapse_checkpoint(
-            restart_path, "first_order"
-        )
-        runtime_configuration = checkpoint_metadata["configuration"]
-        for name in (
-            "amplitude",
-            "width",
-            "radial_center",
-            "domain_half_width",
-            "num_radial_points",
-            "num_z_points",
-            "cfl",
-        ):
-            requested_configuration[name] = runtime_configuration[name]
-        num_radial_points = int(runtime_configuration["num_radial_points"])
-        num_z_points = int(runtime_configuration["num_z_points"])
-        params = BSSNParameters(**checkpoint_metadata["parameters"])
-        start_step = int(checkpoint_metadata["step"])
-        dx = float(params.dx)
-        if summary_path.exists():
-            import json
-
-            with summary_path.open("r", encoding="utf-8") as summary_file:
-                previous_summary = json.load(summary_file)
+    state, u, residual_history = constrained_einstein_maxwell_data(
+        amplitude,
+        width,
+        radial_center,
+        num_radial_points,
+        num_z_points,
+        dx,
+        params,
+        newton_tolerance=newton_tolerance,
+        max_newton_iterations=max_newton_iterations,
+        cg_tolerance=cg_tolerance,
+        max_cg_iterations=max_cg_iterations,
+        verbose=show_progress,
+    )
 
     validate_axisymmetric_grid(state.bssn, params)
     jax.block_until_ready(state)
-    dt = float(params.dt)
-    num_steps = int(math.floor(final_time / float(params.dt) + 1.0e-12))
-    if start_step > num_steps:
-        raise ValueError("restart checkpoint is later than the final-time ceiling")
-
-    if restart_path is None:
-        openpmd_path = output_dir / "EM_blackhole_formation.h5"
-    else:
-        segment = 0
-        openpmd_path = output_dir / (
-            f"EM_blackhole_formation_restart_{start_step:08d}_{segment:02d}.h5"
-        )
-        while openpmd_path.exists():
-            segment += 1
-            openpmd_path = output_dir / (
-                f"EM_blackhole_formation_restart_{start_step:08d}_{segment:02d}.h5"
-            )
-    if openpmd_path.exists():
-        raise FileExistsError(f"refusing to overwrite {openpmd_path}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with residual_path.open("w", encoding="utf-8") as residual_file:
+        residual_file.write("# iteration interior_residual_rms\n")
+        for iteration, residual in enumerate(residual_history):
+            residual_file.write(f"{iteration:d} {residual:.16e}\n")
 
     norm_names = (
         "hamiltonian_l2",
@@ -472,15 +428,14 @@ def run_em_blackhole_formation_first_order(
         "min_W",
     )
     snapshot_steps = max(1, math.ceil(max(num_steps, 1) / max(snapshot_count, 1)))
-    diagnostic_steps = max(1, int(round(diagnostic_interval / float(params.dt))))
-    checkpoint_steps = max(1, int(round(checkpoint_interval / float(params.dt))))
+    diagnostic_steps = max(1, int(round(diagnostic_interval / dt)))
     advance = jax.jit(
         lambda current: axisymmetric_first_order_einstein_maxwell_step(
             current, params
         )
     )
     progress = tqdm(
-        range(start_step, num_steps + 1),
+        range(num_steps + 1),
         disable=not show_progress,
         desc="First-order Einstein-Maxwell",
     )
@@ -497,17 +452,12 @@ def run_em_blackhole_formation_first_order(
         dt=dt,
         ghost_cells=0,
     )
-    mode = "a" if restart_path is not None else "w"
-    diagnostic_records = [
-        {name: record[name] for name in ("step", "time", "finite")}
-        for record in previous_summary.get("diagnostics", [])
-        if record["step"] < start_step
-    ]
+    diagnostic_records = []
     status = "complete"
-    final_step = start_step
+    final_step = 0
 
     def diagnose(step, norm_file, write_fields):
-        time = step * float(params.dt)
+        time = step * dt
         finite = state_is_finite(state)
         rho_em = compute_axisymmetric_em_energy_density(state, params)
         diagnostic_records.append(
@@ -545,18 +495,14 @@ def run_em_blackhole_formation_first_order(
             writer.write(_output_fields(state, violations, params), step, time)
         return finite
 
-    constraint_has_header = (
-        constraint_path.exists() and constraint_path.stat().st_size > 0
-    )
-    with writer, constraint_path.open(mode, encoding="utf-8") as norm_file:
-        if not constraint_has_header:
-            norm_file.write("# step time " + " ".join(norm_names) + "\n")
+    with writer, constraint_path.open("w", encoding="utf-8") as norm_file:
+        norm_file.write("# step time " + " ".join(norm_names) + "\n")
         for step in progress:
             diagnostic_due = (
-                step in (start_step, num_steps) or step % diagnostic_steps == 0
+                step in (0, num_steps) or step % diagnostic_steps == 0
             )
             snapshot_due = (
-                step in (start_step, num_steps) or step % snapshot_steps == 0
+                step in (0, num_steps) or step % snapshot_steps == 0
             )
             if diagnostic_due or snapshot_due:
                 finite = diagnose(step, norm_file, snapshot_due)
@@ -567,19 +513,6 @@ def run_em_blackhole_formation_first_order(
             if step < num_steps:
                 state = advance(state)
                 final_step = step + 1
-                if final_step % checkpoint_steps == 0:
-                    jax.block_until_ready(state)
-                    write_collapse_checkpoint(
-                        checkpoint_path,
-                        state,
-                        u,
-                        residual_history,
-                        "first_order",
-                        final_step,
-                        final_step * float(params.dt),
-                        params,
-                        requested_configuration.copy(),
-                    )
 
     jax.block_until_ready(state)
     write_collapse_checkpoint(
@@ -589,24 +522,22 @@ def run_em_blackhole_formation_first_order(
         residual_history,
         "first_order",
         final_step,
-        final_step * float(params.dt),
+        final_step * dt,
         params,
-        requested_configuration.copy(),
+        configuration,
     )
-    output_segments = list(previous_summary.get("output_segments", []))
-    output_segments.append(str(openpmd_path))
     summary = {
         "formulation": "first_order",
         "status": status,
         "final_step": int(final_step),
-        "final_time": float(final_step * float(params.dt)),
+        "final_time": float(final_step * dt),
         "final_time_ceiling": float(final_time),
-        "configuration": requested_configuration,
+        "configuration": configuration,
         "parameters": parameters_to_dict(params),
         "initial_hamiltonian_residual_history": residual_history,
         "diagnostics": diagnostic_records,
         "checkpoint_path": str(checkpoint_path),
-        "output_segments": output_segments,
+        "output_segments": [str(openpmd_path)],
     }
     atomic_write_json(summary_path, summary)
 
@@ -614,25 +545,33 @@ def run_em_blackhole_formation_first_order(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument("--amplitude", type=float, default=AMPLITUDE)
     parser.add_argument("--width", type=float, default=WIDTH)
-    parser.add_argument("--radial-center", type=float, default=RADIAL_CENTER)
     parser.add_argument(
-        "--domain-half-width", type=float, default=DOMAIN_HALF_WIDTH
+        "--radial-center", type=float, default=RADIAL_CENTER,
+        help="pulse-center parameter r0",
     )
-    parser.add_argument("--num-rho", type=int, default=NUM_RADIAL_POINTS)
-    parser.add_argument("--num-z", type=int, default=NUM_Z_POINTS)
+    parser.add_argument(
+        "--domain-half-width", type=float, default=DOMAIN_HALF_WIDTH,
+        help="positive-rho extent (half the signed-x output width)",
+    )
+    parser.add_argument(
+        "--num-rho", type=int, default=NUM_RADIAL_POINTS,
+        help="radial cell count; spacing = domain-half-width / num-rho",
+    )
+    parser.add_argument(
+        "--num-z", type=int, default=NUM_Z_POINTS,
+        help="even z cell count; full z extent = num-z * spacing",
+    )
     parser.add_argument("--cfl", type=float, default=CFL)
     parser.add_argument("--final-time", type=float, default=FINAL_TIME)
     parser.add_argument("--snapshots", type=int, default=SNAPSHOT_COUNT)
     parser.add_argument("--output-dir")
     parser.add_argument("--newton-tolerance", type=float, default=NEWTON_TOLERANCE)
     parser.add_argument("--cg-tolerance", type=float, default=CG_TOLERANCE)
-    parser.add_argument("--restart", type=Path)
-    parser.add_argument(
-        "--checkpoint-interval", type=float, default=CHECKPOINT_INTERVAL
-    )
     parser.add_argument(
         "--diagnostic-interval", type=float, default=DIAGNOSTIC_INTERVAL
     )
@@ -656,7 +595,5 @@ if __name__ == "__main__":
         newton_tolerance=args.newton_tolerance,
         cg_tolerance=args.cg_tolerance,
         show_progress=not args.no_progress,
-        restart=args.restart,
-        checkpoint_interval=args.checkpoint_interval,
         diagnostic_interval=args.diagnostic_interval,
     )
