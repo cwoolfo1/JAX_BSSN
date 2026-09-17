@@ -27,6 +27,18 @@ def parameters_to_dict(params: BSSNParameters):
     return {name: _json_value(value) for name, value in params._asdict().items()}
 
 
+def parameters_from_dict(values):
+    """Restore uniform parameters, rejecting legacy mapped checkpoints."""
+    values = dict(values)
+    for name in ("cartoon_radial_map", "cartoon_axial_map"):
+        if values.pop(name, None) is not None:
+            raise ValueError("Unsupported checkpoint geometry: mapped grids are no longer supported")
+    transverse_spacing = values.pop("cartoon_transverse_spacing", None)
+    if transverse_spacing is not None and transverse_spacing != values.get("dx", BSSNParameters().dx):
+        raise ValueError("Unsupported checkpoint geometry: transverse spacing must equal dx")
+    return BSSNParameters(**values)
+
+
 def atomic_write_json(path, data):
     """Replace a JSON file only after its complete new contents are durable."""
 
@@ -101,6 +113,7 @@ def load_collapse_checkpoint(path, expected_formulation=None):
     path = Path(path)
     with np.load(path, allow_pickle=False) as checkpoint:
         metadata = json.loads(str(checkpoint["metadata_json"]))
+        parameters_from_dict(metadata["parameters"])  # Validate geometry before loading fields.
         formulation = metadata["formulation"]
         if expected_formulation is not None and formulation != expected_formulation:
             raise ValueError(
@@ -136,6 +149,7 @@ def state_is_finite(state):
 
 __all__ = [
     "parameters_to_dict",
+    "parameters_from_dict",
     "atomic_write_json",
     "write_collapse_checkpoint",
     "load_collapse_checkpoint",

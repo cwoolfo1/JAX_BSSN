@@ -1,97 +1,17 @@
-"""Conformally solved Einstein--Maxwell initial data."""
+"""Solve the electromagnetic Hamiltonian constraint for initial BSSN data."""
 
+import math
 import jax
+
+jax.config.update("jax_enable_x64", True)
+
 import jax.numpy as jnp
+
+import simulation_parameters as settings
 from jax.scipy.sparse.linalg import cg
 
-
-@jax.jit
-def off_centered_toroidal_electric_seed(
-    grid: jnp.ndarray,
-    amplitude: float = 0.08,
-    width: float = 1.0,
-    radial_center: float = 1.0,
-) -> jnp.ndarray:
-    """Return the conformal electric vector for the BGH dipole family.
-
-    The literature field is the contravariant spherical-polar component
-
-    ``bar(E_G)^phi = -4 eta G(r) / sigma^2``.
-
-    Baumgarte, Gundlach, and Hilditch use Gaussian electromagnetic units.
-    The wave solver uses Lorentz--Heaviside fields, so the returned field is
-    divided by ``sqrt(4 pi)``.  This preserves the numerical stress-energy
-    and lets ``amplitude`` retain the literature normalization.
-
-    The Cartesian azimuthal basis is ``partial_phi = (-y, x, 0)``.  The
-    returned component-leading array is therefore the conformal
-    contravariant vector ``bar(E)^i`` in Cartesian coordinates.
-    """
-
-    radius = jnp.sqrt(jnp.einsum("...i,...i->...", grid, grid))
-    gaussian = jnp.exp(-((radius - radial_center) / width) ** 2)
-    gaussian = gaussian + jnp.exp(-((radius + radial_center) / width) ** 2)
-
-    electric_phi = (
-        -4.0
-        * amplitude
-        * gaussian
-        / (jnp.sqrt(4.0 * jnp.pi) * width**2)
-    )
-    azimuthal_vector = jnp.stack(
-        (-grid[..., 1], grid[..., 0], jnp.zeros_like(radius)), axis=0
-    )
-
-    return electric_phi[None, ...] * azimuthal_vector
-
-
-@jax.jit
-def contract_conformal_electromagnetic_fields(
-    conformal_electric_field: jnp.ndarray,
-    conformal_magnetic_field: jnp.ndarray,
-) -> jnp.ndarray:
-    """Return ``bar(E)_i bar(E)^i + bar(B)_i bar(B)^i`` for flat data."""
-
-    electric_squared = jnp.einsum(
-        "i...,i...->...", conformal_electric_field, conformal_electric_field
-    )
-    magnetic_squared = jnp.einsum(
-        "i...,i...->...", conformal_magnetic_field, conformal_magnetic_field
-    )
-
-    return electric_squared + magnetic_squared
-
-
-@jax.jit
-def conformal_vector_to_physical_covector(
-    conformal_vector: jnp.ndarray,
-    psi: jnp.ndarray,
-) -> jnp.ndarray:
-    """Convert ``bar(V)^i`` to the stored physical covector ``V_i``.
-
-    For ``gamma_ij = psi^4 delta_ij`` and the Maxwell conformal scaling
-    ``V^i = psi^-6 bar(V)^i``, the physical covector is
-    ``V_i = psi^-2 bar(V)_i``.  Flat conformal raising and lowering leaves
-    the Cartesian component values unchanged.
-    """
-
-    return psi[None, ...] ** -2 * conformal_vector
-
-
-@jax.jit
-def conformal_vector_to_physical_contravariant(
-    conformal_vector: jnp.ndarray,
-    psi: jnp.ndarray,
-) -> jnp.ndarray:
-    """Convert ``bar(V)^i`` to the physical vector ``V^i``.
-
-    The source-free Maxwell conformal scaling is
-    ``V^i = psi^-6 bar(V)^i``.  This form is used to initialize the
-    contravariant displacement and magnetic fields on the first-order Yee
-    grid.
-    """
-
-    return psi[None, ...] ** -6 * conformal_vector
+from JAX_BSSN.bssn.variables import BSSNVariables
+from JAX_BSSN.cartoon.axisymmetry import compact_axisymmetric_state
 
 
 @jax.jit
@@ -121,6 +41,12 @@ def linearized_electromagnetic_hamiltonian_source(
     )
 
 
+def _radial_weights(size, dx, dtype):
+    centers = (jnp.arange(size, dtype=dtype) + 0.5) * dx
+    lower = jnp.arange(size, dtype=dtype) * dx
+    return centers, lower, lower + dx
+
+
 @jax.jit
 def linearized_electromagnetic_hamiltonian_operator(
     delta_u: jnp.ndarray,
@@ -137,9 +63,9 @@ def linearized_electromagnetic_hamiltonian_operator(
     """
 
     num_radial_active = delta_u.shape[0]
-    rho = (jnp.arange(num_radial_active, dtype=delta_u.dtype) + 0.5) * dx
-    rho_minus = jnp.arange(num_radial_active, dtype=delta_u.dtype) * dx
-    rho_plus = rho_minus + dx
+    volume_weight, radial_lower, radial_upper = _radial_weights(
+        num_radial_active, dx, delta_u.dtype
+    )
 
     full_delta_u = jnp.pad(delta_u, ((0, 1), (1, 1)))
     center = full_delta_u[:-1, 1:-1]
@@ -147,13 +73,12 @@ def linearized_electromagnetic_hamiltonian_operator(
     radial_backward = jnp.concatenate((center[:1], center[:-1]), axis=0)
 
     radial_flux_divergence = (
-        rho_plus[:, None] * (radial_forward - center)
-        - rho_minus[:, None] * (center - radial_backward)
+        radial_upper[:, None] * (radial_forward - center)
+        - radial_lower[:, None] * (center - radial_backward)
     ) / dx**2
-    z_flux_divergence = rho[:, None] * (
-        full_delta_u[:-1, 2:]
-        - 2.0 * center
-        + full_delta_u[:-1, :-2]
+    z_flux_divergence = volume_weight[:, None] * (
+        (full_delta_u[:-1, 2:] - center)
+        - (center - full_delta_u[:-1, :-2])
     ) / dx**2
 
     linearized_source = linearized_electromagnetic_hamiltonian_source(
@@ -165,7 +90,7 @@ def linearized_electromagnetic_hamiltonian_operator(
     return (
         radial_flux_divergence
         + z_flux_divergence
-        + rho[:, None] * linearized_source
+        + volume_weight[:, None] * linearized_source
     )
 
 
@@ -190,18 +115,18 @@ def electromagnetic_hamiltonian_residual(
         zero_field,
         dx,
     )
-    rho = (jnp.arange(u_interior.shape[0], dtype=u.dtype) + 0.5) * dx
+    volume_weight, _, _ = _radial_weights(u_interior.shape[0], dx, u.dtype)
 
-    return differential_operator + rho[:, None] * source
+    return differential_operator + volume_weight[:, None] * source
 
 
 def solve_electromagnetic_conformal_factor(
     conformal_field_squared: jnp.ndarray,
     dx: float,
-    newton_tolerance: float = 1.0e-10,
-    max_newton_iterations: int = 12,
-    cg_tolerance: float = 1.0e-10,
-    max_cg_iterations: int = 1000,
+    newton_tolerance: float | None = None,
+    max_newton_iterations: int | None = None,
+    cg_tolerance: float | None = None,
+    max_cg_iterations: int | None = None,
     verbose: bool = False,
 ):
     """Solve the time-symmetric Einstein--Maxwell Hamiltonian constraint.
@@ -228,10 +153,22 @@ def solve_electromagnetic_conformal_factor(
         Interior RMS residual before each correction and after convergence.
     """
 
+    newton_tolerance = (
+        settings.NEWTON_TOLERANCE if newton_tolerance is None else newton_tolerance
+    )
+    max_newton_iterations = (
+        settings.MAX_NEWTON_ITERATIONS
+        if max_newton_iterations is None else max_newton_iterations
+    )
+    cg_tolerance = settings.CG_TOLERANCE if cg_tolerance is None else cg_tolerance
+    max_cg_iterations = (
+        settings.MAX_CG_ITERATIONS if max_cg_iterations is None else max_cg_iterations
+    )
+
     field_squared_interior = conformal_field_squared[:-1, 1:-1]
     u_n = jnp.zeros_like(field_squared_interior)
     residual_history = []
-    rho = (jnp.arange(u_n.shape[0], dtype=u_n.dtype) + 0.5) * dx
+    volume_weight, _, _ = _radial_weights(u_n.shape[0], dx, u_n.dtype)
 
     for iteration in range(max_newton_iterations + 1):
         psi_n = 1.0 + u_n
@@ -245,7 +182,7 @@ def solve_electromagnetic_conformal_factor(
             zero_field,
             dx,
         )
-        residual_n = differential_operator + rho[:, None] * source_n
+        residual_n = differential_operator + volume_weight[:, None] * source_n
 
         residual_rms = float(jnp.sqrt(jnp.mean(residual_n**2)))
         residual_history.append(residual_rms)
@@ -274,6 +211,13 @@ def solve_electromagnetic_conformal_factor(
                 dx,
             )
 
+        _, radial_lower, radial_upper = _radial_weights(u_n.shape[0], dx, u_n.dtype)
+        diagonal = (
+            (radial_lower + radial_upper)[:, None]
+            + 2.0 * volume_weight[:, None]
+        ) / dx**2 + volume_weight[:, None] * (
+            3 * jnp.pi * field_squared_interior * psi_n**-4
+        )
         # -delta(F) is SPD for psi > 0 and non-negative field energy.
         delta_u, _ = cg(
             negative_linearized_operator,
@@ -281,7 +225,12 @@ def solve_electromagnetic_conformal_factor(
             tol=cg_tolerance,
             atol=0.0,
             maxiter=max_cg_iterations,
+            M=lambda value: value / diagonal,
         )
+        linear_residual = negative_linearized_operator(delta_u) - residual_n
+        relative_residual = float(jnp.linalg.norm(linear_residual) / jnp.maximum(jnp.linalg.norm(residual_n), 1e-300))
+        if not math.isfinite(relative_residual) or relative_residual > max(10 * cg_tolerance, 1e-8):
+            raise RuntimeError(f"Hamiltonian CG did not converge: relative residual {relative_residual:.3e}")
         u_n = u_n + delta_u
         jax.block_until_ready(u_n)
 
@@ -291,14 +240,50 @@ def solve_electromagnetic_conformal_factor(
     return psi, u, residual_history
 
 
-__all__ = [
-    "conformal_vector_to_physical_covector",
-    "conformal_vector_to_physical_contravariant",
-    "contract_conformal_electromagnetic_fields",
-    "electromagnetic_hamiltonian_residual",
-    "electromagnetic_hamiltonian_source",
-    "linearized_electromagnetic_hamiltonian_operator",
-    "linearized_electromagnetic_hamiltonian_source",
-    "off_centered_toroidal_electric_seed",
-    "solve_electromagnetic_conformal_factor",
-]
+def _flat_conformal_bssn_plane(psi_plane):
+    """Map a solved conformal factor to time-symmetric BSSN variables."""
+
+    W = psi_plane**-2
+    shape = W.shape
+    conformal_metric = (
+        jnp.eye(3, dtype=W.dtype)[:, :, None, None, None]
+        * jnp.ones((3, 3) + shape, dtype=W.dtype)
+    )
+    return BSSNVariables(
+        conformal_metric=conformal_metric,
+        conformal_factor=W,
+        traceless_K=jnp.zeros_like(conformal_metric),
+        trace_K=jnp.zeros(shape, dtype=W.dtype),
+        conformal_connection=jnp.zeros((3,) + shape, dtype=W.dtype),
+        lapse=W,
+        shift=jnp.zeros((3,) + shape, dtype=W.dtype),
+    )
+
+
+def initial_metric(
+    conformal_field_squared, dx, *, newton_tolerance=None,
+    max_newton_iterations=None, cg_tolerance=None, max_cg_iterations=None,
+    verbose=False,
+):
+    """Return ``(bssn, psi, u, residual_history)`` for positive-rho pulse data.
+
+    ``psi`` and ``u`` have shape (num_rho, num_z); BSSN fields include the
+    four compact radial ghost cells required by the evolution solver.
+    """
+
+    psi, u, residual_history = solve_electromagnetic_conformal_factor(
+        conformal_field_squared, dx,
+        newton_tolerance=newton_tolerance,
+        max_newton_iterations=max_newton_iterations,
+        cg_tolerance=cg_tolerance,
+        max_cg_iterations=max_cg_iterations,
+        verbose=verbose,
+    )
+    psi_plane = psi[:, None, :]
+    signed_psi_plane = jnp.concatenate(
+        (jnp.flip(psi_plane, axis=0), psi_plane), axis=0
+    )
+    bssn = compact_axisymmetric_state(
+        _flat_conformal_bssn_plane(signed_psi_plane)
+    )
+    return bssn, psi, u, residual_history

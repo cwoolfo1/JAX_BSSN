@@ -1,18 +1,30 @@
 """Evolve electromagnetic dipole data with the first-order Yee solver.
 
 The default uses the time-symmetric family of Baumgarte, Gundlach, and
-Hilditch with pulse-center parameter r0=1.  Black-hole formation at this
-amplitude is unverified.  Each fresh run records field snapshots and
-constraint diagnostics to a fixed final time, then saves its final state.
+Hilditch with pulse-center parameter r0=0.  Black-hole formation at this
+amplitude is unverified.  Edit simulation_parameters.py to configure a run.
+Each fresh run records field snapshots and constraint diagnostics to a fixed
+final time, then saves its final state.
+Compiled JAX programs persist in .jax_cache beside this script; set
+JAX_COMPILATION_CACHE_DIR to use another cache location across runs.
 """
 
-import argparse
 import math
 from pathlib import Path
 
 import jax
 
 jax.config.update("jax_enable_x64", True)
+
+# Configure before importing solver modules that may trigger compilation.
+# Keep the cache separate from simulation output so fresh runs can reuse it.
+jax.config.update(
+    "jax_compilation_cache_dir",
+    jax.config.jax_compilation_cache_dir
+    or str(Path(__file__).resolve().parent / ".jax_cache"),
+)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 
 import jax.numpy as jnp
 from tqdm import tqdm
@@ -21,16 +33,15 @@ from JAX_BSSN.bssn.constraints import (
     ConstraintViolations,
     compute_all_constraints_with_matter,
 )
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
+from JAX_BSSN.bssn.variables import BSSNParameters
 from JAX_BSSN.cartoon.axisymmetry import (
     axisymmetric_plane_output_fields,
-    compact_axisymmetric_state,
     compute_axisymmetric_constraint_norms,
-    reconstruct_axisymmetric_support,
     validate_axisymmetric_grid,
 )
 from JAX_BSSN.cartoon.axisymmetry.reconstruction import (
     _expand_axisymmetric_vector,
+    _expand_axisymmetric_scalar,
     _project_scalar,
     _project_vector,
 )
@@ -42,130 +53,29 @@ from collapse_io import (
     write_collapse_checkpoint,
 )
 from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
+    _support_bssn,
     axisymmetric_densitized_constraint_divergences,
     axisymmetric_first_order_einstein_maxwell_step,
     initialize_axisymmetric_first_order_state,
-    reconstruct_axisymmetric_densitized_support,
 )
-from JAX_BSSN.EM.first_order.energy_momentum import (
-    compute_densitized_electromagnetic_energy_momentum,
+from JAX_BSSN.EM.first_order.cartoon.cylindrical import (
+    axisymmetric_electromagnetic_sources, axisymmetric_physical_fields,
 )
 from JAX_BSSN.EM.first_order.evolve import (
     common_densitized_fields,
     common_physical_fields,
 )
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
-from initial_data import (
+import simulation_parameters as settings
+from JAX_BSSN.evolution.coordinates import cylindrical_volume_weights
+
+from initial_metric import initial_metric
+from initial_pulse import (
     conformal_vector_to_physical_contravariant,
     contract_conformal_electromagnetic_fields,
-    off_centered_toroidal_electric_seed,
-    solve_electromagnetic_conformal_factor,
+    electromagnetic_cylindrical_grid,
+    initial_pulse,
 )
-from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
-
-
-AMPLITUDE = 0.08
-WIDTH = 1.0
-RADIAL_CENTER = 1.0
-DOMAIN_HALF_WIDTH = 12.0
-NUM_RADIAL_POINTS = 150
-NUM_Z_POINTS = 150
-CFL = 0.2
-FINAL_TIME = 500.0
-SNAPSHOT_COUNT = 40
-DIAGNOSTIC_INTERVAL = 0.5
-
-NEWTON_TOLERANCE = 1.0e-10
-MAX_NEWTON_ITERATIONS = 12
-CG_TOLERANCE = 1.0e-10
-MAX_CG_ITERATIONS = 1000
-
-KAPPA = 0.002
-ETA = 2.0
-NU = 0.02
-GAMMA_DRIVER = 0.75
-
-
-def _grid_spacing(num_radial_points, num_z_points, domain_half_width):
-    """Validate the cell counts and return the common rho/z spacing."""
-
-    if num_radial_points < 6:
-        raise ValueError("num_radial_points must be at least six")
-    if num_z_points < 10 or num_z_points % 2:
-        raise ValueError("num_z_points must be even and at least ten")
-    if not math.isfinite(domain_half_width) or domain_half_width <= 0:
-        raise ValueError("domain_half_width must be finite and positive")
-    return domain_half_width / num_radial_points
-
-
-def axisymmetric_parameters(
-    num_radial_points: int,
-    num_z_points: int,
-    domain_half_width: float,
-    dt: float,
-) -> BSSNParameters:
-    """Use rho extent domain_half_width and z half-extent num_z_points*dx/2."""
-
-    dx = _grid_spacing(num_radial_points, num_z_points, domain_half_width)
-
-    z_min = -(num_z_points - 1) * dx / 2.0
-    return BSSNParameters(
-        eta=ETA,
-        kappa=KAPPA,
-        nu=NU,
-        g=GAMMA_DRIVER,
-        dx=dx,
-        dt=dt,
-        zero_shift=0,
-        gauge=1,
-        xl_bc=PERIODIC_BC,
-        xr_bc=SOMMERFELD_BC,
-        yl_bc=PERIODIC_BC,
-        yr_bc=PERIODIC_BC,
-        zl_bc=SOMMERFELD_BC,
-        zr_bc=SOMMERFELD_BC,
-        x_min=-3.5 * dx,
-        y_min=-4.0 * dx,
-        z_min=z_min,
-        mad_q=1.0,
-    )
-
-
-def electromagnetic_cylindrical_grid(
-    num_radial_points: int,
-    num_z_points: int,
-    dx: float,
-):
-    """Return the positive-rho, full-z cell-centred elliptic grid."""
-
-    rho = (jnp.arange(num_radial_points, dtype=jnp.float64) + 0.5) * dx
-    z = (
-        jnp.arange(num_z_points, dtype=jnp.float64)
-        - (num_z_points - 1) / 2.0
-    ) * dx
-    RHO, Z = jnp.meshgrid(rho, z, indexing="ij")
-    grid = jnp.stack((RHO, jnp.zeros_like(RHO), Z), axis=-1)
-    return grid[:, None, :, :]
-
-
-def _flat_conformal_bssn_plane(psi_plane):
-    """Map a solved conformal factor to time-symmetric BSSN variables."""
-
-    W = psi_plane**-2
-    shape = W.shape
-    conformal_metric = (
-        jnp.eye(3, dtype=W.dtype)[:, :, None, None, None]
-        * jnp.ones((3, 3) + shape, dtype=W.dtype)
-    )
-    return BSSNVariables(
-        conformal_metric=conformal_metric,
-        conformal_factor=W,
-        traceless_K=jnp.zeros_like(conformal_metric),
-        trace_K=jnp.zeros(shape, dtype=W.dtype),
-        conformal_connection=jnp.zeros((3,) + shape, dtype=W.dtype),
-        lapse=W,
-        shift=jnp.zeros((3,) + shape, dtype=W.dtype),
-    )
 
 
 def constrained_einstein_maxwell_data(
@@ -176,10 +86,10 @@ def constrained_einstein_maxwell_data(
     num_z_points: int,
     dx: float,
     params: BSSNParameters,
-    newton_tolerance: float = NEWTON_TOLERANCE,
-    max_newton_iterations: int = MAX_NEWTON_ITERATIONS,
-    cg_tolerance: float = CG_TOLERANCE,
-    max_cg_iterations: int = MAX_CG_ITERATIONS,
+    newton_tolerance: float | None = None,
+    max_newton_iterations: int | None = None,
+    cg_tolerance: float | None = None,
+    max_cg_iterations: int | None = None,
     verbose: bool = False,
 ):
     """Solve the constraints and bootstrap compact Yee-grid EM/BSSN data."""
@@ -187,17 +97,16 @@ def constrained_einstein_maxwell_data(
     grid = electromagnetic_cylindrical_grid(
         num_radial_points, num_z_points, dx
     )
-    conformal_electric = off_centered_toroidal_electric_seed(
+    conformal_electric, conformal_magnetic = initial_pulse(
         grid,
         amplitude=amplitude,
         width=width,
         radial_center=radial_center,
     )
-    conformal_magnetic = jnp.zeros_like(conformal_electric)
     conformal_field_squared = contract_conformal_electromagnetic_fields(
         conformal_electric, conformal_magnetic
     )[:, 0, :]
-    psi, u, residual_history = solve_electromagnetic_conformal_factor(
+    bssn, psi, u, residual_history = initial_metric(
         conformal_field_squared,
         dx,
         newton_tolerance=newton_tolerance,
@@ -208,13 +117,6 @@ def constrained_einstein_maxwell_data(
     )
 
     psi_plane = psi[:, None, :]
-    signed_psi_plane = jnp.concatenate(
-        (jnp.flip(psi_plane, axis=0), psi_plane), axis=0
-    )
-    bssn = compact_axisymmetric_state(
-        _flat_conformal_bssn_plane(signed_psi_plane)
-    )
-
     physical_displacement_plane = conformal_vector_to_physical_contravariant(
         conformal_electric, psi_plane
     )
@@ -224,7 +126,12 @@ def constrained_einstein_maxwell_data(
     ).at[:, 4:, 0, :].set(
         physical_displacement_plane[:, :, 0, :]
     )
-    physical_magnetic = jnp.zeros_like(physical_displacement)
+    physical_magnetic_plane = conformal_vector_to_physical_contravariant(
+        conformal_magnetic, psi_plane
+    )
+    physical_magnetic = jnp.zeros_like(physical_displacement).at[:, 4:, 0, :].set(
+        physical_magnetic_plane[:, :, 0, :]
+    )
 
     # The toroidal seed has only D^y on the y=0 reference plane.  Its native
     # Yee location is centered in rho and z, so the elliptic cell-center sample
@@ -247,11 +154,10 @@ def compute_matter_aware_axisymmetric_constraints(
 ) -> ConstraintViolations:
     """Return compact Einstein constraints including electromagnetic matter."""
 
-    support_bssn = reconstruct_axisymmetric_support(state.bssn, params)
-    support_em = reconstruct_axisymmetric_densitized_support(state.em, params)
-    displacement, magnetic = common_densitized_fields(support_em)
+    support_bssn = _support_bssn(state.bssn, params)
+    displacement, magnetic = common_densitized_fields(state.em)
     energy_density, momentum_density, _ = (
-        compute_densitized_electromagnetic_energy_momentum(
+        axisymmetric_electromagnetic_sources(
             displacement,
             magnetic,
             support_bssn,
@@ -280,10 +186,9 @@ def compute_axisymmetric_em_energy_density(
 ) -> jnp.ndarray:
     """Return compact rho_EM evaluated on reconstructed Cartesian support."""
 
-    support_bssn = reconstruct_axisymmetric_support(state.bssn, params)
-    support_em = reconstruct_axisymmetric_densitized_support(state.em, params)
-    displacement, magnetic = common_densitized_fields(support_em)
-    energy_density, _, _ = compute_densitized_electromagnetic_energy_momentum(
+    support_bssn = _support_bssn(state.bssn, params)
+    displacement, magnetic = common_densitized_fields(state.em)
+    energy_density, _, _ = axisymmetric_electromagnetic_sources(
         displacement,
         magnetic,
         support_bssn,
@@ -292,13 +197,15 @@ def compute_axisymmetric_em_energy_density(
     return _project_scalar(energy_density)
 
 
-def _axisymmetric_scalar_norms(field):
+def _axisymmetric_scalar_norms(field, params, location=("C", "C", "C")):
     """Return the standard interior cylindrical L2 and Linf norms."""
 
     physical = field[4:-4, 0, 4:-4]
-    rho = jnp.arange(physical.shape[0], dtype=field.dtype) + 0.5
-    normalization = jnp.sum(rho) * physical.shape[1]
-    l2_norm = jnp.sqrt(jnp.sum(rho[:, None] * physical**2) / normalization)
+    weight = cylindrical_volume_weights(field.shape, params, field.dtype, location)[4:-4, 4:-4]
+    if location[0] == "V":
+        weight = weight.at[0, :].set(params.dx / 8.0)
+    normalization = jnp.sum(weight)
+    l2_norm = jnp.sqrt(jnp.sum(weight * physical**2) / normalization)
     linf_norm = jnp.max(jnp.abs(physical))
     return l2_norm, linf_norm
 
@@ -312,11 +219,14 @@ def _output_fields(state, violations, params):
         violations.trace_A,
         violations.gamma_condition,
     )
-    displacement, magnetic = common_physical_fields(state, params)
+    displacement, magnetic = axisymmetric_physical_fields(
+        *common_densitized_fields(state.em), state.bssn, params
+    )
     displacement = _expand_axisymmetric_vector(displacement)
     magnetic = _expand_axisymmetric_vector(magnetic)
     fields.update(
         {
+            "rho_EM": _expand_axisymmetric_scalar(compute_axisymmetric_em_energy_density(state, params)),
             "D": tuple(displacement[i] for i in range(3)),
             "B": tuple(magnetic[i] for i in range(3)),
         }
@@ -324,43 +234,41 @@ def _output_fields(state, violations, params):
     return fields
 
 
-def run_em_blackhole_formation_first_order(
-    amplitude: float = AMPLITUDE,
-    width: float = WIDTH,
-    radial_center: float = RADIAL_CENTER,
-    domain_half_width: float = DOMAIN_HALF_WIDTH,
-    num_radial_points: int = NUM_RADIAL_POINTS,
-    num_z_points: int = NUM_Z_POINTS,
-    cfl: float = CFL,
-    final_time: float = FINAL_TIME,
-    snapshot_count: int = SNAPSHOT_COUNT,
-    output_dir: str | Path | None = None,
-    newton_tolerance: float = NEWTON_TOLERANCE,
-    max_newton_iterations: int = MAX_NEWTON_ITERATIONS,
-    cg_tolerance: float = CG_TOLERANCE,
-    max_cg_iterations: int = MAX_CG_ITERATIONS,
-    show_progress: bool = True,
-    diagnostic_interval: float = DIAGNOSTIC_INTERVAL,
-):
-    """Start fresh and evolve to the last whole step at or before final_time."""
+def run_collapse():
+    """Start a fresh run using the current simulation_parameters globals."""
 
-    dx = _grid_spacing(num_radial_points, num_z_points, domain_half_width)
+    amplitude = settings.AMPLITUDE
+    width = settings.WIDTH
+    radial_center = settings.RADIAL_CENTER
+    domain_half_width = settings.DOMAIN_HALF_WIDTH
+    num_radial_points = settings.NUM_RADIAL_POINTS
+    num_z_points = settings.NUM_Z_POINTS
+    cfl = settings.CFL
+    final_time = settings.FINAL_TIME
+    snapshot_count = settings.SNAPSHOT_COUNT
+    output_dir = settings.OUTPUT_DIR
+    newton_tolerance = settings.NEWTON_TOLERANCE
+    max_newton_iterations = settings.MAX_NEWTON_ITERATIONS
+    cg_tolerance = settings.CG_TOLERANCE
+    max_cg_iterations = settings.MAX_CG_ITERATIONS
+    show_progress = settings.SHOW_PROGRESS
+    diagnostic_interval = settings.DIAGNOSTIC_INTERVAL
+
+    dx = settings.grid_spacing(num_radial_points, num_z_points, domain_half_width)
     if not math.isfinite(cfl) or cfl <= 0:
         raise ValueError("cfl must be finite and positive")
     if not math.isfinite(final_time) or final_time < 0:
         raise ValueError("final_time must be finite and nonnegative")
     if not math.isfinite(diagnostic_interval) or diagnostic_interval <= 0:
         raise ValueError("diagnostic_interval must be finite and positive")
-    dt = cfl * dx
-    params = axisymmetric_parameters(
-        num_radial_points, num_z_points, domain_half_width, dt
+    params = settings.axisymmetric_parameters(
+        num_radial_points, num_z_points, domain_half_width, cfl * dx
     )
+
+    dt = float(params.dt)
     num_steps = int(math.floor(final_time / dt + 1.0e-12))
 
-    output_dir = (
-        Path(output_dir) if output_dir is not None
-        else Path(__file__).resolve().parent / "output"
-    )
+    output_dir = Path(output_dir)
     residual_path = output_dir / "hamiltonian_residual.txt"
     constraint_path = output_dir / "constraint_norms.txt"
     checkpoint_path = output_dir / "final_checkpoint.npz"
@@ -369,6 +277,7 @@ def run_em_blackhole_formation_first_order(
     protected_paths = (
         residual_path, constraint_path, checkpoint_path, summary_path,
         openpmd_path, output_dir / "rolling_checkpoint.npz",
+        output_dir / "last_finite_checkpoint.npz",
     )
     if any(path.exists() for path in protected_paths):
         raise FileExistsError(
@@ -465,15 +374,15 @@ def run_em_blackhole_formation_first_order(
         )
 
         violations = compute_matter_aware_axisymmetric_constraints(state, params)
-        norms = compute_axisymmetric_constraint_norms(violations)
+        norms = compute_axisymmetric_constraint_norms(violations, params=params)
         displacement_divergence, magnetic_divergence = (
             axisymmetric_densitized_constraint_divergences(state.em, params)
         )
         displacement_l2, displacement_linf = _axisymmetric_scalar_norms(
-            displacement_divergence
+            displacement_divergence, params
         )
         magnetic_l2, magnetic_linf = _axisymmetric_scalar_norms(
-            magnetic_divergence
+            magnetic_divergence, params, ("V", "C", "V")
         )
         physical = (slice(4, None), 0, slice(None))
         norms.update(
@@ -495,9 +404,21 @@ def run_em_blackhole_formation_first_order(
             writer.write(_output_fields(state, violations, params), step, time)
         return finite
 
+    finite_flag = jax.jit(lambda current: jnp.all(jnp.stack([
+        jnp.all(jnp.isfinite(leaf)) for leaf in jax.tree_util.tree_leaves(current)
+    ])))
+    last_finite_state = state if bool(finite_flag(state)) else None
+    last_finite_step = 0 if last_finite_state is not None else None
     with writer, constraint_path.open("w", encoding="utf-8") as norm_file:
         norm_file.write("# step time " + " ".join(norm_names) + "\n")
         for step in progress:
+            finite = bool(finite_flag(state))
+            if not finite:
+                diagnose(step, norm_file, True)
+                final_step = step
+                status = "failed_nonfinite"
+                break
+            last_finite_state, last_finite_step = state, step
             diagnostic_due = (
                 step in (0, num_steps) or step % diagnostic_steps == 0
             )
@@ -526,9 +447,16 @@ def run_em_blackhole_formation_first_order(
         params,
         configuration,
     )
+    if last_finite_state is not None:
+        write_collapse_checkpoint(
+            output_dir / "last_finite_checkpoint.npz", last_finite_state,
+            u, residual_history, "first_order", last_finite_step,
+            last_finite_step * dt, params, configuration,
+        )
     summary = {
         "formulation": "first_order",
         "status": status,
+        "last_finite_step": last_finite_step,
         "final_step": int(final_step),
         "final_time": float(final_step * dt),
         "final_time_ceiling": float(final_time),
@@ -544,56 +472,5 @@ def run_em_blackhole_formation_first_order(
     return state, u, residual_history
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument("--amplitude", type=float, default=AMPLITUDE)
-    parser.add_argument("--width", type=float, default=WIDTH)
-    parser.add_argument(
-        "--radial-center", type=float, default=RADIAL_CENTER,
-        help="pulse-center parameter r0",
-    )
-    parser.add_argument(
-        "--domain-half-width", type=float, default=DOMAIN_HALF_WIDTH,
-        help="positive-rho extent (half the signed-x output width)",
-    )
-    parser.add_argument(
-        "--num-rho", type=int, default=NUM_RADIAL_POINTS,
-        help="radial cell count; spacing = domain-half-width / num-rho",
-    )
-    parser.add_argument(
-        "--num-z", type=int, default=NUM_Z_POINTS,
-        help="even z cell count; full z extent = num-z * spacing",
-    )
-    parser.add_argument("--cfl", type=float, default=CFL)
-    parser.add_argument("--final-time", type=float, default=FINAL_TIME)
-    parser.add_argument("--snapshots", type=int, default=SNAPSHOT_COUNT)
-    parser.add_argument("--output-dir")
-    parser.add_argument("--newton-tolerance", type=float, default=NEWTON_TOLERANCE)
-    parser.add_argument("--cg-tolerance", type=float, default=CG_TOLERANCE)
-    parser.add_argument(
-        "--diagnostic-interval", type=float, default=DIAGNOSTIC_INTERVAL
-    )
-    parser.add_argument("--no-progress", action="store_true")
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
-    run_em_blackhole_formation_first_order(
-        amplitude=args.amplitude,
-        width=args.width,
-        radial_center=args.radial_center,
-        domain_half_width=args.domain_half_width,
-        num_radial_points=args.num_rho,
-        num_z_points=args.num_z,
-        cfl=args.cfl,
-        final_time=args.final_time,
-        snapshot_count=args.snapshots,
-        output_dir=args.output_dir,
-        newton_tolerance=args.newton_tolerance,
-        cg_tolerance=args.cg_tolerance,
-        show_progress=not args.no_progress,
-        diagnostic_interval=args.diagnostic_interval,
-    )
+    run_collapse()
