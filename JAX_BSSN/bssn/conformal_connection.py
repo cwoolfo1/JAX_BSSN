@@ -1,16 +1,19 @@
 """Conformal-connection evolution equation."""
 
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    diff1_physical, diff2_physical, ko_dissipation,
+)
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field, diff6_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
 from JAX_BSSN.bssn.shift_and_lapse import (
     compute_shift_advection,
     compute_shift_derivatives,
 )
 from JAX_BSSN.bssn.tensor_algebra import christoffel_symbols_second_kind, invert_3x3_metric
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 
 
 @jit
@@ -28,7 +31,6 @@ def evolve_conformal_connection(vars: BSSNVariables,
         Time derivative of conformal connection
     """
 
-    dx = params.dx
     alpha = vars.lapse
     K = vars.trace_K
     A_ij = vars.traceless_K
@@ -39,7 +41,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(W, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -48,7 +50,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     dalphadi = jnp.stack(
         [
-            diff1_field(alpha, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(alpha, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -57,7 +59,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     dKdi = jnp.stack(
         [
-            diff1_field(K, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(K, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -79,9 +81,7 @@ def evolve_conformal_connection(vars: BSSNVariables,
 
     metric_derivs = jnp.stack(
         [
-            diff1_field(
-                gamma, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
-            )
+            diff1_physical(gamma, d + 2, params)
             for d in range(3)
         ],
         axis=0,
@@ -117,19 +117,9 @@ def evolve_conformal_connection(vars: BSSNVariables,
         for m in range(3):
             for n in range(3):
                 if m == n:
-                    second_derivative = diff2_field(
-                        shift[i],
-                        m,
-                        dx,
-                        *get_boundary_codes(params, m), mad_q=params.mad_q,
-                    )
+                    second_derivative = diff2_physical(shift[i], m, params)
                 else:
-                    second_derivative = diff1_field(
-                        d_shift[i, n],
-                        m,
-                        dx,
-                        *get_boundary_codes(params, m), mad_q=params.mad_q,
-                    )
+                    second_derivative = diff1_physical(d_shift[i, n], m, params)
                 d2_shift = d2_shift.at[i, m, n].set(second_derivative)
     # d2_shift[i, m, n] = partial_m partial_n beta^i
 
@@ -140,19 +130,9 @@ def evolve_conformal_connection(vars: BSSNVariables,
     for m in range(3):
         for n in range(3):
             if m == n:
-                derivative = diff2_field(
-                    shift[n],
-                    m,
-                    dx,
-                    *get_boundary_codes(params, m), mad_q=params.mad_q,
-                )
+                derivative = diff2_physical(shift[n], m, params)
             else:
-                derivative = diff1_field(
-                    d_shift[n, n],
-                    m,
-                    dx,
-                    *get_boundary_codes(params, m), mad_q=params.mad_q,
-                )
+                derivative = diff1_physical(d_shift[n, n], m, params)
             div_shift_deriv = div_shift_deriv.at[m].add(derivative)
     # partial_m partial_n beta^n = partial_m div(beta)
 
@@ -174,19 +154,9 @@ def evolve_conformal_connection(vars: BSSNVariables,
     )
     # compute dt_Gamma
 
-    dGamma_dx1 = diff6_field(
-        vars.conformal_connection, 1, params.dx, *get_boundary_codes(params, 0)
-    )
-    dGamma_dx2 = diff6_field(
-        vars.conformal_connection, 2, params.dx, *get_boundary_codes(params, 1)
-    )
-    dGamma_dx3 = diff6_field(
-        vars.conformal_connection, 3, params.dx, *get_boundary_codes(params, 2)
-    )
     # Gamma is shape (3, ni, nj, nk)
-    # compute the 6th derivative in each direction
 
-    dissipation_term = params.nu / 64 * params.dx**5 * (dGamma_dx1 + dGamma_dx2 + dGamma_dx3)
+    dissipation_term = ko_dissipation(vars.conformal_connection, params)
     # compute dissipation term
 
     return dt_Gamma + dissipation_term

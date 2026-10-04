@@ -16,8 +16,8 @@ from JAX_BSSN.EM.first_order.staggering import (
 from JAX_BSSN.EM.first_order.boundaries import (
     _apply_densitized_sommerfeld_boundaries_with_geometry,
 )
+from JAX_BSSN.EM.first_order.coupling import constitutive_fields
 from JAX_BSSN.EM.first_order.geometry import (
-    _metric_fields_at_location,
     _metric_fields_on_yee_sites,
 )
 
@@ -31,157 +31,16 @@ LEVI_CIVITA_SYMBOL = jnp.asarray(
 )
 
 
-def _physical_contravariant(density, W):
-    # sqrt(gamma)=W^-3, hence V^i=W^3 mathcal(V)^i.
-    return W**3 * density
-
-
-def _physical_covariant(contravariant, W, conformal_metric):
-    # gamma_ij=W^-2 conformal_gamma_ij.
-    return W**-2 * jnp.einsum(
-        "ij...,j...->i...", conformal_metric, contravariant
-    )
-
-
-def _compute_covariant_E(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    displacement_geometry,
-    params: BSSNParameters,
-) -> jnp.ndarray:
-    components = []
-    epsilon = LEVI_CIVITA_SYMBOL.astype(densitized_displacement.dtype)
-    for target_component, target_location in enumerate(
-        DISPLACEMENT_FIELD_LOCATIONS
-    ):
-        W, lapse, shift, conformal_metric, _ = displacement_geometry[
-            target_component
-        ]
-        displacement_density = vector_at_location(
-            densitized_displacement,
-            DISPLACEMENT_FIELD_LOCATIONS,
-            target_location,
-            params,
-        )
-        magnetic_density = vector_at_location(
-            densitized_magnetic,
-            MAGNETIC_FIELD_LOCATIONS,
-            target_location,
-            params,
-        )
-
-        displacement_up = _physical_contravariant(
-            displacement_density, W
-        )
-        magnetic_up = _physical_contravariant(magnetic_density, W)
-        displacement_down = _physical_covariant(
-            displacement_up, W, conformal_metric
-        )
-        sqrt_gamma = W**-3
-        shift_cross_magnetic = jnp.einsum(
-            "jk,j...,k...->...",
-            epsilon[target_component],
-            shift,
-            magnetic_up,
-        )
-        components.append(
-            lapse * displacement_down[target_component]
-            + sqrt_gamma * shift_cross_magnetic
-        )
-
-    return jnp.stack(tuple(components), axis=0)
+@jax.jit
+def compute_covariant_E(densitized_displacement, densitized_magnetic, bssn, params):
+    """Return the displacement derivative of the discrete quadratic energy."""
+    return constitutive_fields(densitized_displacement, densitized_magnetic, bssn, params)[0]
 
 
 @jax.jit
-def compute_covariant_E(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    bssn: BSSNVariables,
-    params: BSSNParameters,
-) -> jnp.ndarray:
-    """Return Entity ``E_i`` on the three displacement Yee sites."""
-
-    displacement_geometry = tuple(
-        _metric_fields_at_location(bssn, location, params)
-        for location in DISPLACEMENT_FIELD_LOCATIONS
-    )
-    return _compute_covariant_E(
-        densitized_displacement,
-        densitized_magnetic,
-        displacement_geometry,
-        params,
-    )
-
-
-def _compute_covariant_H(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    magnetic_geometry,
-    params: BSSNParameters,
-) -> jnp.ndarray:
-
-    components = []
-    epsilon = LEVI_CIVITA_SYMBOL.astype(densitized_displacement.dtype)
-    for target_component, target_location in enumerate(
-        MAGNETIC_FIELD_LOCATIONS
-    ):
-        W, lapse, shift, conformal_metric, _ = magnetic_geometry[
-            target_component
-        ]
-        displacement_density = vector_at_location(
-            densitized_displacement,
-            DISPLACEMENT_FIELD_LOCATIONS,
-            target_location,
-            params,
-        )
-        magnetic_density = vector_at_location(
-            densitized_magnetic,
-            MAGNETIC_FIELD_LOCATIONS,
-            target_location,
-            params,
-        )
-
-        displacement_up = _physical_contravariant(
-            displacement_density, W
-        )
-        magnetic_up = _physical_contravariant(magnetic_density, W)
-        magnetic_down = _physical_covariant(
-            magnetic_up, W, conformal_metric
-        )
-        sqrt_gamma = W**-3
-        shift_cross_displacement = jnp.einsum(
-            "jk,j...,k...->...",
-            epsilon[target_component],
-            shift,
-            displacement_up,
-        )
-        components.append(
-            lapse * magnetic_down[target_component]
-            - sqrt_gamma * shift_cross_displacement
-        )
-
-    return jnp.stack(tuple(components), axis=0)
-
-
-@jax.jit
-def compute_covariant_H(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    bssn: BSSNVariables,
-    params: BSSNParameters,
-) -> jnp.ndarray:
-    """Return Entity ``H_i`` on the three magnetic Yee sites."""
-
-    magnetic_geometry = tuple(
-        _metric_fields_at_location(bssn, location, params)
-        for location in MAGNETIC_FIELD_LOCATIONS
-    )
-    return _compute_covariant_H(
-        densitized_displacement,
-        densitized_magnetic,
-        magnetic_geometry,
-        params,
-    )
+def compute_covariant_H(densitized_displacement, densitized_magnetic, bssn, params):
+    """Return the magnetic derivative of the discrete quadratic energy."""
+    return constitutive_fields(densitized_displacement, densitized_magnetic, bssn, params)[1]
 
 
 def _backward_difference(
@@ -201,7 +60,8 @@ def _backward_difference(
     left_derivative = (-3.0 * first + 4.0 * second - third) / (
         2.0 * params.dx
     )
-    return jax.lax.cond(
+
+    derivative = jax.lax.cond(
         left_bc == SOMMERFELD_BC,
         lambda values: values.at[
             (slice(None),) * axis + (0,)
@@ -209,6 +69,8 @@ def _backward_difference(
         lambda values: values,
         derivative,
     )
+
+    return derivative
 
 
 def _forward_difference(
@@ -228,7 +90,8 @@ def _forward_difference(
     right_derivative = (3.0 * last - 4.0 * previous + previous_two) / (
         2.0 * params.dx
     )
-    return jax.lax.cond(
+
+    derivative = jax.lax.cond(
         right_bc == SOMMERFELD_BC,
         lambda values: values.at[
             (slice(None),) * axis + (-1,)
@@ -236,6 +99,8 @@ def _forward_difference(
         lambda values: values,
         derivative,
     )
+
+    return derivative
 
 
 @jax.jit
@@ -314,17 +179,8 @@ def densitized_maxwell_rhs(
     displacement_geometry, magnetic_geometry = _metric_fields_on_yee_sites(
         bssn, params
     )
-    electric_covector = _compute_covariant_E(
-        densitized_displacement,
-        densitized_magnetic,
-        displacement_geometry,
-        params,
-    )
-    magnetic_covector = _compute_covariant_H(
-        densitized_displacement,
-        densitized_magnetic,
-        magnetic_geometry,
-        params,
+    electric_covector, magnetic_covector = constitutive_fields(
+        densitized_displacement, densitized_magnetic, bssn, params
     )
     displacement_rhs = curl_H_to_densitized_D(magnetic_covector, params)
     magnetic_rhs = -curl_E_to_densitized_B(electric_covector, params)

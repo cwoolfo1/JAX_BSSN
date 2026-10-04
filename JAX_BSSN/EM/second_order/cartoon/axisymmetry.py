@@ -1,5 +1,7 @@
 """Axisymmetric Cartoon reconstruction and evolution for Maxwell covectors."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 
@@ -107,8 +109,8 @@ def validate_axisymmetric_wave_grid(
         raise ValueError("axisymmetric z faces must be periodic or Sommerfeld")
     if float(params.mad_q) != 1.0:
         raise ValueError("axisymmetric Cartoon requires mad_q=1")
-    if float(params.dx) <= 0.0:
-        raise ValueError("axisymmetric Cartoon requires dx > 0")
+    if not math.isfinite(float(params.dx)) or float(params.dx) <= 0.0:
+        raise ValueError("axisymmetric Cartoon requires finite dx > 0")
     if not jnp.isclose(params.x_min, -3.5 * params.dx):
         raise ValueError("axisymmetric Cartoon requires x_min=-3.5*dx")
     if not jnp.isclose(params.y_min, -4.0 * params.dx):
@@ -159,10 +161,10 @@ def _outer_buffer(reference, params):
     z = jnp.asarray(params.z_min, dtype=dtype) + dx * jnp.arange(
         nz, dtype=dtype
     )
-    radius_edge = jnp.sqrt(rho_edge**2 + z**2)
     rho_buffer = rho_edge + dx * jnp.arange(
         1, AXISYMMETRIC_OUTER_BUFFER_CELLS + 1, dtype=dtype
     )
+    radius_edge = jnp.sqrt(rho_edge**2 + z**2)
     radius_buffer = jnp.sqrt(rho_buffer[:, None] ** 2 + z[None, :] ** 2)
     ratio = radius_edge[None, :] / radius_buffer
     ratio = ratio.reshape((1,) * (reference.ndim - 2) + ratio.shape)
@@ -178,7 +180,7 @@ def _support_geometry(reference, params):
     y = (
         jnp.arange(AXISYMMETRIC_SUPPORT_SIZE, dtype=dtype)
         - AXISYMMETRIC_CENTER
-    ) * dx
+    ) * params.dx
     X = x[:, None]
     Y = y[None, :]
     rho = jnp.sqrt(X**2 + Y**2)

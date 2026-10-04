@@ -2,14 +2,13 @@
 
 import jax
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    diff1_physical, diff1_upwind_physical, ko_dissipation,
+)
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import (
-    diff1_field,
-    diff1_upwind_field,
-    diff6_field,
-)
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 
 
 @jit
@@ -28,12 +27,7 @@ def compute_shift_derivatives(
         [
             jnp.stack(
                 [
-                    diff1_field(
-                        shift[i, ...],
-                        j,
-                        params.dx,
-                        *get_boundary_codes(params, j), mad_q=params.mad_q,
-                    )
+                    diff1_physical(shift[i, ...], j, params)
                     for j in range(3)
                 ],
                 axis=0,
@@ -63,20 +57,10 @@ def compute_shift_advection(
     spatial_start = field.ndim - 3
     directional_terms = [
         shift[direction]
-        * diff1_upwind_field(
-            field,
-            shift[direction],
-            spatial_start + direction,
-            params.dx,
-            *get_boundary_codes(params, direction),
-            mad_q=params.mad_q,
-        )
+        * diff1_upwind_physical(field, shift[direction], spatial_start + direction, params)
         for direction in range(3)
     ]
     return sum(directional_terms)
-
-
-
 
 @jit
 def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
@@ -107,18 +91,7 @@ def evolve_lapse(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
     advection_term = compute_shift_advection(vars.lapse, vars.shift, params)
     # advect the lapse with the shift using the production upwind operator
 
-    dalpha_dx1 = diff6_field(
-        vars.lapse, 0, params.dx, *get_boundary_codes(params, 0)
-    )
-    dalpha_dx2 = diff6_field(
-        vars.lapse, 1, params.dx, *get_boundary_codes(params, 1)
-    )
-    dalpha_dx3 = diff6_field(
-        vars.lapse, 2, params.dx, *get_boundary_codes(params, 2)
-    )
-    # compute the 6th derivative in each direction
-
-    dissipation_term = params.nu / 64 * params.dx**5 * (dalpha_dx1 + dalpha_dx2 + dalpha_dx3)
+    dissipation_term = ko_dissipation(vars.lapse, params)
     # compute dissipation term
 
     return slicing_term + advection_term + dissipation_term
@@ -151,21 +124,9 @@ def evolve_shift(vars: BSSNVariables, params: BSSNParameters) -> jnp.ndarray:
 
     dt_beta = gamma_driver_term + advection_term + damping_term
 
-    dbeta_dx1 = diff6_field(
-        shift, 1, params.dx, *get_boundary_codes(params, 0)
-    )
-    dbeta_dx2 = diff6_field(
-        shift, 2, params.dx, *get_boundary_codes(params, 1)
-    )
-    dbeta_dx3 = diff6_field(
-        shift, 3, params.dx, *get_boundary_codes(params, 2)
-    )
     # beta is shape (3, ni, nj, nk)
-    # compute the 6th derivative in each direction
 
-    dissipation_term = params.nu / 64 * params.dx**5 * (
-        dbeta_dx1 + dbeta_dx2 + dbeta_dx3
-    )
+    dissipation_term = ko_dissipation(shift, params)
     # compute dissipation term
 
     return dt_beta + dissipation_term

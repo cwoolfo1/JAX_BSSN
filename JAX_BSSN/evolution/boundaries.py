@@ -2,11 +2,15 @@
 
 import jax
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    diff1_physical,
+)
+from JAX_BSSN.evolution.coordinates import grid_coordinates
 from jax import jit
 from functools import partial
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
-from JAX_BSSN.evolution.derivatives import diff1_field
 
 
 PERIODIC_BC = 0
@@ -16,15 +20,7 @@ SOMMERFELD_BC = 1
 def _radial_coordinates(shape, params, dtype):
     """Return broadcast coordinate factors and radius for the spatial grid."""
 
-    nx, ny, nz = shape
-    dx = jnp.asarray(params.dx, dtype=dtype)
-    x = jnp.asarray(params.x_min, dtype=dtype) + dx * jnp.arange(nx, dtype=dtype)
-    y = jnp.asarray(params.y_min, dtype=dtype) + dx * jnp.arange(ny, dtype=dtype)
-    z = jnp.asarray(params.z_min, dtype=dtype) + dx * jnp.arange(nz, dtype=dtype)
-
-    X = x[:, None, None]
-    Y = y[None, :, None]
-    Z = z[None, None, :]
+    X, Y, Z = grid_coordinates(shape, params, dtype)
     r = jnp.sqrt(X**2 + Y**2 + Z**2)
 
     return X, Y, Z, r
@@ -35,30 +31,9 @@ def radial_derivative(field: jnp.ndarray, params: BSSNParameters) -> jnp.ndarray
     """Compute the Cartesian contraction ``(x^i / r) partial_i field``."""
 
     spatial_start = field.ndim - 3
-    dfdx = diff1_field(
-        field,
-        spatial_start,
-        params.dx,
-        params.xl_bc,
-        params.xr_bc,
-        params.mad_q,
-    )
-    dfdy = diff1_field(
-        field,
-        spatial_start + 1,
-        params.dx,
-        params.yl_bc,
-        params.yr_bc,
-        params.mad_q,
-    )
-    dfdz = diff1_field(
-        field,
-        spatial_start + 2,
-        params.dx,
-        params.zl_bc,
-        params.zr_bc,
-        params.mad_q,
-    )
+    dfdx = diff1_physical(field, spatial_start, params)
+    dfdy = diff1_physical(field, spatial_start + 1, params)
+    dfdz = diff1_physical(field, spatial_start + 2, params)
 
     X, Y, Z, r = _radial_coordinates(field.shape[-3:], params, field.dtype)
     r_safe = jnp.where(r > 0.0, r, 1.0)

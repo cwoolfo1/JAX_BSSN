@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+from JAX_BSSN.evolution.coordinates import grid_coordinates
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.bssn.variables import get_boundary_codes
@@ -18,7 +19,7 @@ def _spatial_axis(field, direction):
     return field.ndim - 3 + direction
 
 
-def _scalar_gradient(field, params):
+def _scalar_gradient(field, params, location=("C", "C", "C")):
     derivatives = []
     for direction in range(3):
         axis = _spatial_axis(field, direction)
@@ -46,6 +47,7 @@ def _scalar_gradient(field, params):
         derivative = derivative.at[
             (slice(None),) * axis + (-1,)
         ].set(right)
+
         derivatives.append(derivative)
     return jnp.stack(tuple(derivatives), axis=0)
 
@@ -72,20 +74,7 @@ def _outward_boundary_covector(shape, params, dtype):
 
 
 def _native_radius(shape, location, params, dtype):
-    minima = (params.x_min, params.y_min, params.z_min)
-    coordinates = []
-    for direction, (size, site, minimum) in enumerate(
-        zip(shape, location, minima)
-    ):
-        offset = -0.5 if site == "V" else 0.0
-        coordinate = jnp.asarray(minimum, dtype=dtype) + params.dx * (
-            jnp.arange(size, dtype=dtype) + offset
-        )
-        coordinates.append(
-            coordinate.reshape(
-                (1,) * direction + (size,) + (1,) * (2 - direction)
-            )
-        )
+    coordinates = grid_coordinates(shape, params, dtype, location)
     return jnp.sqrt(sum(coordinate**2 for coordinate in coordinates))
 
 
@@ -115,7 +104,7 @@ def _apply_component_boundary(
         boundary_covector,
     ) / safe_norm
 
-    gradient = _scalar_gradient(field, params)
+    gradient = _scalar_gradient(field, params, location)
     characteristic_velocity = shift - lapse * outward_normal
     boundary_rhs = jnp.einsum(
         "i...,i...->...", characteristic_velocity, gradient

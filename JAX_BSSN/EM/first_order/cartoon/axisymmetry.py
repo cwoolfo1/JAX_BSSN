@@ -1,7 +1,9 @@
-"""Axisymmetric Cartoon evolution for staggered vector densities."""
+"""Cylindrical Yee Maxwell evolution coupled to axisymmetric Cartoon BSSN."""
 
 import jax
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.coordinates import grid_coordinates
 
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.cartoon.axisymmetry import (
@@ -22,15 +24,7 @@ from JAX_BSSN.evolution.time_evolve import (
     enforce_algebraic_constraints,
 )
 
-from JAX_BSSN.EM.first_order.energy_momentum import (
-    compute_densitized_electromagnetic_energy_momentum,
-)
 from JAX_BSSN.EM.first_order.evolve import common_densitized_fields
-from JAX_BSSN.EM.first_order.equations import (
-    densitized_displacement_divergence,
-    densitized_magnetic_divergence,
-    densitized_maxwell_rhs,
-)
 from JAX_BSSN.EM.first_order.geometry import (
     _conformal_factors_at_locations,
 )
@@ -109,10 +103,10 @@ def _outer_buffer(reference, source_location, params):
         jnp.arange(reference.shape[-1], dtype=reference.dtype)
         + _native_offset(source_location[2])
     )
-    radius_edge = jnp.sqrt(rho_edge**2 + z**2)
     rho_buffer = rho_edge + dx * jnp.arange(
         1, AXISYMMETRIC_OUTER_BUFFER_CELLS + 1, dtype=reference.dtype
     )
+    radius_edge = jnp.sqrt(rho_edge**2 + z**2)
     radius_buffer = jnp.sqrt(rho_buffer[:, None] ** 2 + z[None, :] ** 2)
     buffer = reference[-1:, :] * radius_edge[None, :] / radius_buffer
     return jnp.concatenate((reference, buffer), axis=0)
@@ -120,18 +114,8 @@ def _outer_buffer(reference, source_location, params):
 
 def _target_coordinates(shape, location, params, dtype):
     nx, _, nz = shape
-    dx = jnp.asarray(params.dx, dtype=dtype)
-    x = jnp.asarray(params.x_min, dtype=dtype) + dx * (
-        jnp.arange(nx, dtype=dtype) + _native_offset(location[0])
-    )
-    y = jnp.asarray(params.y_min, dtype=dtype) + dx * (
-        jnp.arange(AXISYMMETRIC_SUPPORT_SIZE, dtype=dtype)
-        + _native_offset(location[1])
-    )
-    z = jnp.asarray(params.z_min, dtype=dtype) + dx * (
-        jnp.arange(nz, dtype=dtype) + _native_offset(location[2])
-    )
-    X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
+    shape = (nx, AXISYMMETRIC_SUPPORT_SIZE, nz)
+    X, Y, Z = jnp.broadcast_arrays(*grid_coordinates(shape, params, dtype, location))
     rho = jnp.sqrt(X**2 + Y**2)
     safe_rho = jnp.where(rho > 0.0, rho, 1.0)
     return X, Y, Z, rho, X / safe_rho, Y / safe_rho
@@ -314,45 +298,20 @@ def initialize_axisymmetric_first_order_state(
     compact_bssn = fill_axisymmetric_ghosts(
         enforce_algebraic_constraints(bssn)
     )
-    support_bssn = enforce_algebraic_constraints(
-        reconstruct_axisymmetric_support(compact_bssn, params)
-    )
-    physical_displacement = _fill_vector_ghosts(
-        physical_displacement, DISPLACEMENT_FIELD_LOCATIONS
-    )
-    physical_magnetic = _fill_vector_ghosts(
-        physical_magnetic, MAGNETIC_FIELD_LOCATIONS
-    )
-    support_displacement = _reconstruct_vector(
-        physical_displacement, DISPLACEMENT_FIELD_LOCATIONS, params
-    )
-    support_magnetic = _reconstruct_vector(
-        physical_magnetic, MAGNETIC_FIELD_LOCATIONS, params
-    )
-    displacement_W = _conformal_factors_at_locations(
-        support_bssn, DISPLACEMENT_FIELD_LOCATIONS, params
-    )
-    magnetic_W = _conformal_factors_at_locations(
-        support_bssn, MAGNETIC_FIELD_LOCATIONS, params
-    )
-    displacement_density = displacement_W**-3 * support_displacement
-    magnetic_density = magnetic_W**-3 * support_magnetic
-    displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
-        displacement_density,
-        magnetic_density,
-        support_bssn,
-        params,
-    )
+    from JAX_BSSN.EM.first_order.coupling import AXIS_DISPLACEMENT_LOCATIONS, AXIS_MAGNETIC_LOCATIONS
+    displacement_W = _conformal_factors_at_locations(compact_bssn, AXIS_DISPLACEMENT_LOCATIONS, params)
+    magnetic_W = _conformal_factors_at_locations(compact_bssn, AXIS_MAGNETIC_LOCATIONS, params)
+    displacement = _fill_vector_ghosts(physical_displacement * displacement_W**-3, DISPLACEMENT_FIELD_LOCATIONS)
+    magnetic = _fill_vector_ghosts(physical_magnetic * magnetic_W**-3, MAGNETIC_FIELD_LOCATIONS)
+    displacement_rhs, magnetic_rhs = _compact_maxwell_rhs(compact_bssn, displacement, magnetic, params)
     half_step = 0.5 * params.dt
-    support_em = DensitizedMaxwellState(
-        magnetic_density - params.dt * magnetic_rhs,
-        magnetic_density,
-        displacement_density - half_step * displacement_rhs,
-        displacement_density + half_step * displacement_rhs,
-    )
     return EinsteinMaxwellVariables(
-        bssn=compact_bssn,
-        em=_project_axisymmetric_densitized_support(support_em),
+        compact_bssn,
+        fill_axisymmetric_densitized_ghosts(DensitizedMaxwellState(
+            magnetic - params.dt * magnetic_rhs, magnetic,
+            displacement - half_step * displacement_rhs,
+            displacement + half_step * displacement_rhs,
+        )),
     )
 
 
@@ -362,16 +321,9 @@ def axisymmetric_densitized_constraint_divergences(
 ):
     """Return compact axisymmetric divergence constraints."""
 
-    support = reconstruct_axisymmetric_densitized_support(state, params)
-    displacement, magnetic = common_densitized_fields(support)
-    displacement_divergence = densitized_displacement_divergence(
-        displacement, params
-    )
-    magnetic_divergence = densitized_magnetic_divergence(magnetic, params)
-    return (
-        _project_scalar(displacement_divergence, ("C", "C", "C")),
-        _project_scalar(magnetic_divergence, ("V", "V", "V")),
-    )
+    from JAX_BSSN.EM.first_order.cartoon.cylindrical import cylindrical_divergences
+    state = fill_axisymmetric_densitized_ghosts(state)
+    return cylindrical_divergences(*common_densitized_fields(state), params)
 
 
 def _add_bssn_scaled(bssn, rhs, scale):
@@ -400,18 +352,8 @@ def _support_vector(field, locations, params):
 
 def _compact_bssn_rhs(bssn, displacement, magnetic, params):
     support_bssn = _support_bssn(bssn, params)
-    support_displacement = _support_vector(
-        displacement, DISPLACEMENT_FIELD_LOCATIONS, params
-    )
-    support_magnetic = _support_vector(
-        magnetic, MAGNETIC_FIELD_LOCATIONS, params
-    )
-    sources = compute_densitized_electromagnetic_energy_momentum(
-        support_displacement,
-        support_magnetic,
-        support_bssn,
-        params,
-    )
+    from JAX_BSSN.EM.first_order.cartoon.cylindrical import axisymmetric_electromagnetic_sources
+    sources = axisymmetric_electromagnetic_sources(displacement, magnetic, support_bssn, params)
     support_rhs = compute_bssn_rhs_with_matter(
         support_bssn, params, *sources
     )
@@ -419,23 +361,8 @@ def _compact_bssn_rhs(bssn, displacement, magnetic, params):
 
 
 def _compact_maxwell_rhs(bssn, displacement, magnetic, params):
-    support_bssn = _support_bssn(bssn, params)
-    support_displacement = _support_vector(
-        displacement, DISPLACEMENT_FIELD_LOCATIONS, params
-    )
-    support_magnetic = _support_vector(
-        magnetic, MAGNETIC_FIELD_LOCATIONS, params
-    )
-    displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
-        support_displacement,
-        support_magnetic,
-        support_bssn,
-        params,
-    )
-    return (
-        _project_vector(displacement_rhs, DISPLACEMENT_FIELD_LOCATIONS),
-        _project_vector(magnetic_rhs, MAGNETIC_FIELD_LOCATIONS),
-    )
+    from JAX_BSSN.EM.first_order.cartoon.cylindrical import cylindrical_maxwell_rhs
+    return cylindrical_maxwell_rhs(_prepare_bssn(bssn), displacement, magnetic, params)
 
 
 @jax.jit

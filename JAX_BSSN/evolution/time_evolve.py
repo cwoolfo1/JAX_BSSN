@@ -145,18 +145,19 @@ def enforce_algebraic_constraints(vars: BSSNVariables) -> BSSNVariables:
 def rk4_step(vars: BSSNVariables, params: BSSNParameters) -> BSSNVariables:
     """
     Perform one RK4 timestep with Kreiss-Oliger dissipation.
-    
+
     Args:
         vars: Current BSSN variables
         params: Evolution parameters
         Kreiss-Oliger dissipation is controlled by params.nu.
-        
+
     Returns:
         Updated BSSN variables
     """
+
     dt = params.dt
     vars = enforce_algebraic_constraints(vars)
-    
+
     # k1 time derivatives
     k1 = compute_bssn_rhs(vars, params)
 

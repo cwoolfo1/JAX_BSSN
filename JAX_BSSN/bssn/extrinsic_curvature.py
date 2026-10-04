@@ -1,9 +1,12 @@
 """Trace and traceless extrinsic-curvature evolution equations."""
 
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    diff1_physical, ko_dissipation,
+)
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff6_field
 from JAX_BSSN.bssn.constraints import (
     compute_momentum_constraint_and_derivative,
     compute_momentum_constraint_and_derivative_with_matter,
@@ -22,7 +25,7 @@ from JAX_BSSN.bssn.tensor_algebra import (
     invert_3x3_metric,
     traceless_part,
 )
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 
 
 def _evolve_trace_extrinsic_curvature(
@@ -83,18 +86,7 @@ def _evolve_trace_extrinsic_curvature(
         )
         # +4 pi alpha (rho + S), with S = gamma^ij S_ij
 
-    dK_dx1 = diff6_field(
-        vars.trace_K, 0, params.dx, *get_boundary_codes(params, 0)
-    )
-    dK_dx2 = diff6_field(
-        vars.trace_K, 1, params.dx, *get_boundary_codes(params, 1)
-    )
-    dK_dx3 = diff6_field(
-        vars.trace_K, 2, params.dx, *get_boundary_codes(params, 2)
-    )
-    # compute the 6th derivative in each direction
-
-    dissipation_term = params.nu / 64 * params.dx**5 * (dK_dx1 + dK_dx2 + dK_dx3)
+    dissipation_term = ko_dissipation(vars.trace_K, params)
     # compute dissipation term
 
     return dt_K + dissipation_term
@@ -141,7 +133,6 @@ def _evolve_traceless_extrinsic_curvature(
         Time derivative of traceless extrinsic curvature
     """
 
-    dx = params.dx
     alpha = vars.lapse
     K = vars.trace_K
     A_ij = vars.traceless_K
@@ -150,9 +141,7 @@ def _evolve_traceless_extrinsic_curvature(
 
     metric_derivs = jnp.stack(
         [
-            diff1_field(
-                gamma, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
-            )
+            diff1_physical(gamma, d + 2, params)
             for d in range(3)
         ],
         axis=0,
@@ -210,17 +199,7 @@ def _evolve_traceless_extrinsic_curvature(
     dt_A = first_term + second_term + third_term + fourth_term + fifth_term + sixth_term
     # compute dt_A
 
-    dA_dx1 = diff6_field(
-        vars.traceless_K, 2, params.dx, *get_boundary_codes(params, 0)
-    )
-    dA_dx2 = diff6_field(
-        vars.traceless_K, 3, params.dx, *get_boundary_codes(params, 1)
-    )
-    dA_dx3 = diff6_field(
-        vars.traceless_K, 4, params.dx, *get_boundary_codes(params, 2)
-    )
     # A_ij is shape (3, 3, ni, nj, nk)
-    # compute the 6th derivative in each direction
 
     if momentum_density is None:
         M, dMidj = compute_momentum_constraint_and_derivative(vars, params)
@@ -239,7 +218,7 @@ def _evolve_traceless_extrinsic_curvature(
     seventh_term = kappa/2 * alpha * (DjMi + DiMj)
     # seventh term
 
-    dissipation_term = params.nu / 64 * params.dx**5 * (dA_dx1 + dA_dx2 + dA_dx3)
+    dissipation_term = ko_dissipation(vars.traceless_K, params)
     # compute dissipation term
 
     return dt_A + seventh_term + dissipation_term

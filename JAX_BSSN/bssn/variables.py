@@ -22,7 +22,7 @@ class BSSNParameters(NamedTuple):
     kappa: float = 0.0        # Constraint damping parameter
     nu: float = 0.002          # Kreiss-Oliger dissipation coefficient
     g: float = 0.75           # Gamma driver shift parameter
-    dx: float = 0.1           # Grid spacing
+    dx: float = 0.1           # Uniform physical Cartesian spacing
     dt: float = 0.001         # Time step
     zero_shift: int = 0       # If 1, hold the shift fixed during RK stages
     gauge: int = 0            # 0 = harmonic slicing, 1 = 1+log slicing

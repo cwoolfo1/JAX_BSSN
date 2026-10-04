@@ -1,14 +1,17 @@
 """Conformal spatial-metric and conformal-factor evolution equations."""
 
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    ko_dissipation,
+)
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff6_field
 from JAX_BSSN.bssn.shift_and_lapse import (
     compute_shift_advection,
     compute_shift_derivatives,
 )
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 
 
 @jit
@@ -54,19 +57,8 @@ def evolve_conformal_metric(vars: BSSNVariables,
     # compute dt_gamma
 
     # Kreiss-Oliger dissipation can be added here if desired
-    dgamma_dx1 = diff6_field(
-        vars.conformal_metric, 2, params.dx, *get_boundary_codes(params, 0)
-    )
-    dgamma_dx2 = diff6_field(
-        vars.conformal_metric, 3, params.dx, *get_boundary_codes(params, 1)
-    )
-    dgamma_dx3 = diff6_field(
-        vars.conformal_metric, 4, params.dx, *get_boundary_codes(params, 2)
-    )
-    # gamma is shape (3, 3, ni, nj, nk)
-    # compute the 6th derivative in each direction
 
-    dissipation_term = params.nu / 64 * params.dx**5 * (dgamma_dx1 + dgamma_dx2 + dgamma_dx3)
+    dissipation_term = ko_dissipation(vars.conformal_metric, params)
     # compute dissipation term
 
     return dt_gamma + dissipation_term
@@ -107,18 +99,7 @@ def evolve_conformal_factor(vars: BSSNVariables,
     third_term = -(1.0/3.0) * vars.conformal_factor * div_shift
     # compute the term due to divergence of shift
 
-    dW_dx1 = diff6_field(
-        vars.conformal_factor, 0, params.dx, *get_boundary_codes(params, 0)
-    )
-    dW_dx2 = diff6_field(
-        vars.conformal_factor, 1, params.dx, *get_boundary_codes(params, 1)
-    )
-    dW_dx3 = diff6_field(
-        vars.conformal_factor, 2, params.dx, *get_boundary_codes(params, 2)
-    )
-    # compute the 6th derivative in each direction
-
-    dissipation_term = params.nu / 64 * params.dx**5 * (dW_dx1 + dW_dx2 + dW_dx3)
+    dissipation_term = ko_dissipation(vars.conformal_factor, params)
     # compute dissipation term
 
 

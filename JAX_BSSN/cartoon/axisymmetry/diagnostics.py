@@ -1,6 +1,7 @@
 """Constraints and output mappings for compact axisymmetric Cartoon states."""
 
 from functools import partial
+from JAX_BSSN.evolution.coordinates import cylindrical_volume_weights
 
 import jax.numpy as jnp
 from jax import jit
@@ -40,6 +41,7 @@ def compute_axisymmetric_constraint_norms(
     violations: ConstraintViolations,
     exclude_outer_rho: int = 4,
     exclude_z: int = 4,
+    params: BSSNParameters | None = None,
 ) -> dict:
     """Return normalized cylindrical L2 norms and ordinary Linf norms."""
 
@@ -59,15 +61,18 @@ def compute_axisymmetric_constraint_norms(
         "gamma": physical(violations.gamma_condition),
     }
 
+    if params is not None:
+        full_weight = cylindrical_volume_weights(violations.hamiltonian.shape, params, violations.hamiltonian.dtype)
+        coordinate_weight = physical(full_weight[:, None, :])
     norms = {}
     for name, field in fields.items():
         nrho, nz = field.shape[-2:]
         rho = jnp.arange(nrho, dtype=field.dtype) + 0.5
-        weight = rho.reshape((1,) * (field.ndim - 2) + (nrho, 1))
+        weight = jnp.broadcast_to(rho[:, None], (nrho, nz)) if params is None else coordinate_weight
         component_count = 1
         for size in field.shape[:-2]:
             component_count *= size
-        normalization = jnp.sum(rho) * nz * component_count
+        normalization = jnp.sum(weight) * component_count
         norms[f"{name}_l2"] = jnp.sqrt(jnp.sum(weight * field**2) / normalization)
         norms[f"{name}_linf"] = jnp.max(jnp.abs(field))
     return norms

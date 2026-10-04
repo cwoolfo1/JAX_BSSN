@@ -1,6 +1,5 @@
-import importlib.util
 import math
-from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 
@@ -11,22 +10,17 @@ import numpy as np
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[2]
+from tests.EM.demo_helpers import load_em_demo_module
 
 
 def _load_initial_data(formulation):
-    path = (
-        ROOT
-        / "demos"
-        / f"EM_blackhole_formation_{formulation}"
-        / "initial_data.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        f"em_blackhole_{formulation}_initial_data", path
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    pulse = load_em_demo_module(formulation, "initial_pulse")
+    metric = load_em_demo_module(formulation, "initial_metric")
+    return SimpleNamespace(**{
+        name: value for module in (pulse, metric)
+        for name, value in vars(module).items()
+        if callable(value) and not name.startswith("_")
+    })
 
 
 @pytest.fixture(params=("first_order", "second_order"))
@@ -253,3 +247,28 @@ def test_toroidal_seed_produces_nonnegative_conformal_energy(initial_data):
     assert bool(jnp.all(field_squared >= 0.0))
     assert float(jnp.max(field_squared)) > 0.0
     np.testing.assert_array_equal(field_squared[4, 4, :], 0.0)
+
+
+@pytest.mark.parametrize("formulation", ["first_order", "second_order"])
+def test_zero_pulse_builds_flat_compact_metric(formulation):
+    pulse = load_em_demo_module(formulation, "initial_pulse")
+    metric = load_em_demo_module(formulation, "initial_metric")
+    grid = pulse.electromagnetic_cylindrical_grid(6, 12, 0.5)
+    electric, magnetic = pulse.initial_pulse(grid, amplitude=0.0)
+    squared = pulse.contract_conformal_electromagnetic_fields(electric, magnetic)
+    bssn, psi, u, history = metric.initial_metric(squared[:, 0, :], 0.5)
+    np.testing.assert_array_equal(electric, 0.0)
+    np.testing.assert_array_equal(magnetic, 0.0)
+    np.testing.assert_array_equal(psi, 1.0)
+    np.testing.assert_array_equal(u, 0.0)
+    assert history == [0.0]
+    assert bssn.lapse.shape == (10, 1, 12)
+    assert bssn.lapse.dtype == jnp.float64
+    np.testing.assert_array_equal(bssn.lapse, 1.0)
+    np.testing.assert_array_equal(bssn.conformal_factor, 1.0)
+    for field in (bssn.traceless_K, bssn.trace_K, bssn.conformal_connection, bssn.shift):
+        np.testing.assert_array_equal(field, 0.0)
+    np.testing.assert_array_equal(
+        bssn.conformal_metric,
+        np.broadcast_to(np.eye(3)[:, :, None, None, None], (3, 3, 10, 1, 12)),
+    )

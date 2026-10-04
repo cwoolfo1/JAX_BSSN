@@ -102,6 +102,18 @@ def second_derivative(
     return jnp.moveaxis(derivative_axis_last, -1, direction)
 
 
+def physical_first_derivative(field, direction, params):
+    spatial_direction = direction % field.ndim - (field.ndim - 3)
+    return first_derivative(field, direction, params.dx,
+                              *get_boundary_codes(params, spatial_direction))
+
+
+def physical_second_derivative(field, direction, params):
+    spatial_direction = direction % field.ndim - (field.ndim - 3)
+    return second_derivative(field, direction, params.dx,
+                               *get_boundary_codes(params, spatial_direction))
+
+
 def spatial_derivatives(
     field: jnp.ndarray, params: BSSNParameters
 ) -> jnp.ndarray:
@@ -110,12 +122,7 @@ def spatial_derivatives(
     spatial_start = field.ndim - 3
     return jnp.stack(
         [
-            first_derivative(
-                field,
-                spatial_start + direction,
-                params.dx,
-                *get_boundary_codes(params, direction),
-            )
+            physical_first_derivative(field, spatial_start + direction, params)
             for direction in range(3)
         ],
         axis=0,
@@ -134,19 +141,9 @@ def partial_second_derivatives(
         row = []
         for k in range(3):
             if j == k:
-                derivative = second_derivative(
-                    field,
-                    spatial_start + k,
-                    params.dx,
-                    *get_boundary_codes(params, k),
-                )
+                derivative = physical_second_derivative(field, spatial_start + k, params)
             else:
-                derivative = first_derivative(
-                    first[k],
-                    spatial_start + j,
-                    params.dx,
-                    *get_boundary_codes(params, j),
-                )
+                derivative = physical_first_derivative(first[k], spatial_start + j, params)
             row.append(derivative)
         rows.append(jnp.stack(row, axis=0))
 

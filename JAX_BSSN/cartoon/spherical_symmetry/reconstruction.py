@@ -1,5 +1,7 @@
 """Compact storage and Cartesian support reconstruction for spherical Cartoon."""
 
+import math
+
 import jax.numpy as jnp
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
@@ -87,6 +89,9 @@ def validate_cartoon_grid(
         raise ValueError(
             "Cartoon reconstruction requires mad_q=1 for its 9 x 9 support"
         )
+
+    if not math.isfinite(float(params.dx)) or float(params.dx) <= 0.0:
+        raise ValueError("spherical Cartoon requires finite dx > 0")
 
     expected_minima = (
         -(CARTOON_GHOST_CELLS - 0.5) * params.dx,
@@ -200,7 +205,6 @@ def _cartoon_geometry(num_x, dx, dtype):
     transverse = (
         jnp.arange(CARTOON_SUPPORT_SIZE, dtype=dtype) - CARTOON_CENTER
     ) * spacing
-
     X = x[:, None, None]
     Y = transverse[None, :, None]
     Z = transverse[None, None, :]
@@ -270,6 +274,7 @@ def reconstruct_cartoon_support(
 
     vars = fill_cartoon_ghosts(vars)
     num_x = vars.conformal_factor.shape[0]
+
     r, direction = _cartoon_geometry(num_x, params.dx, vars.lapse.dtype)
 
     conformal_factor = _interpolate_axis(

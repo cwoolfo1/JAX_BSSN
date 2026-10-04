@@ -3,9 +3,12 @@
 from typing import NamedTuple
 
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    diff1_physical, diff2_physical,
+)
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE, compute_W2_ricci
 from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_second_kind,
@@ -13,7 +16,7 @@ from JAX_BSSN.bssn.tensor_algebra import (
     invert_3x3_metric,
     trace_tensor,
 )
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 
 
 @jit
@@ -30,7 +33,6 @@ def compute_momentum_constraint(vars: BSSNVariables,
         Momentum constraint vector M_i
     """
 
-    dx = params.dx
     K = vars.trace_K
     A_ij = vars.traceless_K
     W    = vars.conformal_factor
@@ -40,7 +42,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dKdi = jnp.stack(
         [
-            diff1_field(K, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(K, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -49,7 +51,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(W, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -61,9 +63,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dA_i_up_j_dk = jnp.stack(
         [
-            diff1_field(
-                A_i_up_j, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q
-            )
+            diff1_physical(A_i_up_j, d + 2, params)
             for d in range(3)
         ],
         axis=0,
@@ -72,7 +72,7 @@ def compute_momentum_constraint(vars: BSSNVariables,
 
     dA_ij_dk = jnp.stack(
         [
-            diff1_field(A_ij, d + 2, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(A_ij, d + 2, params)
             for d in range(3)
         ],
         axis=0,
@@ -109,7 +109,6 @@ def compute_momentum_constraint_and_derivative(
     retain ordered applications of ``diff1_field``.
     """
 
-    dx = params.dx
     A_ij = vars.traceless_K
     W = vars.conformal_factor
     W_floor = jnp.maximum(W, W_FLOOR_VALUE)
@@ -122,72 +121,42 @@ def compute_momentum_constraint_and_derivative(
 
     dB = jnp.stack(
         [
-            diff1_field(
-                B_i_up_j,
-                direction + 2,
-                dx,
-                *get_boundary_codes(params, direction), mad_q=params.mad_q,
-            )
+            diff1_physical(B_i_up_j, direction + 2, params)
             for direction in range(3)
         ],
         axis=0,
     )
     dA = jnp.stack(
         [
-            diff1_field(
-                A_ij,
-                direction + 2,
-                dx,
-                *get_boundary_codes(params, direction), mad_q=params.mad_q,
-            )
+            diff1_physical(A_ij, direction + 2, params)
             for direction in range(3)
         ],
         axis=0,
     )
     d_inv_gamma = jnp.stack(
         [
-            diff1_field(
-                inv_gamma,
-                direction + 2,
-                dx,
-                *get_boundary_codes(params, direction), mad_q=params.mad_q,
-            )
+            diff1_physical(inv_gamma, direction + 2, params)
             for direction in range(3)
         ],
         axis=0,
     )
     dB_over_W = jnp.stack(
         [
-            diff1_field(
-                B_over_W,
-                direction + 2,
-                dx,
-                *get_boundary_codes(params, direction), mad_q=params.mad_q,
-            )
+            diff1_physical(B_over_W, direction + 2, params)
             for direction in range(3)
         ],
         axis=0,
     )
     dW = jnp.stack(
         [
-            diff1_field(
-                W,
-                direction,
-                dx,
-                *get_boundary_codes(params, direction), mad_q=params.mad_q,
-            )
+            diff1_physical(W, direction, params)
             for direction in range(3)
         ],
         axis=0,
     )
     dK = jnp.stack(
         [
-            diff1_field(
-                K,
-                direction,
-                dx,
-                *get_boundary_codes(params, direction), mad_q=params.mad_q,
-            )
+            diff1_physical(K, direction, params)
             for direction in range(3)
         ],
         axis=0,
@@ -200,55 +169,15 @@ def compute_momentum_constraint_and_derivative(
     for l in range(3):
         for inner in range(3):
             if l == inner:
-                second_B = diff2_field(
-                    B_i_up_j,
-                    l + 2,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
-                second_A = diff2_field(
-                    A_ij,
-                    l + 2,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
-                second_W = diff2_field(
-                    W,
-                    l,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
-                second_K = diff2_field(
-                    K,
-                    l,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
+                second_B = diff2_physical(B_i_up_j, l + 2, params)
+                second_A = diff2_physical(A_ij, l + 2, params)
+                second_W = diff2_physical(W, l, params)
+                second_K = diff2_physical(K, l, params)
             else:
-                second_B = diff1_field(
-                    dB[inner],
-                    l + 2,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
-                second_A = diff1_field(
-                    dA[inner],
-                    l + 2,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
-                second_W = diff1_field(
-                    dW[inner],
-                    l,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
-                second_K = diff1_field(
-                    dK[inner],
-                    l,
-                    dx,
-                    *get_boundary_codes(params, l), mad_q=params.mad_q,
-                )
+                second_B = diff1_physical(dB[inner], l + 2, params)
+                second_A = diff1_physical(dA[inner], l + 2, params)
+                second_W = diff1_physical(dW[inner], l, params)
+                second_K = diff1_physical(dK[inner], l, params)
             d2B = d2B.at[l, inner].set(second_B)
             d2A = d2A.at[l, inner].set(second_A)
             d2W = d2W.at[l, inner].set(second_W)
@@ -317,13 +246,7 @@ def compute_momentum_constraint_and_derivative_with_matter(
     )
     momentum_derivative = jnp.stack(
         [
-            diff1_field(
-                momentum_density,
-                direction + 1,
-                params.dx,
-                *get_boundary_codes(params, direction),
-                mad_q=params.mad_q,
-            )
+            diff1_physical(momentum_density, direction + 1, params)
             for direction in range(3)
         ],
         axis=1,
@@ -446,13 +369,7 @@ def compute_gamma_constraint(vars: BSSNVariables,
 
     metric_derivatives = jnp.stack(
         [
-            diff1_field(
-                vars.conformal_metric,
-                direction + 2,
-                params.dx,
-                *get_boundary_codes(params, direction),
-                mad_q=params.mad_q,
-            )
+            diff1_physical(vars.conformal_metric, direction + 2, params)
             for direction in range(3)
         ],
         axis=0,

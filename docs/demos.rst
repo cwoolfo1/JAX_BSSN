@@ -11,6 +11,26 @@ Install demo support first:
 
    python -m pip install -e ".[demos]"
 
+Electromagnetic pp-wave packet
+-----------------------------
+
+The ``EM_waves`` demo evolves the exact Einstein--Maxwell plane-wave family
+of Harte and Drivas (arXiv:1202.0540v3) in Rosen coordinates. It uses the
+production first-order Maxwell/BSSN stepper on a plane-symmetric Cartesian
+grid, with prescribed lapse and shift and exact boundary data.
+
+.. code-block:: bash
+
+   python demos/EM_waves/run.py
+   python demos/EM_waves/make_movies.py --input demos/EM_waves/output
+   python demos/EM_waves/validate.py
+
+The default packet crosses from z=-2 to z=2 over t=0 to t=4. Movies compare
+the numerical EM fields and gravitational response with the exact solution.
+The validator checks the continuum equations independently and measures
+spatial and temporal convergence. See ``demos/EM_waves/README.md`` for the
+derivation and the restriction to evolution before Rosen coordinate focusing.
+
 Gauge wave
 ----------
 
@@ -48,35 +68,7 @@ Each patch is also an independent file-based openPMD series, with per-patch
 the centered inclusive patch bounds land on coarse vertices. The demo rejects 
 a final normalized coarse or fine RMS wave error at or above five percent.
 
-Single puncture
----------------
 
-The single-puncture demo constructs time-symmetric Schwarzschild puncture data
-with :math:`W=\psi^{-2}` and evolves it with 1+log lapse and an evolved
-Gamma-driver shift. Its grid avoids sampling :math:`R=0` directly.
-
-Run from the demo directory so its snapshots and the movie helper agree on the
-output location:
-
-.. code-block:: bash
-
-   cd demos/single_puncture
-   python single_puncture.py
-
-The default run writes per-field ``.npy`` snapshots and
-``constraint_l2.txt`` under ``output/``, plus a final field plot. Grid size,
-domain width, CFL, final time, and snapshot cadence are explicit near the top
-of ``main``.
-
-After a run, optional MP4 rendering requires an ``ffmpeg`` executable visible
-to Matplotlib:
-
-.. code-block:: bash
-
-   python make_movies.py
-
-The renderer produces lapse, shift, and conformal-factor movies from the
-synchronized snapshots.
 
 Spherical Cartoon puncture
 --------------------------
@@ -99,145 +91,3 @@ Output is written under ``output/`` as ``cartoon_puncture.h5`` and
 ``2*Nr x 1 x 1`` axis, including all BSSN tensor components and Hamiltonian and
 momentum constraints. Constraint norms use only independent positive radii and
 exclude the four outer stencil-affected samples.
-
-Axisymmetric Cartoon puncture
------------------------------
-
-The parallel z-axis axisymmetric executable stores a positive-rho by full-z
-plane, reconstructs nine Cartesian y planes at every RK stage, and writes an
-expanded signed x-z plane to a distinct openPMD file:
-
-.. code-block:: bash
-
-   python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
-
-Its defaults are ``rho_max=32M``, ``z in [-32M,32M]``, ``Nrho=256``,
-``Nz=512``, CFL ``0.2``, and final time ``10M``. Constraints are evaluated only at
-the initial, output, and final iterations.
-
-Axisymmetric boosted Bowen--York puncture
-------------------------------------------
-
-The boosted Bowen--York demo first solves the three-dimensional Cartesian
-Hamiltonian constraint for a single puncture with linear momentum along the
-z axis. Its exact ``y=0`` plane is converted to the repository's W-form BSSN
-variables and evolved with the existing axisymmetric Cartoon RK4 path.
-
-.. code-block:: bash
-
-   cd demos/axisymmetric_bowen_york
-   python axisymmetric_bowen_york.py
-   python make_movies.py
-
-The defaults use ``M=1``, ``Pz=0.5M``, ``rho_max=12M``,
-``z in [-12M,12M]``, ``Nrho=48``, ``Nz=96``, CFL ``0.2``, and final time
-``10M``. The elliptic grid is ``96 x 97 x 96``: its central y sample is
-exactly zero, while the even x and z dimensions keep the puncture between
-grid points. The run writes complete BSSN fields and constraints to
-``output/axisymmetric_bowen_york.h5``. The renderer creates grouped H.264
-movies and ``movies/puncture_trajectory.txt`` using the minimum of W near the
-symmetry axis.
-
-The elliptic solve is second-order and fixes the regular correction ``u`` to
-zero on the finite outer grid layers. This approximates asymptotic flatness
-and should be checked by enlarging the domain.
-
-Einstein--Maxwell black-hole formation candidates
---------------------------------------------------
-
-The electromagnetic formation example is available with both Maxwell
-formulations. Both demos solve the same rho-weighted cylindrical Hamiltonian
-constraint for the off-centered toroidal dipole family directly on the
-positive-rho, full-z compact Cartoon plane:
-
-.. code-block:: bash
-
-   python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py
-   python demos/EM_blackhole_formation_second_order/EM_blackhole_formation_second_order.py
-
-The first-order demo evolves staggered densitized displacement and magnetic
-fields with the doubled-leapfrog Yee solver and writes physical ``D`` and
-``B`` records. The second-order demo evolves cell-centered field and projected
-field-derivative variables with RK4 and writes ``E`` and ``B`` records. Each
-directory contains its own ``initial_data.py`` and writes to its own
-local ``output/`` directory unless ``--output-dir`` is supplied.
-
-The first-order default has pulse-center parameter ``r0=1``, width 1, and
-amplitude 0.08; black-hole formation at these settings is unverified. Its
-150-by-150 grid covers ``0 <= rho <= 12`` and ``-6 <= z <= 6`` at cell edges,
-with common spacing 0.08 and timestep 0.016. Radial cell centers range from
-0.04 to 11.96 and z centers from -5.96 to 5.96. ``--domain-half-width`` sets
-the positive-rho extent, while ``--num-z`` sets the full z length in units of
-that spacing. Equal radial and z point counts therefore cover half as far
-along positive z as along rho; doubling ``--num-z`` restores equal reach
-without changing spacing. The second-order default retains ``r0=3`` and
-its existing grid configuration.
-
-The Gamma-driver shift is active. The demos record constraint norms and field
-snapshots and evolve for a fixed duration: 500 simulation units by default for
-the first-order solver and 40 for the second-order solver. ``--final-time``
-overrides the duration. The final step is the last whole timestep at or before
-that time. A finite run reports ``complete``; a nonfinite state reports
-``failed_nonfinite``. Completion alone does not establish physical settling.
-
-The first-order demo always starts fresh. It writes the complete native
-Maxwell and BSSN state once, to ``final_checkpoint.npz``, on completion or
-detected nonfinite termination. It has no restart or periodic-checkpoint
-options, so interrupted runs cannot be resumed through this driver. Field
-snapshots and constraint diagnostics retain their independent cadences.
-
-The second-order demo retains ``rolling_checkpoint.npz`` and ``--restart``.
-Its legacy checkpoints and runs previously marked ``settled`` continue
-toward the requested end time. Use a fresh output directory for a new run:
-
-.. code-block:: bash
-
-   python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py \
-       --amplitude 0.08 --radial-center 1 --domain-half-width 12 --num-rho 150 --num-z 150 \
-       --final-time 500 --output-dir path/to/collapse
-
-Run the optional vacuum comparison separately, supplying a finite, positive
-puncture mass explicitly. The example mass below is an input, not a measurement.
-The reference uses the first-order checkpoint's grid, gauge, boundaries, and
-elapsed time:
-
-.. code-block:: bash
-
-   python demos/EM_blackhole_formation_first_order/compare_schwarzschild.py \
-       --input-dir path/to/collapse --mass 1.0 \
-       --output-dir path/to/new_comparison
-
-This writes the final reference state and 16 BSSN comparison figures. Regenerate
-figures using ``--plot-only`` with the same input and output directories; the
-mass is read from the saved reference. Matching gauge parameters does not
-imply matching gauge histories.
-
-The comparison reads the checkpoint named in ``run_summary.json`` beside
-that summary, so copied runs remain usable. Legacy summaries without a
-checkpoint path use ``rolling_checkpoint.npz``. Moving the pulse and outer
-boundaries changes the initial data and evolution; long-time accuracy and
-black-hole formation require separate checks.
-
-Each formation folder is self-contained, with its own ``collapse_io.py`` for
-checkpoint and summary handling. The first-order folder also contains
-``schwarzschild_reference.py``. Its ``run_schwarzschild_reference`` helper
-accepts an explicit mass and final time, writes openPMD snapshots, and supports
-rolling-checkpoint restarts. These are demo-local workflows, outside the
-installed production package. For existing openPMD formation and reference data:
-
-.. code-block:: bash
-
-   python demos/plot_em_blackhole_schwarzschild.py \
-       --formation path/to/collapse --reference path/to/reference \
-       --mass 1.0 --output path/to/comparison.png
-
-This writes PNG/PDF profiles and error norms over a fixed coordinate interval,
-from two formation-grid spacings to 65% of the common radial extent. These are
-profile errors, without an inferred exterior boundary or settling test.
-
-The electromagnetic family, conformal scaling, energy density, and
-Hamiltonian equation are equations (4)--(6) of Baumgarte, Gundlach, and
-Hilditch, `Critical phenomena in the gravitational collapse of
-electromagnetic waves <https://arxiv.org/abs/1909.00850>`_. Multiplying their
-axisymmetric flat Laplacian by ``rho`` gives the conservative cylindrical form
-used here.

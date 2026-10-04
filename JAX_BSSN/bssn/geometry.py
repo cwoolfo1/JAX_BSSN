@@ -1,10 +1,13 @@
 """Geometric quantities shared by the Cartesian BSSN equations."""
 
 import jax.numpy as jnp
+
+from JAX_BSSN.evolution.spatial_derivatives import (
+    diff1_physical, diff2_physical,
+)
 from jax import jit
 
-from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
-from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables, get_boundary_codes
+from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.bssn.tensor_algebra import (
     christoffel_symbols_first_kind,
     christoffel_symbols_second_kind,
@@ -14,8 +17,6 @@ from JAX_BSSN.bssn.tensor_algebra import (
 
 # Keep inverse powers of W finite without clamping the evolved conformal factor.
 W_FLOOR_VALUE = 1.0e-12
-
-
 
 @jit
 def pack_symmetric_3x3(tensor: jnp.ndarray) -> jnp.ndarray:
@@ -99,7 +100,6 @@ def compute_W2_ricci(vars: BSSNVariables,
                      params: BSSNParameters) -> jnp.ndarray:
     """Compute the denominator-free scaled Ricci tensor ``W**2 R_ij``."""
 
-    dx = params.dx
     conformal_metric = vars.conformal_metric
     inv_conformal_metric = invert_3x3_metric(conformal_metric)
     conformal_connection = vars.conformal_connection
@@ -107,12 +107,7 @@ def compute_W2_ricci(vars: BSSNVariables,
 
     metric_derivs = jnp.stack(
         [
-            diff1_field(
-                conformal_metric,
-                d + 2,
-                dx,
-                *get_boundary_codes(params, d), mad_q=params.mad_q,
-            )
+            diff1_physical(conformal_metric, d + 2, params)
             for d in range(3)
         ],
         axis=0,
@@ -130,19 +125,9 @@ def compute_W2_ricci(vars: BSSNVariables,
     for m in range(3):
         for n in range(3):
             if m == n:
-                metric_second_derivative = diff2_field(
-                    conformal_metric,
-                    n + 2,
-                    dx,
-                    *get_boundary_codes(params, n), mad_q=params.mad_q,
-                )
+                metric_second_derivative = diff2_physical(conformal_metric, n + 2, params)
             else:
-                metric_second_derivative = diff1_field(
-                    metric_derivs[m, ...],
-                    n + 2,
-                    dx,
-                    *get_boundary_codes(params, n), mad_q=params.mad_q,
-                )
+                metric_second_derivative = diff1_physical(metric_derivs[m, ...], n + 2, params)
             term_1 = term_1 - 0.5 * (
                 inv_conformal_metric[m, n] * metric_second_derivative
             )
@@ -150,12 +135,7 @@ def compute_W2_ricci(vars: BSSNVariables,
 
     connection_derivs = jnp.stack(
         [
-            diff1_field(
-                conformal_connection,
-                d + 1,
-                dx,
-                *get_boundary_codes(params, d), mad_q=params.mad_q,
-            )
+            diff1_physical(conformal_connection, d + 1, params)
             for d in range(3)
         ],
         axis=0,
@@ -180,7 +160,7 @@ def compute_W2_ricci(vars: BSSNVariables,
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(W, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -190,13 +170,9 @@ def compute_W2_ricci(vars: BSSNVariables,
     for i in range(3):
         for j in range(3):
             if i == j:
-                second_derivative = diff2_field(
-                    W, j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
-                )
+                second_derivative = diff2_physical(W, j, params)
             else:
-                second_derivative = diff1_field(
-                    dWdi[i], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
-                )
+                second_derivative = diff1_physical(dWdi[i], j, params)
             dWdij = dWdij.at[i, j].set(second_derivative)
     # second derivatives of W
 
@@ -227,7 +203,6 @@ def compute_W2_covariant_lapse_hessian(
 ) -> jnp.ndarray:
     """Compute the denominator-free tensor ``W**2 D_i D_j alpha``."""
 
-    dx = params.dx
     alpha = vars.lapse
     W = vars.conformal_factor
     conformal_metric = vars.conformal_metric
@@ -235,7 +210,7 @@ def compute_W2_covariant_lapse_hessian(
 
     dalphadi = jnp.stack(
         [
-            diff1_field(alpha, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(alpha, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -244,18 +219,14 @@ def compute_W2_covariant_lapse_hessian(
     for i in range(3):
         for j in range(3):
             if i == j:
-                second_derivative = diff2_field(
-                    alpha, j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
-                )
+                second_derivative = diff2_physical(alpha, j, params)
             else:
-                second_derivative = diff1_field(
-                    dalphadi[i], j, dx, *get_boundary_codes(params, j), mad_q=params.mad_q
-                )
+                second_derivative = diff1_physical(dalphadi[i], j, params)
             dalphadij = dalphadij.at[i, j].set(second_derivative)
 
     dWdi = jnp.stack(
         [
-            diff1_field(W, d, dx, *get_boundary_codes(params, d), mad_q=params.mad_q)
+            diff1_physical(W, d, params)
             for d in range(3)
         ],
         axis=0,
@@ -263,12 +234,7 @@ def compute_W2_covariant_lapse_hessian(
 
     metric_derivs = jnp.stack(
         [
-            diff1_field(
-                conformal_metric,
-                d + 2,
-                dx,
-                *get_boundary_codes(params, d), mad_q=params.mad_q,
-            )
+            diff1_physical(conformal_metric, d + 2, params)
             for d in range(3)
         ],
         axis=0,

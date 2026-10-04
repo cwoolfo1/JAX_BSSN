@@ -4,7 +4,10 @@ import jax.numpy as jnp
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
-from JAX_BSSN.bssn.tensor_algebra import invert_3x3_metric
+from JAX_BSSN.bssn.tensor_algebra import (
+    determinant_3x3_metric,
+    invert_3x3_metric,
+)
 
 from JAX_BSSN.EM.first_order.staggering import (
     CENTER_LOCATION,
@@ -31,6 +34,14 @@ def _metric_fields_at_location(
     conformal_metric = interpolate_between_locations(
         bssn.conformal_metric, CENTER_LOCATION, location, params
     )
+
+    # Componentwise interpolation does not preserve unit determinant. Project
+    # after all spatial shifts, keeping W fixed as in the BSSN constraints.
+    # This changes the interpolated physical metric so its volume factor is
+    # W^-3, consistently with the densitized Maxwell fields. Invalid metrics
+    # remain invalid: do not floor or take the absolute value of the determinant.
+    determinant = determinant_3x3_metric(conformal_metric)
+    conformal_metric = conformal_metric * determinant ** (-1.0 / 3.0)
 
     W = jnp.maximum(W, W_FLOOR_VALUE)
     inverse_conformal_metric = invert_3x3_metric(conformal_metric)

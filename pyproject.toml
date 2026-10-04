@@ -23,9 +23,11 @@ dependencies = [
 [project.optional-dependencies]
 demos = [
     "tqdm",
+    "sympy",
 ]
 test = [
     "pytest",
+    "sympy",
 ]
 
 [tool.setuptools]
@@ -37,7 +39,10 @@ packages = [
     "JAX_BSSN.cartoon.spherical_symmetry",
     "JAX_BSSN.diagnostics",
     "JAX_BSSN.EM",
-    "JAX_BSSN.EM.cartoon",
+    "JAX_BSSN.EM.first_order",
+    "JAX_BSSN.EM.first_order.cartoon",
+    "JAX_BSSN.EM.second_order",
+    "JAX_BSSN.EM.second_order.cartoon",
     "JAX_BSSN.evolution",
     "JAX_BSSN.fmr",
     "JAX_BSSN.utilities",

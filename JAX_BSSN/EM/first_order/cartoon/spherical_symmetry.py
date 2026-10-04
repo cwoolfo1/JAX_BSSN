@@ -3,6 +3,8 @@
 import jax
 import jax.numpy as jnp
 
+from JAX_BSSN.evolution.coordinates import grid_coordinates
+
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.cartoon.spherical_symmetry import (
     CARTOON_CENTER,
@@ -79,21 +81,7 @@ def _outer_buffer(radial_axis, radial_site, params):
 
 
 def _target_coordinates(shape, location, params, dtype):
-    axes = []
-    for size, site, minimum in zip(
-        shape,
-        location,
-        (params.x_min, params.y_min, params.z_min),
-    ):
-        axes.append(
-            jnp.asarray(minimum, dtype=dtype)
-            + params.dx
-            * (
-                jnp.arange(size, dtype=dtype)
-                + _native_offset(site)
-            )
-        )
-    return jnp.meshgrid(*axes, indexing="ij")
+    return jnp.meshgrid(*(v.reshape(-1) for v in grid_coordinates(shape, params, dtype, location)), indexing="ij")
 
 
 def _reconstruct_radial_vector(field, locations, params):

@@ -28,15 +28,22 @@ The supported physical examples are:
 
 1. Gauge wave
 2. Linear wave
-3. Single puncture
-4. Spherical Cartoon puncture
-5. Axisymmetric Cartoon puncture
-6. Axisymmetric boosted Bowen--York puncture
-7. First-order Einstein--Maxwell black-hole formation candidate
-8. Second-order Einstein--Maxwell black-hole formation candidate
+3. Spherical Cartoon puncture
+
+4. Exact electromagnetic pp-wave packet in Rosen coordinates
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
+
+Run the compact Einstein--Maxwell propagation test and make comparison movies:
+
+```bash
+python demos/EM_waves/run.py
+python demos/EM_waves/make_movies.py --input demos/EM_waves/output
+```
+
+See [EM_waves](demos/EM_waves/README.md) for the exact solution, spatial/time
+refinement validation, and numerical-versus-exact movie descriptions.
 
 Run the periodic analytic gauge wave:
 
@@ -82,68 +89,47 @@ python axisymmetric_bowen_york.py
 python make_movies.py  # optional; requires ffmpeg
 ```
 
-Run the same constraint-solved electromagnetic dipole data with either the
-first-order staggered Yee solver or the second-order cell-centered wave solver:
+Run constraint-solved electromagnetic dipole data with either the first-order
+staggered Yee solver or the second-order cell-centered wave solver:
 
 ```bash
-python demos/EM_blackhole_formation_first_order/EM_blackhole_formation_first_order.py
-python demos/EM_blackhole_formation_second_order/EM_blackhole_formation_second_order.py
+python demos/EM_blackhole_formation_first_order/run_collapse.py
+python demos/EM_blackhole_formation_second_order/run_collapse.py
 ```
 
-Each demo owns an identical local copy of the physical initial-data routines
-and writes to an `output/` directory beside its script by default. The
-first-order openPMD output contains physical `D` and `B`; the second-order
-output contains `E` and `B`. The default amplitude remains a
-literature-informed candidate.
+Configure either demo by editing `simulation_parameters.py` in its folder.
+It contains pulse, domain, initial metric solver, BSSN evolution, and output
+settings; there are no command-line configuration options. `initial_pulse.py`
+creates the electromagnetic fields, `initial_metric.py` solves the Hamiltonian
+constraint, and `run_collapse.py` assembles and evolves the coupled state.
+Each folder also owns `collapse_io.py` and `make_movies.py`.
 
-The initial-data phase solves the rho-weighted Hamiltonian constraint directly
-on the positive-rho, full-z Cartoon plane. It uses a conservative radial flux,
-regular zero flux at the axis, and fixed `u=0` outer-rho and outer-z rows. Both
-demos evolve the Gamma-driver shift, write rolling restart checkpoints, and
-record constraint diagnostics and field snapshots. The first-order default
-end time is 500 simulation units; the second-order default remains 40. Override
-either with `--final-time`. Evolution stops at the last whole timestep at or
-before that time, or reports `failed_nonfinite` if the state becomes nonfinite.
-A `complete` run has reached its requested step count; this does not certify
-black-hole formation or physical settling.
+Both demos solve the rho-weighted cylindrical Hamiltonian constraint on the
+positive-rho, full-z Cartoon plane, with regular zero flux at the axis and fixed
+`u=0` outer boundaries. Defaults are amplitude 0.913, width 1, pulse-center
+parameter 0, a 200-by-400 uniform grid, and final time 100. Cell edges span rho
+from 0 to 12 and z from -12 to 12. The physical Cartesian spacing is 0.06 in
+all directions, and `CFL=0.2` gives a timestep of 0.012.
 
-Existing run files are never overwritten by a fresh run; choose a fresh
-`--output-dir` or continue `--restart path/to/rolling_checkpoint.npz`. Older
-checkpoints remain readable, including runs previously marked `settled`.
+Both demos start fresh, record field snapshots and constraint norms, and write
+the final native state to `final_checkpoint.npz`. There is no restart or periodic
+checkpoint option. Evolution stops at the last whole step at or before
+`FINAL_TIME`, or reports `failed_nonfinite` when detected. Completion does not
+establish black-hole formation or physical settling. Set `OUTPUT_DIR` to a
+fresh directory to avoid overwriting existing run files; the default is
+`output_uniform/` beside the script.
 
-Run a separate Schwarzschild comparison with an explicitly chosen positive
-mass (1.0 is an example, not a measured remnant mass). It uses the first-order
-checkpoint's grid, gauge, and elapsed time, and writes 16 BSSN comparison plots:
+First-order openPMD fields contain physical contravariant `D` and `B`;
+second-order fields contain physical covariant `E` and `B`, with projected time
+derivatives retained in checkpoints. Each `make_movies.py` renders the saved
+physical coordinates and computes electromagnetic energy density using the
+appropriate spatial metric contraction. Checkpoints and summaries record the uniform grid parameters.
+Readers reject legacy mapped checkpoints and meshes. Compiled JAX programs are cached in `.jax_cache/` beside the runner,
+unless `JAX_COMPILATION_CACHE_DIR` is set.
 
-```bash
-python demos/EM_blackhole_formation_first_order/compare_schwarzschild.py \
-  --input-dir path/to/collapse --mass 1.0 \
-  --output-dir path/to/new_comparison
-```
-
-Regenerate those plots with `--plot-only --input-dir path/to/collapse
---output-dir path/to/new_comparison`; the saved reference supplies the mass.
-For a separately evolved openPMD reference, compare lapse and conformal factor:
-
-```bash
-python demos/plot_em_blackhole_schwarzschild.py \
-  --formation path/to/collapse \
-  --reference path/to/reference --mass 1.0 \
-  --output path/to/comparison.png
-```
-
-Each formation folder contains its own `collapse_io.py` for checkpoints and
-summaries, alongside its local initial-data helpers. The first-order folder
-also contains `schwarzschild_reference.py`; its `run_schwarzschild_reference`
-helper accepts an explicit mass, grid parameters, and final time, and retains
-restart support. These workflows live entirely in the demos and are not part
-of the installed production package.
-Profile error norms use a fixed interval from two formation-grid spacings to
-65% of the common radial extent. They do not identify a black-hole exterior.
-Coordinate profiles depend on gauge history even with matching gauge settings.
 
 The default production runs compile substantial JAX kernels. The
-[demo guide](docs/demos.rst) describes the evolution and comparison options.
+[demo guide](docs/demos.rst) describes the evolution and configuration options.
 
 ## Package structure
 

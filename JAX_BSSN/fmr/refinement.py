@@ -205,6 +205,7 @@ def validate_hierarchy(states, parameters, hierarchy: FMRHierarchySpec) -> None:
     if not np.isfinite(dt) or dt <= 0.0:
         raise ValueError("the shared FMR timestep must be finite and positive")
     for level, (state, params) in enumerate(zip(states, parameters)):
+
         if not np.isclose(float(params.dt), dt):
             raise ValueError("stage-synchronous FMR requires identical timesteps")
         shapes = {tuple(field.shape[-3:]) for field in state}

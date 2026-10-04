@@ -6,9 +6,13 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
 from JAX_BSSN.evolution.time_evolve import rk4_step
+from JAX_BSSN.evolution.boundaries import SOMMERFELD_BC
+from JAX_BSSN.EM.first_order.geometry import _metric_fields_at_location
+from JAX_BSSN.EM.first_order.boundaries import apply_densitized_sommerfeld_boundaries
 
 from JAX_BSSN.EM.first_order import (
     CENTER_LOCATION,
@@ -94,14 +98,17 @@ def test_density_factor_is_W_minus_three_not_metric_determinant():
     np.testing.assert_allclose(recovered_B, physical_B)
 
 
-def test_manufactured_constitutive_relations_with_shift_and_offdiagonal_metric():
+@pytest.mark.parametrize("metric_scale", [1.0, 2.0])
+def test_manufactured_constitutive_relations_with_shift_and_offdiagonal_metric(metric_scale):
     shape = (7, 5, 3)
     params = BSSNParameters(dx=0.3, dt=0.02, nu=0.0)
     conformal_metric = jnp.asarray(
         [[1.2, 0.15, -0.08], [0.15, 0.9, 0.11], [-0.08, 0.11, 1.1]]
     )
+    conformal_metric /= jnp.linalg.det(conformal_metric) ** (1.0 / 3.0)
     bssn = _constant_bssn(
-        shape, 0.75, conformal_metric, lapse=0.83, shift=(0.12, -0.07, 0.04)
+        shape, 0.75, metric_scale * conformal_metric,
+        lapse=0.83, shift=(0.12, -0.07, 0.04)
     )
     D_density_values = jnp.asarray((0.3, -0.2, 0.1))
     B_density_values = jnp.asarray((-0.15, 0.05, 0.25))
@@ -127,6 +134,133 @@ def test_manufactured_constitutive_relations_with_shift_and_offdiagonal_metric()
     expected_H = jnp.broadcast_to(expected_H[:, None, None, None], H.shape)
     np.testing.assert_allclose(E, expected_E)
     np.testing.assert_allclose(H, expected_H)
+
+
+def _smooth_unit_metric(x, y, z):
+    """Analytic SPD metric with unit determinant and off-diagonal entries."""
+    phase = 0.3 * jnp.sin(x) + 0.2 * jnp.cos(y) + 0.1 * jnp.sin(z)
+    eigenvalues = jnp.stack((jnp.exp(phase), jnp.exp(-0.4 * phase),
+                            jnp.exp(-0.6 * phase)))
+    rotation = jnp.asarray([[1., 2., 2.], [2., 1., -2.], [-2., 2., -1.]]) / 3.0
+    return jnp.einsum("ia,a...,ja->ij...", rotation, eigenvalues, rotation)
+
+
+def _matrix_last(metric):
+    return np.moveaxis(np.asarray(metric), (0, 1), (-2, -1))
+
+
+@pytest.mark.parametrize("shape", [(7, 6, 5), (7, 1, 5)])
+@pytest.mark.parametrize("sommerfeld", [False, True])
+def test_yee_metric_projection_preserves_W_and_volume(shape, sommerfeld):
+    dx = 0.15
+    params = BSSNParameters(dx=dx, dt=0.01, nu=0.0)
+    if sommerfeld:
+        params = params._replace(xl_bc=SOMMERFELD_BC, xr_bc=SOMMERFELD_BC,
+                                 zl_bc=SOMMERFELD_BC, zr_bc=SOMMERFELD_BC)
+    x, y, z = jnp.meshgrid(*(dx * (jnp.arange(n) + 0.5) for n in shape),
+                           indexing="ij")
+    bssn = _constant_bssn(shape, 1.0, jnp.eye(3))._replace(
+        conformal_metric=_smooth_unit_metric(x, y, z),
+        conformal_factor=0.8 + 0.03 * jnp.sin(x + y + z),
+        lapse=0.9 + 0.02 * jnp.cos(x - z),
+        shift=jnp.stack((0.02 * x, -0.03 * y, 0.01 * z)),
+    )
+    np.testing.assert_allclose(np.linalg.det(_matrix_last(bssn.conformal_metric)),
+                               1.0, atol=1.e-12, rtol=0.0)
+    for location in DISPLACEMENT_FIELD_LOCATIONS + MAGNETIC_FIELD_LOCATIONS:
+        raw = interpolate_between_locations(bssn.conformal_metric,
+                                             CENTER_LOCATION, location, params)
+        raw_matrix = _matrix_last(raw)
+        raw_det = np.linalg.det(raw_matrix)
+        # An isolated shift along a singleton dimension performs no averaging.
+        if any(site == "V" and n > 1 for site, n in zip(location, shape)):
+            assert np.max(np.abs(raw_det - 1.0)) > 1.e-8
+        W, lapse, shift, metric, inverse = _metric_fields_at_location(bssn, location, params)
+        for actual, source in zip((W, lapse, shift),
+                                  (bssn.conformal_factor, bssn.lapse, bssn.shift)):
+            expected = interpolate_between_locations(source, CENTER_LOCATION, location, params)
+            np.testing.assert_array_equal(actual, expected)
+        matrix = _matrix_last(metric)
+        np.testing.assert_allclose(matrix, raw_matrix / np.cbrt(raw_det)[..., None, None],
+                                   atol=1.e-12, rtol=0.0)
+        assert np.all(np.linalg.eigvalsh(matrix) > 0.0)
+        np.testing.assert_allclose(np.linalg.det(matrix), 1.0, atol=1.e-12, rtol=0.0)
+        np.testing.assert_allclose(matrix @ _matrix_last(inverse),
+                                   np.broadcast_to(np.eye(3), matrix.shape),
+                                   atol=1.e-12, rtol=0.0)
+        volume = np.sqrt(np.linalg.det(_matrix_last(metric / W**2)))
+        np.testing.assert_allclose(volume, W**-3, atol=1.e-12, rtol=0.0)
+
+
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+def test_yee_constant_metric_projects_to_identity(scale):
+    bssn = _constant_bssn((4, 3, 1), 0.8, scale * jnp.eye(3))
+    for location in DISPLACEMENT_FIELD_LOCATIONS + MAGNETIC_FIELD_LOCATIONS:
+        W, _, _, metric, inverse = _metric_fields_at_location(bssn, location, BSSNParameters())
+        expected = np.broadcast_to(np.eye(3), _matrix_last(metric).shape)
+        np.testing.assert_allclose(_matrix_last(metric), expected, atol=1.e-12, rtol=0.0)
+        np.testing.assert_allclose(_matrix_last(inverse), expected, atol=1.e-12, rtol=0.0)
+        np.testing.assert_array_equal(W, bssn.conformal_factor)
+
+
+@pytest.mark.parametrize("diagonal", [(0., 1., 1.), (-1., 1., 1.), (-1., -1., 1.)])
+def test_yee_projection_does_not_repair_invalid_geometry(diagonal):
+    bssn = _constant_bssn((3, 2, 1), 0.8, jnp.diag(jnp.asarray(diagonal)))
+    _, _, _, metric, inverse = _metric_fields_at_location(
+        bssn, DISPLACEMENT_FIELD_LOCATIONS[0], BSSNParameters())
+    # Also cover positive-determinant indefinite input: det=1 is not sufficient.
+    assert not (np.all(np.isfinite(metric)) and np.all(np.isfinite(inverse)))
+
+
+def test_yee_projected_metric_interpolation_is_second_order():
+    errors = []
+    for n in (16, 32, 64):
+        dx = 2.0 * math.pi / n
+        params = BSSNParameters(dx=dx)
+        x, y, z = jnp.meshgrid(*(dx * (jnp.arange(n) + 0.5) for _ in range(3)),
+                               indexing="ij")
+        bssn = _constant_bssn((n, n, n), 0.8, jnp.eye(3))._replace(
+            conformal_metric=_smooth_unit_metric(x, y, z))
+        site_errors = []
+        for location in DISPLACEMENT_FIELD_LOCATIONS + MAGNETIC_FIELD_LOCATIONS:
+            coordinates = tuple(q - (0.5 * dx if site == "V" else 0.0)
+                                for q, site in zip((x, y, z), location))
+            expected = _smooth_unit_metric(*coordinates)
+            metric = _metric_fields_at_location(bssn, location, params)[3]
+            site_errors.append(float(jnp.sqrt(jnp.mean((metric - expected)**2))))
+        errors.append(site_errors)
+    orders = np.log2(np.asarray(errors[:-1]) / np.asarray(errors[1:]))
+    assert np.all(orders > 1.9), orders
+
+
+def test_yee_sommerfeld_normals_use_projected_inverse():
+    shape = (6, 1, 1)
+    params = BSSNParameters(dx=0.2, xl_bc=SOMMERFELD_BC, xr_bc=SOMMERFELD_BC,
+                            x_min=1.0)
+    # Projection of 2I gives I, hence physical outward normal n^x = +/- W.
+    bssn = _constant_bssn(shape, 0.8, 2.0 * jnp.eye(3), lapse=0.9,
+                          shift=(0.1, 0.0, 0.0))
+    x_center = 1.0 + params.dx * jnp.arange(shape[0])[:, None, None]
+    densities = []
+    for locations in (DISPLACEMENT_FIELD_LOCATIONS, MAGNETIC_FIELD_LOCATIONS):
+        densities.append(jnp.stack(tuple(
+            x_center - (0.5 * params.dx if location[0] == "V" else 0.0)
+            for location in locations)))
+    rhs = jnp.full((3,) + shape, 7.0)
+    results = apply_densitized_sommerfeld_boundaries(*densities, rhs, rhs, bssn, params)
+    for result, density, locations in zip(
+        results, densities, (DISPLACEMENT_FIELD_LOCATIONS, MAGNETIC_FIELD_LOCATIONS)
+    ):
+        for component, location in enumerate(locations):
+            x = np.asarray(density[component])
+            transverse_squared = sum((0.5 * params.dx)**2
+                                     for site in location[1:] if site == "V")
+            falloff = 0.9 * x / np.sqrt(x**2 + transverse_squared)
+            np.testing.assert_allclose(result[component, 0],
+                                       0.1 + 0.9 * 0.8 - falloff[0], atol=1.e-12)
+            np.testing.assert_allclose(result[component, -1],
+                                       0.1 - 0.9 * 0.8 - falloff[-1], atol=1.e-12)
+        np.testing.assert_array_equal(result[:, 1:-1], rhs[:, 1:-1])
 
 
 def test_yee_curls_are_second_order_and_divergence_of_curl_is_roundoff():

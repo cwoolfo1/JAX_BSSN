@@ -1,5 +1,7 @@
 """Spherical Cartoon reconstruction and evolution for Maxwell covectors."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 
@@ -103,6 +105,9 @@ def validate_cartoon_wave_grid(
     if float(params.mad_q) != 1.0:
         raise ValueError("Cartoon reconstruction requires mad_q=1")
 
+    if not math.isfinite(float(params.dx)) or float(params.dx) <= 0.0:
+        raise ValueError("spherical Cartoon requires finite dx > 0")
+
     expected_minima = (
         -(CARTOON_GHOST_CELLS - 0.5) * params.dx,
         -CARTOON_GHOST_CELLS * params.dx,
@@ -160,7 +165,6 @@ def _support_geometry(num_x, dx, dtype):
     transverse = (
         jnp.arange(CARTOON_SUPPORT_SIZE, dtype=dtype) - CARTOON_CENTER
     ) * spacing
-
     X = x[:, None, None]
     Y = transverse[None, :, None]
     Z = transverse[None, None, :]
