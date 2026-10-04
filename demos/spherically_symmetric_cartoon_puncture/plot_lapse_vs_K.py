@@ -11,6 +11,8 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from JAX_BSSN.diagnostics.mesh_coordinates import mesh_axis_coordinates
+
 import openpmd_api as io
 
 
@@ -41,14 +43,11 @@ def load_final_positive_axis(path: Path) -> tuple[int, float, np.ndarray, np.nda
     K_pending = K_component.load_chunk()
 
     time = float(iteration.time)
-    dx = float(lapse_mesh.grid_spacing[0])
-    offset = float(lapse_mesh.grid_global_offset[0])
-    position = float(lapse_component.position[0])
     series.flush()
 
     lapse = np.array(lapse_pending[:, 0, 0], copy=True)
     trace_K = np.array(K_pending[:, 0, 0], copy=True)
-    radius = offset + (np.arange(lapse.size) + position) * dx
+    radius = mesh_axis_coordinates(lapse_mesh, lapse_component, 0)
     positive = radius >= 0.0
 
     iteration.close()

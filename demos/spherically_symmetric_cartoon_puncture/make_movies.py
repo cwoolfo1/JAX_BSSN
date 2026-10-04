@@ -11,6 +11,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter
 import numpy as np
+from JAX_BSSN.diagnostics.mesh_coordinates import mesh_axis_coordinates
+
 import openpmd_api as io
 
 
@@ -173,12 +175,7 @@ def load_snapshots(path: Path, movie_specs: tuple[MovieSpec, ...] = MOVIES):
             pending[(mesh_name, requested_component)] = component.load_chunk()
 
             if x is None and mesh_name == "W":
-                nx = component.shape[0]
-                x = (
-                    float(mesh.grid_global_offset[0])
-                    + (np.arange(nx) + float(component.position[0]))
-                    * float(mesh.grid_spacing[0])
-                )
+                x = mesh_axis_coordinates(mesh, component, 0)
 
         series.flush()
         for component, array in pending.items():
