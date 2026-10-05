@@ -108,3 +108,32 @@ class RosenSolution:
 def prescribed_gauge(bssn, time):
     return (jnp.ones_like(bssn.lapse), jnp.zeros_like(bssn.shift),
             jnp.zeros_like(bssn.lapse), jnp.zeros_like(bssn.shift))
+
+
+def symbolic_audit():
+    """Build curvature and Maxwell tensors independently of the BSSN code."""
+    import sympy as s
+    w=s.symbols('w',real=True)
+    a=s.Function('a')(w); f=s.Function('f')(w)
+    g=s.diag(-1,a*a,a*a,1); inv=g.inv()
+    du=(1,0,0,-1)
+    derivative=lambda q,i: du[i]*s.diff(q,w)
+    simp=lambda q: s.simplify(q.subs(s.diff(a,w,2),-f*f*a))
+    connection=[[[s.simplify(sum(inv[i,l]*(derivative(g[l,j],k)+derivative(g[l,k],j)-derivative(g[j,k],l))/2 for l in range(4))) for k in range(4)] for j in range(4)] for i in range(4)]
+    ricci=s.Matrix(4,4,lambda i,j: s.simplify(sum(
+        derivative(connection[k][i][j],k)-derivative(connection[k][i][k],j)
+        +sum(connection[k][i][j]*connection[l][k][l]-connection[l][i][k]*connection[k][j][l] for l in range(4)) for k in range(4))))
+    scalar=s.simplify(sum(inv[i,j]*ricci[i,j] for i in range(4) for j in range(4)))
+    F=s.zeros(4); F[0,1]=a*f/s.sqrt(4*s.pi); F[3,1]=-F[0,1]; F=F-F.T
+    raised=inv*F*inv
+    invariant=s.simplify(sum(F[i,j]*raised[i,j] for i in range(4) for j in range(4)))
+    stress=F*inv*F.T-g*invariant/4
+    einstein=[simp(q) for q in ricci-g*scalar/2-8*s.pi*stress]
+    divergence=[simp(sum(derivative(a*a*raised[i,j],i) for i in range(4))) for j in range(4)]
+    closure=[simp(derivative(F[i,j],k)+derivative(F[j,k],i)+derivative(F[k,i],j)) for i in range(4) for j in range(4) for k in range(4)]
+    dual=sum(s.LeviCivita(i,j,k,l)*F[i,j]*F[k,l] for i in range(4) for j in range(4) for k in range(4) for l in range(4))
+    checks=einstein+divergence+closure+[invariant,simp(dual),simp(stress[0,0]-f*f/(4*s.pi))]
+    return dict(passed=all(q==0 for q in checks),nonzero_residuals=[str(q) for q in checks if q!=0],
+                method='Independent 4D Christoffel/Ricci/Einstein tensor, Maxwell divergence and closure, both null invariants',
+                rho=str(stress[0,0]),ode="a''=-f^2*a")
+

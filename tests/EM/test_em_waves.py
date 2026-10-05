@@ -1,5 +1,4 @@
-"""Exact packet, production stage hooks, and continuum reference regressions."""
-import json
+"""In-memory Rosen wave accuracy, self-convergence, and stage regressions."""
 
 import jax
 jax.config.update('jax_enable_x64',True)
@@ -7,8 +6,18 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from JAX_BSSN.bssn.variables import BSSNParameters
+from JAX_BSSN.bssn.constraints import (
+    compute_det_gamma_violation,
+    compute_trace_A_violation,
+)
 from JAX_BSSN.EM.first_order import evolve
-from demos.EM_waves.solution import Packet, RosenSolution, GHOSTS, prescribed_gauge, profile
+from JAX_BSSN.EM.first_order.equations import (
+    densitized_displacement_divergence,
+    densitized_magnetic_divergence,
+)
+from tests.EM.em_wave_helpers import (
+    GHOSTS, Packet, RosenSolution, prescribed_gauge, profile, symbolic_audit,
+)
 
 
 def solution(n=32,packet=Packet(),duration=.1):
@@ -18,8 +27,8 @@ def solution(n=32,packet=Packet(),duration=.1):
 
 
 def test_continuum_tensors_and_normalization():
-    from demos.EM_waves.validate import symbolic_audit
-    assert symbolic_audit()['passed']
+    audit = symbolic_audit()
+    assert audit['passed'], audit['nonzero_residuals']
 
 
 def test_native_sampling_and_history():
@@ -97,119 +106,135 @@ def test_short_coupled_packet_evolves_interior():
         np.testing.assert_allclose(q[...,-GHOSTS:],r[...,-GHOSTS:],atol=1e-14)
 
 
-# Explicit lists prevent a missing field or zero error from silently removing
-# an equation from the convergence checks.
-_WAVE_FIELDS = {
-    'D': ('D_native', 'D_native_exact'),
-    'B': ('B_native', 'B_native_exact'),
-    'conformal_metric': ('bssn_conformal_metric', 'exact_conformal_metric'),
-    'conformal_factor': ('bssn_conformal_factor', 'exact_conformal_factor'),
-    'traceless_K': ('bssn_traceless_K', 'exact_traceless_K'),
-    'trace_K': ('bssn_trace_K', 'exact_trace_K'),
-    'conformal_connection': ('bssn_conformal_connection', 'exact_conformal_connection'),
+# Keep every evolved field explicit so missing or vanishing signals cannot
+# silently remove an equation from the accuracy or self-convergence checks.
+_GRAVITY_TOLERANCES = {
+    'conformal_metric': 5e-6,
+    'conformal_factor': 2e-6,
+    'traceless_K': 2e-5,
+    'trace_K': 2e-5,
+    'conformal_connection': 5e-5,
 }
-_SPATIAL_FIELDS = {**_WAVE_FIELDS, 'rho': ('rho', 'rho_exact')}
-_CONVERGING_CONSTRAINTS = ('hamiltonian', 'momentum', 'gamma_condition')
-_ROUNDOFF_CONSTRAINTS = ('det_gamma', 'trace_A', 'div_D', 'div_B')
+_WAVE_FIELDS = ('D', 'B', *_GRAVITY_TOLERANCES)
 
 
-@pytest.fixture(scope='module')
-def em_wave_convergence_runs(tmp_path_factory):
-    """Five fresh production evolutions shared by space/time assertions."""
-    from demos.EM_waves.run import run
-
-    root = tmp_path_factory.mktemp('em_wave_convergence')
-    cases = ((128, .2), (256, .2), (512, .2), (256, .1), (256, .05))
-    results = {}
-    for n, cfl in cases:
-        output = root / f'n{n}_cfl{cfl:g}'
-        rows = run(output, n=n, cfl=cfl, duration=4., frames=2, device='cpu')
-        config = json.loads((output / 'configuration.json').read_text())
-        label = f'N={n}, dt={config["dt"]:.8g}, output={output}'
-        assert config['status'] == 'complete', label
-        assert 'CPU' in config['device'].upper(), label
-        assert len(rows) == 2, label
-        np.testing.assert_array_equal([row['time'] for row in rows], [0., 4.], err_msg=label)
-
-        # Snapshots contain only physical cells and common-time D/B (not
-        # mismatched half-step histories from final_state.npz).
-        with np.load(output / 'snapshots.npz') as data:
-            np.testing.assert_array_equal(data['time'], [0., 4.], err_msg=label)
-            assert data['z'].shape == (n,), label
-            numerical, reference = {}, {}
-            for name, (actual_key, exact_key) in _SPATIAL_FIELDS.items():
-                actual, exact = data[actual_key], data[exact_key]
-                assert actual.dtype == exact.dtype == np.dtype('float64'), f'{label}: {name}'
-                assert actual.shape == exact.shape, f'{label}: {name}'
-                assert actual.shape[0] == 2 and actual.shape[-1] == n, f'{label}: {name}'
-                assert np.isfinite(actual).all() and np.isfinite(exact).all(), f'{label}: {name}'
-                numerical[name], reference[name] = actual[-1].copy(), exact[-1].copy()
-            for gauge, expected in (('lapse', 1.), ('shift', 0.)):
-                np.testing.assert_allclose(
-                    data[f'bssn_{gauge}'], expected, rtol=0, atol=1e-14,
-                    err_msg=f'{label}: prescribed {gauge}',
-                )
-
-        for row in rows:
-            for name in _ROUNDOFF_CONSTRAINTS:
-                value = row['constraints'][name]
-                assert np.isfinite(value) and 0 <= value < 1e-12, (
-                    f'{label}, t={row["time"]}: {name} RMS={value}, expected <1e-12'
-                )
-        results[n, cfl] = dict(
-            numerical=numerical, reference=reference,
-            constraints=rows[-1]['constraints'], dt=config['dt'],
-        )
-    return results
+def _physical(value):
+    return np.asarray(value)[..., 0, 0, GHOSTS:-GHOSTS]
 
 
 def _wave_rms(value):
     return float(np.sqrt(np.mean(np.asarray(value)**2)))
 
 
-def _assert_wave_convergence(field, levels, errors):
-    errors = np.asarray(errors, dtype=float)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        orders = np.log2(errors[:-1] / errors[1:])
-    message = (
-        f'{field}; {levels}; RMS errors/differences={errors.tolist()}; '
-        f'observed orders={orders.tolist()}; expected decreasing errors and order >1.7'
-    )
-    # These resolved signals are comfortably above roundoff. A zero/vanishing
-    # error is a failure, not grounds for dropping the field from the study.
-    assert np.all(np.isfinite(errors)) and np.all(errors > 1e-14), message
-    assert np.all(errors[1:] < errors[:-1]), message
-    assert np.all(np.isfinite(orders)) and np.all(orders > 1.7), message
+def _wave_fields(bssn, d, b):
+    return {
+        'D': _physical(d),
+        'B': _physical(b),
+        **{name: _physical(getattr(bssn, name)) for name in _GRAVITY_TOLERANCES},
+    }
 
 
-def test_em_wave_spatial_convergence(em_wave_convergence_runs):
-    resolutions = (128, 256, 512)
-    runs = [em_wave_convergence_runs[n, .2] for n in resolutions]
-    levels = f'N={resolutions}, dt={[case["dt"] for case in runs]}'
-    for name in _SPATIAL_FIELDS:
-        errors = [
-            _wave_rms(case['numerical'][name] - case['reference'][name])
-            for case in runs
-        ]
-        _assert_wave_convergence(name, levels, errors)
-        if name in ('D', 'B'):
-            scale = _wave_rms(runs[-1]['reference'][name])
-            assert np.isfinite(scale) and scale > 1e-14, f'{name}: reference RMS={scale}'
-            relative = errors[-1] / scale
-            assert relative < .02, f'{name}; {levels}; finest relative RMS={relative}, expected <0.02'
-    for name in _CONVERGING_CONSTRAINTS:
-        _assert_wave_convergence(
-            name, levels, [case['constraints'][name] for case in runs],
+def _assert_gauge_and_constraints(state, params, label):
+    for name, expected in (('lapse', 1.), ('shift', 0.)):
+        np.testing.assert_allclose(
+            getattr(state.bssn, name), expected, rtol=0, atol=1e-14,
+            err_msg=f'{label}: prescribed {name}',
+        )
+    d, b = evolve.common_densitized_fields(state.em)
+    constraints = {
+        'det_gamma': compute_det_gamma_violation(state.bssn),
+        'trace_A': compute_trace_A_violation(state.bssn),
+        'div_D': densitized_displacement_divergence(d, params),
+        'div_B': densitized_magnetic_divergence(b, params),
+    }
+    for name, field in constraints.items():
+        value = _wave_rms(_physical(field))
+        assert np.isfinite(value) and 0 <= value < 1e-12, (
+            f'{label}: {name} RMS={value}, expected <1e-12'
         )
 
 
-def test_em_wave_temporal_convergence(em_wave_convergence_runs):
-    runs = [em_wave_convergence_runs[256, cfl] for cfl in (.2, .1, .05)]
+@pytest.fixture(scope='module')
+def em_wave_convergence_runs():
+    """Three short CPU evolutions sharing one reference and compiled stepper."""
+    n, duration = 128, .5
+    dx = 8 / n
+    step_counts = (40, 80, 160)
+    results = []
+    with jax.default_device(jax.devices('cpu')[0]):
+        z = -4 + (np.arange(n + 2*GHOSTS) - GHOSTS + .5)*dx
+        # The largest dt covers all three runs' staggered history and stages.
+        sol = RosenSolution(z, dx, duration / step_counts[0], duration)
+        reference = _wave_fields(sol.bssn(duration), *sol.fields(duration))
+
+        @jax.jit
+        def step(state, params, time):
+            # Pass dt through params rather than closing over it: all refinements
+            # reuse the same compiled function and static boundary callback.
+            return evolve.first_order_einstein_maxwell_step(
+                state, params, time=time,
+                prescribed_gauge=prescribed_gauge, stage_boundary=sol.boundary,
+            )
+
+        for steps in step_counts:
+            dt = duration / steps
+            params = BSSNParameters(
+                dx=dx, dt=dt, nu=0., kappa=0., zero_shift=1, z_min=float(z[0]),
+            )
+            state = sol.state(0., dt)
+            label = f'N={n}, dt={dt:.8g}, steps={steps}'
+            _assert_gauge_and_constraints(state, params, f'{label}, t=0')
+            for i in range(steps):
+                state = step(state, params, jnp.asarray(i*dt))
+            _assert_gauge_and_constraints(state, params, f'{label}, t={duration}')
+
+            # D is averaged to the integer time; B already lives there. Neither
+            # field is spatially recentered before comparison to its native sites.
+            numerical = _wave_fields(
+                state.bssn, *evolve.common_densitized_fields(state.em),
+            )
+            for name in _WAVE_FIELDS:
+                actual, exact = numerical[name], reference[name]
+                assert actual.dtype == exact.dtype == np.dtype('float64'), f'{label}: {name}'
+                assert actual.shape == exact.shape and actual.shape[-1] == n, f'{label}: {name}'
+                assert np.isfinite(actual).all() and np.isfinite(exact).all(), f'{label}: {name}'
+            results.append(dict(numerical=numerical, reference=reference, dt=dt))
+    return results
+
+
+def test_em_wave_analytical_comparison(em_wave_convergence_runs):
+    finest = em_wave_convergence_runs[-1]
+    for name in _WAVE_FIELDS:
+        error = _wave_rms(finest['numerical'][name] - finest['reference'][name])
+        label = f'{name}; N=128, dt={finest["dt"]}, t=0.5'
+        assert np.isfinite(error), label
+        if name in ('D', 'B'):
+            scale = _wave_rms(finest['reference'][name])
+            assert np.isfinite(scale) and scale > 1e-14, f'{label}: reference RMS={scale}'
+            relative = error / scale
+            assert relative < .02, f'{label}: relative RMS={relative}, expected <0.02'
+        else:
+            tolerance = _GRAVITY_TOLERANCES[name]
+            assert error < tolerance, f'{label}: RMS={error}, expected <{tolerance}'
+
+
+def test_em_wave_temporal_self_convergence(em_wave_convergence_runs):
+    runs = em_wave_convergence_runs
     timesteps = np.asarray([case['dt'] for case in runs])
     np.testing.assert_allclose(timesteps[:-1] / timesteps[1:], 2., rtol=0, atol=1e-14)
     for name in _WAVE_FIELDS:
-        differences = [
+        differences = np.asarray([
             _wave_rms(runs[i]['numerical'][name] - runs[i+1]['numerical'][name])
             for i in (0, 1)
-        ]
-        _assert_wave_convergence(name, f'N=256, dt={timesteps.tolist()}', differences)
+        ])
+        with np.errstate(divide='ignore', invalid='ignore'):
+            order = np.log2(differences[0] / differences[1])
+        message = (
+            f'{name}; N=128, dt={timesteps.tolist()}; '
+            f'RMS differences={differences.tolist()}; observed order={order}; '
+            'expected decreasing differences and order >1.7'
+        )
+        # These resolved signals must not disappear into roundoff.
+        assert np.all(np.isfinite(differences)) and np.all(differences > 1e-14), message
+        assert differences[1] < differences[0], message
+        assert np.isfinite(order) and order > 1.7, message

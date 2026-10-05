@@ -29,20 +29,9 @@ The supported physical examples are:
 1. Gauge wave
 2. Linear wave
 3. Spherical Cartoon puncture
-4. Exact electromagnetic pp-wave packet in Rosen coordinates
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
-
-Run the compact Einstein--Maxwell propagation test and make comparison movies:
-
-```bash
-python demos/EM_waves/run.py
-python demos/EM_waves/make_movies.py --input demos/EM_waves/output
-```
-
-See the [EM-wave demo guide](docs/demos.rst#electromagnetic-pp-wave-packet)
-for the reference solution, refinement validation, and comparison movies.
 
 Run the periodic analytic gauge wave:
 
@@ -80,8 +69,8 @@ JAX_BSSN/
 ```
 
 Demos own their physical initial data and configuration; reusable Bowen–York
-helpers live in `JAX_BSSN.utilities`. Analytic wave tests use
-`tests/initial_data.py`, while integration tests also exercise demo runners.
+helpers live in `JAX_BSSN.utilities`. Analytic reference data lives under
+`tests/`, while integration tests also exercise demo runners.
 
 ## Tests
 
@@ -91,3 +80,13 @@ Install test dependencies and run the complete suite with:
 python -m pip install -e ".[test]"
 python -m pytest
 ```
+
+Run the in-memory Einstein--Maxwell Rosen wave tests, including analytical
+comparison and temporal self-convergence, with:
+
+```bash
+python -m pytest tests/EM/test_em_waves.py
+```
+
+The convergence study uses 128 cells and three timestep sizes through `t=0.5`
+on the CPU in double precision. It writes no simulation output files.

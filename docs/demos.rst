@@ -1,36 +1,14 @@
 Demos
 =====
 
-The supported physical examples are gauge wave, linear wave, spherical Cartoon
-puncture, and an electromagnetic pp-wave packet. Each demo owns its coordinates,
-initial data, parameters, and run loop.
+The supported physical examples are gauge wave, linear wave, and spherical Cartoon
+puncture. Each demo owns its coordinates, initial data, parameters, and run loop.
 
 Install demo support first:
 
 .. code-block:: bash
 
    python -m pip install -e ".[demos]"
-
-Electromagnetic pp-wave packet
------------------------------
-
-The ``EM_waves`` demo evolves the exact Einstein--Maxwell plane-wave family
-of Harte and Drivas (arXiv:1202.0540v3) in Rosen coordinates. It uses the
-production first-order Maxwell/BSSN stepper on a plane-symmetric Cartesian
-grid, with prescribed lapse and shift and exact boundary data.
-
-.. code-block:: bash
-
-   python demos/EM_waves/run.py
-   python demos/EM_waves/make_movies.py --input demos/EM_waves/output
-   python demos/EM_waves/validate.py
-
-The default packet crosses from z=-2 to z=2 over t=0 to t=4. Movies compare
-the numerical EM fields and gravitational response with the exact solution.
-The validator checks the continuum equations independently and measures
-spatial and temporal convergence. The reference scale factor obeys
-``a'' = -f^2 a``; the demo rejects intervals where ``a < 0.5`` to keep
-evolution away from Rosen coordinate focusing.
 
 Gauge wave
 ----------

@@ -23,7 +23,6 @@ dependencies = [
 [project.optional-dependencies]
 demos = [
     "tqdm",
-    "sympy",
 ]
 test = [
     "pytest",
