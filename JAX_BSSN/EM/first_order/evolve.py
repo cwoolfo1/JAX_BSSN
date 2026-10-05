@@ -25,6 +25,11 @@ from JAX_BSSN.EM.first_order.staggering import (
     MAGNETIC_FIELD_LOCATIONS,
 )
 from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.first_order.pec import (
+    apply_pec_boundaries,
+    enforce_pec_B,
+    enforce_pec_D,
+)
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
@@ -114,37 +119,59 @@ def bootstrap_densitized_maxwell_state(
     )
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("pec_boundary",))
 def initialize_densitized_maxwell_state(
     densitized_displacement: jnp.ndarray,
     densitized_magnetic: jnp.ndarray,
     bssn: BSSNVariables,
     params: BSSNParameters,
+    *,
+    pec_boundary=None,
 ) -> DensitizedMaxwellState:
     """Bootstrap the doubled leapfrog from common-time density fields."""
 
     bssn = enforce_algebraic_constraints(bssn)
+    if pec_boundary is not None:
+        densitized_displacement, densitized_magnetic = apply_pec_boundaries(
+            densitized_displacement, densitized_magnetic, bssn, params,
+            boundary=pec_boundary,
+        )
     displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
         densitized_displacement,
         densitized_magnetic,
         bssn,
         params,
     )
-    return bootstrap_densitized_maxwell_state(
+    em = bootstrap_densitized_maxwell_state(
         densitized_displacement,
         densitized_magnetic,
         displacement_rhs,
         magnetic_rhs,
         params.dt,
     )
+    if pec_boundary is not None:
+        # First-order metric predictors suffice for second-order history data.
+        rhs = _bssn_rhs_from_densities(bssn, densitized_displacement, densitized_magnetic, params)
+
+        def metric_at(offset):
+            return enforce_algebraic_constraints(_add_bssn_scaled(bssn, rhs, offset * params.dt))
+
+        em = em._replace(
+            magnetic_previous=enforce_pec_B(em.magnetic_previous, metric_at(-1), params, boundary=pec_boundary),
+            displacement_left_half=enforce_pec_D(em.displacement_left_half, metric_at(-0.5), params, boundary=pec_boundary),
+            displacement_right_half=enforce_pec_D(em.displacement_right_half, metric_at(0.5), params, boundary=pec_boundary),
+        )
+    return em
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("pec_boundary",))
 def initialize_first_order_einstein_maxwell_state(
     bssn: BSSNVariables,
     physical_displacement: jnp.ndarray,
     physical_magnetic: jnp.ndarray,
     params: BSSNParameters,
+    *,
+    pec_boundary=None,
 ) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Initialize from physical contravariant fields on their native Yee sites."""
 
@@ -162,11 +189,12 @@ def initialize_first_order_einstein_maxwell_state(
         densitized_magnetic,
         bssn,
         params,
+        pec_boundary=pec_boundary,
     )
     return EinsteinMaxwellVariables(bssn=bssn, em=em)
 
 
-@partial(jax.jit, static_argnames=("prescribed_gauge", "stage_boundary"))
+@partial(jax.jit, static_argnames=("prescribed_gauge", "stage_boundary", "pec_boundary"))
 def first_order_einstein_maxwell_step(
     state: EinsteinMaxwellVariables[DensitizedMaxwellState],
     params: BSSNParameters,
@@ -174,6 +202,7 @@ def first_order_einstein_maxwell_step(
     time=0.0,
     prescribed_gauge=None,
     stage_boundary=None,
+    pec_boundary=None,
 ) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
     """Advance one two-way coupled RK4/doubled-leapfrog timestep.
 
@@ -186,7 +215,9 @@ def first_order_einstein_maxwell_step(
     During history-only calls, other inputs retain current-stage values and
     their returned values are discarded. Prescribed boundary callbacks should
     therefore obtain boundary data from time/coordinates, not those inputs.
-    With neither callback, the historical algorithm is unchanged.
+    ``pec_boundary`` selects metric-aware Cartesian conductor walls on an
+    explicitly padded grid. PEC runs after the optional stage callback and
+    uses the projected metric at each stage (and predicted history time).
     """
 
     def prepare(bssn, displacement, magnetic, t):
@@ -195,6 +226,10 @@ def first_order_einstein_maxwell_step(
         if prescribed_gauge is not None:
             lapse, shift, _, _ = prescribed_gauge(bssn, t)
             bssn = bssn._replace(lapse=lapse, shift=shift)
+        if pec_boundary is not None:
+            displacement, magnetic = apply_pec_boundaries(
+                displacement, magnetic, bssn, params, boundary=pec_boundary
+            )
         return bssn, displacement, magnetic
 
     def gravity_rhs(bssn, displacement, magnetic, t):
@@ -220,6 +255,9 @@ def first_order_einstein_maxwell_step(
     magnetic_previous = em.magnetic_previous
     if stage_boundary is not None:
         _, _, magnetic_previous = stage_boundary(bssn_n, displacement_n, magnetic_previous, time - dt)
+    if pec_boundary is not None:
+        previous_metric = enforce_algebraic_constraints(_add_bssn_scaled(bssn_n, k1, -dt))
+        magnetic_previous = enforce_pec_B(magnetic_previous, previous_metric, params, boundary=pec_boundary)
     magnetic_left_half = 0.5 * (magnetic_previous + magnetic_n)
     magnetic_right_half = magnetic_left_half + dt * magnetic_rhs_n
 
@@ -296,6 +334,11 @@ def first_order_einstein_maxwell_step(
     if stage_boundary is not None:
         _, displacement_next_half, _ = stage_boundary(
             bssn_next, displacement_next_half, magnetic_next, time + 1.5 * dt
+        )
+    if pec_boundary is not None:
+        half_metric = enforce_algebraic_constraints(_add_bssn_scaled(bssn_next, k4, 0.5 * dt))
+        displacement_next_half = enforce_pec_D(
+            displacement_next_half, half_metric, params, boundary=pec_boundary
         )
 
     return EinsteinMaxwellVariables(

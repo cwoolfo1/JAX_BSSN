@@ -88,5 +88,12 @@ comparison and temporal self-convergence, with:
 python -m pytest tests/EM/test_em_waves.py
 ```
 
+EM coupling uses RK4 for BSSN with the staggered leapfrog solver. The wave
+formulation advances both systems with its `*_rk4_step` entry points.
+Cartesian staggered EM supports metric-aware PEC walls through `PECBoundary` and the
+`pec_boundary` initializer/stepper argument. See
+[Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for the padded-grid
+layout, wall convention, and time integration details.
+
 The convergence study uses 128 cells and three timestep sizes through `t=0.5`
 on the CPU in double precision. It writes no simulation output files.

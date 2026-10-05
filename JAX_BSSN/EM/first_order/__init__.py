@@ -41,10 +41,20 @@ from JAX_BSSN.EM.first_order.staggering import (
     interpolate_between_locations,
 )
 from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.first_order.pec import (
+    PECBoundary,
+    apply_pec_boundaries,
+    enforce_pec_D,
+    enforce_pec_B,
+)
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 
 __all__ = [
+    "PECBoundary",
+    "apply_pec_boundaries",
+    "enforce_pec_D",
+    "enforce_pec_B",
     "CENTER_LOCATION",
     "DISPLACEMENT_FIELD_LOCATIONS",
     "DensitizedMaxwellState",
