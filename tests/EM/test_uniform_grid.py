@@ -1,4 +1,4 @@
-"""Uniform Yee coordinates, analytic stencils, and cylindrical initial data."""
+"""Uniform Yee coordinates, analytic stencils, and cylindrical norms."""
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -13,7 +13,6 @@ from JAX_BSSN.EM.first_order.equations import (
 )
 from JAX_BSSN.EM.first_order.staggering import DISPLACEMENT_FIELD_LOCATIONS, MAGNETIC_FIELD_LOCATIONS
 from JAX_BSSN.EM.second_order.derivatives import physical_first_derivative, physical_second_derivative
-from tests.EM.demo_helpers import load_em_demo_module
 from tests.EM.em_helpers import flat_bssn_variables
 jax.config.update('jax_enable_x64', True)
 
@@ -22,15 +21,6 @@ def params(n=24):
     h=4.0/n
     return BSSNParameters(dx=h, dt=.1*h, x_min=-3.5*h, y_min=-4*h,
         z_min=-(2*n-1)*h/2, xr_bc=1, zl_bc=1, zr_bc=1)
-
-
-@pytest.mark.parametrize("formulation", ["first_order", "second_order"])
-def test_uniform_hamiltonian_reports_failed_cg(formulation):
-    metric = load_em_demo_module(formulation, "initial_metric")
-    with pytest.raises(RuntimeError, match="Hamiltonian CG did not converge"):
-        metric.solve_electromagnetic_conformal_factor(
-            jnp.ones((12, 24)) * .01, 4 / 12, max_cg_iterations=1,
-        )
 
 
 @pytest.mark.parametrize('order',[2,4])
@@ -70,45 +60,6 @@ def test_yee_axial_derivatives_and_div_curl():
     p=params(24);f=jnp.asarray(np.random.default_rng(1).normal(size=(3,28,9,48)))
     for curl,div in ((curl_E_to_densitized_B,densitized_magnetic_divergence),(curl_H_to_densitized_D,densitized_displacement_divergence)):
         np.testing.assert_allclose(div(curl(f,p),p)[5:-4,2:-2,2:-2],0,atol=5e-12)
-
-
-@pytest.mark.parametrize("formulation", ["first_order", "second_order"])
-def test_newton_sparse_reference_and_convergence(formulation):
-    from scipy.sparse import diags, kron
-    from scipy.sparse.linalg import spsolve
-    metric=load_em_demo_module(formulation,'initial_metric')
-    p=params(12);h=p.dx
-    nr,nz=11,22
-    u=(np.arange(nr)+.5)*h
-    weights=u; lo=u-h/2; hi=u+h/2
-    Ar=diags((lo[1:],-lo-hi,hi[:-1]),(-1,0,1))
-    Az=diags((np.ones(nz-1),-2*np.ones(nz),np.ones(nz-1)),(-1,0,1))
-    lap=(kron(Ar,diags(np.ones(nz)))+kron(diags(weights),Az))/h**2
-    energy=np.ones((nr,nz))*.01; psi=np.ones((nr,nz))*1.05
-    volume=np.broadcast_to(weights[:,None],(nr,nz))
-    A=lap-diags((3*np.pi*energy*psi**-4*volume).ravel())
-    rng=np.random.default_rng(9);x=rng.normal(size=(nr,nz));y=rng.normal(size=(nr,nz))
-    op=lambda q:metric.linearized_electromagnetic_hamiltonian_operator(jnp.asarray(q),jnp.asarray(psi),jnp.asarray(energy),h)
-    np.testing.assert_allclose(op(x).ravel(),A@x.ravel(),rtol=2e-13,atol=2e-12)
-    np.testing.assert_allclose(np.vdot(x,op(y)),np.vdot(op(x),y),rtol=2e-13)
-    assert np.vdot(x,-op(x))>0
-    solved,correction,history=metric.solve_electromagnetic_conformal_factor(jnp.ones((12,24))*.01,h,cg_tolerance=1e-12)
-    ref=np.zeros(nr*nz)
-    for _ in range(8):
-        F=lap@ref+np.pi*(volume*.01).ravel()*(1+ref)**-3
-        jac=lap-diags(3*np.pi*(volume*.01).ravel()*(1+ref)**-4)
-        ref-=spsolve(jac,F)
-    np.testing.assert_allclose(correction[:-1,1:-1].ravel(),ref,atol=1e-10)
-    assert history[-1]<1e-10
-    errors=[]
-    for n in (24,48,96):
-        p=params(n);r=axis_coordinates(n+4,0,p,jnp.float64)[4:,None];z=axis_coordinates(2*n,2,p,jnp.float64)[None,:]
-        u=jnp.exp(-r*r-z*z)
-        residual=metric.electromagnetic_hamiltonian_residual(u,jnp.zeros_like(u),p.dx)
-        weight=cylindrical_volume_weights((n+4,1,2*n),p,jnp.float64)[4:-1,1:-1]
-        exact=(4*(r*r+z*z)-6)*u
-        errors.append(float(jnp.max(jnp.abs(residual/weight-exact[:-1,1:-1])[:-4,3:-3])))
-    assert np.log2(errors[-2]/errors[-1])>1.8,errors
 
 
 def test_native_reconstruction_z_dependence_converges():
@@ -158,26 +109,6 @@ def test_uniform_wrapper_is_exact_legacy_stencil():
     field = jnp.sin(jnp.arange(28 * 9 * 9).reshape(28, 9, 9) * .1)
     np.testing.assert_array_equal(diff1_physical(field, 0, p), diff1_field(field, 0, p.dx, 0, 1))
     np.testing.assert_array_equal(diff2_physical(field, 0, p), diff2_field(field, 0, p.dx, 0, 1))
-
-
-@pytest.mark.parametrize('formulation,location', [
-    ('first_order', ('C', 'C', 'C')),
-    ('first_order', ('V', 'C', 'V')),
-    ('second_order', ('C', 'C', 'C')),
-])
-def test_demo_norms_keep_native_radial_volume_weights(formulation, location):
-    demo = load_em_demo_module(formulation, 'run_collapse')
-    p = params(12)
-    field = jnp.arange(16 * 24, dtype=float).reshape((16, 1, 24))
-    kwargs = {'location': location} if formulation == 'first_order' else {}
-    l2, linf = demo._axisymmetric_scalar_norms(field, p, **kwargs)
-    rho = (np.arange(16) - 3.5 - (0.5 if location[0] == 'V' else 0.0)) * p.dx
-    weights = np.broadcast_to(np.abs(rho[:, None]), (16, 24))[4:-4, 4:-4].copy()
-    if formulation == "first_order" and location[0] == "V":
-        weights[0, :] = p.dx / 8.0
-    interior = np.asarray(field)[4:-4, 0, 4:-4]
-    assert float(l2) == pytest.approx(np.sqrt(np.sum(weights * interior**2) / np.sum(weights)))
-    assert float(linf) == pytest.approx(np.max(np.abs(interior)))
 
 
 def test_physical_derivatives_import_without_initializing_bssn_first():

@@ -33,9 +33,9 @@ from JAX_BSSN.EM.first_order.staggering import (
     MAGNETIC_FIELD_LOCATIONS,
 )
 from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.first_order.cartoon._reflection import expand_native_state
 from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
     compact_axisymmetric_wave,
-    expand_axisymmetric_wave_plane,
 )
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
@@ -215,9 +215,7 @@ def compact_axisymmetric_densitized_state(
 ) -> DensitizedMaxwellState:
     """Compact a complete signed rho-z plane to positive-rho storage."""
 
-    # A weight-one vector density transforms as a vector under the proper
-    # rotations used by Cartoon, so the existing vector-state helper applies.
-    return compact_axisymmetric_wave(state)
+    return fill_axisymmetric_densitized_ghosts(compact_axisymmetric_wave(state))
 
 
 def fill_axisymmetric_densitized_ghosts(
@@ -240,9 +238,14 @@ def fill_axisymmetric_densitized_ghosts(
 def expand_axisymmetric_densitized_state(
     state: DensitizedMaxwellState,
 ) -> DensitizedMaxwellState:
-    """Expand compact densities onto the complete signed reference plane."""
+    """Expand compact densities onto a signed plane with ``2*N`` samples.
 
-    return expand_axisymmetric_wave_plane(state)
+    Radial centers lie at ``(i-N+1/2)*dx`` and vertices at ``(i-N)*dx``.
+    The axis vertex appears once. The missing outermost negative vertex is
+    obtained by parity reflection of a linearly extrapolated positive sample.
+    """
+
+    return expand_native_state(state, AXISYMMETRIC_GHOST_CELLS, (-1, -1, 1))
 
 
 def reconstruct_axisymmetric_densitized_support(

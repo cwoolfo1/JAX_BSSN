@@ -1,9 +1,9 @@
 Demos
 =====
 
-The supported physical examples are gauge wave, linear wave, Cartesian single
-puncture, axisymmetric Cartoon puncture, and spherical Cartoon puncture. Each demo contains its own
-coordinates, initial data, parameters, and run loop.
+The supported physical examples are gauge wave, linear wave, spherical Cartoon
+puncture, and an electromagnetic pp-wave packet. Each demo owns its coordinates,
+initial data, parameters, and run loop.
 
 Install demo support first:
 
@@ -28,8 +28,9 @@ grid, with prescribed lapse and shift and exact boundary data.
 The default packet crosses from z=-2 to z=2 over t=0 to t=4. Movies compare
 the numerical EM fields and gravitational response with the exact solution.
 The validator checks the continuum equations independently and measures
-spatial and temporal convergence. See ``demos/EM_waves/README.md`` for the
-derivation and the restriction to evolution before Rosen coordinate focusing.
+spatial and temporal convergence. The reference scale factor obeys
+``a'' = -f^2 a``; the demo rejects intervals where ``a < 0.5`` to keep
+evolution away from Rosen coordinate focusing.
 
 Gauge wave
 ----------
@@ -40,7 +41,7 @@ RMS errors against the analytic solution at the final time.
 
 .. code-block:: bash
 
-   python demos/gauge_wave/gauge_wave.py
+   python demos/gravitational_waves/gauge_wave.py
 
 The default configuration uses ``grid_size=60``, amplitude ``0.1``, wavelength
 ``1``, CFL ``1``, and one wavelength of evolution.
@@ -55,10 +56,10 @@ available value at each physical location.
 
 .. code-block:: bash
 
-   python demos/linear_wave/linear_wave.py
+   python demos/gravitational_waves/linear_wave.py
 
 The default run writes the VisIt multiblock collection
-``demos/linear_wave/output/linear_wave_fmr.visit``. Open that file in VisIt to
+``demos/gravitational_waves/output/linear_wave_fmr.visit``. Open that file in VisIt to
 load the root and fine patches together. The collection spatially aligns the
 overlapping blocks; it does not remove root cells covered by the fine patch or
 encode native AMR nesting.
@@ -73,14 +74,14 @@ a final normalized coarse or fine RMS wave error at or above five percent.
 Spherical Cartoon puncture
 --------------------------
 
-The Cartoon puncture demo evolves the same time-symmetric Schwarzschild data
+The Cartoon puncture demo evolves time-symmetric Schwarzschild data
 on ``Nr`` positive half-cell radii with four parity ghosts. Each RK stage
 reconstructs a temporary Cartesian support grid, so the installed Cartesian
 BSSN equations remain the single equation implementation.
 
 .. code-block:: bash
 
-   python demos/cartoon_puncture/cartoon_puncture.py
+   python demos/spherically_symmetric_cartoon_puncture/cartoon_puncture.py
 
 The production defaults reproduce the comparison configuration:
 ``Nr=2000``, ``rmax=100M``, CFL ``0.2``, final time ``100M``, and 500 output
