@@ -7,42 +7,32 @@ import numpy as np
 import openpmd_api as io
 
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
-from JAX_BSSN.EM.second_order.cartoon.axisymmetry import (
-    compact_axisymmetric_wave,
-    expand_axisymmetric_wave_plane,
+from JAX_BSSN.bssn import BSSNParameters
+from JAX_BSSN.EM.first_order import (
+    DensitizedMaxwellState,
+    EinsteinMaxwellVariables,
+    electromagnetic_output_fields,
 )
-from JAX_BSSN.EM.second_order.diagnostics import electromagnetic_output_fields
-from JAX_BSSN.EM.second_order.variables import EMVariables
+from tests.EM.em_helpers import flat_bssn_variables
 
 
-def test_openpmd_writes_only_E_and_B_with_axisymmetric_vector_parity(tmp_path):
-    num_radial_points = 6
-    num_z_points = 9
-    full_nx = 2 * num_radial_points
-    shape = (3, full_nx, 1, num_z_points)
-    radial = jnp.arange(num_radial_points, dtype=jnp.float64)[:, None] + 1.0
-    z_factor = jnp.arange(num_z_points, dtype=jnp.float64)[None, :] + 1.0
-    profile = radial * z_factor
-
-    electric = jnp.zeros(shape, dtype=jnp.float64)
-    magnetic = jnp.zeros(shape, dtype=jnp.float64)
-    for component in range(3):
-        electric = electric.at[
-            component, num_radial_points:, 0, :
-        ].set((component + 1.0) * profile)
-        magnetic = magnetic.at[
-            component, num_radial_points:, 0, :
-        ].set(-(component + 4.0) * profile)
-
-    full_em = EMVariables(
-        electric_field=electric,
-        electric_field_dot=7.0 * electric,
-        magnetic_field=magnetic,
-        magnetic_field_dot=11.0 * magnetic,
+def test_openpmd_writes_common_time_physical_cartesian_fields(tmp_path):
+    shape = (8, 6, 9)
+    W = 0.8
+    bssn = flat_bssn_variables(shape)._replace(conformal_factor=jnp.full(shape, W))
+    displacement = jnp.broadcast_to(
+        jnp.array([1., 2., 3.])[:, None, None, None], (3,) + shape
     )
-    compact_em = compact_axisymmetric_wave(full_em)
-    expanded_em = expand_axisymmetric_wave_plane(compact_em)
-    fields = electromagnetic_output_fields(expanded_em)
+    magnetic = -2. * displacement
+    em = DensitizedMaxwellState(
+        magnetic_previous=7. * magnetic,
+        magnetic_current=magnetic,
+        displacement_left_half=displacement - 0.25,
+        displacement_right_half=displacement + 0.25,
+    )
+    fields = electromagnetic_output_fields(
+        EinsteinMaxwellVariables(bssn, em), BSSNParameters(dx=0.25)
+    )
 
     dx = 0.25
     z_min = -1.0
@@ -51,7 +41,7 @@ def test_openpmd_writes_only_E_and_B_with_axisymmetric_vector_parity(tmp_path):
         filename,
         grid_spacing=(dx, dx, dx),
         grid_global_offset=(
-            -(num_radial_points - 0.5) * dx,
+            -1.0,
             0.0,
             z_min,
         ),
@@ -89,26 +79,17 @@ def test_openpmd_writes_only_E_and_B_with_axisymmetric_vector_parity(tmp_path):
     iteration.close()
     series.close()
 
-    assert set(arrays) == {"E", "B"}
-    assert set(arrays["E"]) == {"x", "y", "z"}
+    assert set(arrays) == {"D", "B"}
+    assert set(arrays["D"]) == {"x", "y", "z"}
     assert set(arrays["B"]) == {"x", "y", "z"}
     assert time == 0.06
 
-    expected_offset = (-(num_radial_points - 0.5) * dx, 0.0, z_min)
-    for mesh_name in ("E", "B"):
+    expected_offset = (-1.0, 0.0, z_min)
+    for mesh_name in ("D", "B"):
         assert metadata[mesh_name] == ((dx, dx, dx), expected_offset)
         for array in arrays[mesh_name].values():
-            assert array.shape == (full_nx, 1, num_z_points)
+            assert array.shape == shape
 
-    parity = (-1.0, -1.0, 1.0)
-    for field_name, positive_components in (
-        ("E", electric[:, num_radial_points:, 0, :]),
-        ("B", magnetic[:, num_radial_points:, 0, :]),
-    ):
+    for field_name, expected in (("D", W**3 * displacement), ("B", W**3 * magnetic)):
         for component, component_name in enumerate(("x", "y", "z")):
-            output = arrays[field_name][component_name][:, 0, :]
-            positive = np.asarray(positive_components[component])
-            np.testing.assert_array_equal(output[num_radial_points:], positive)
-            np.testing.assert_array_equal(
-                output[:num_radial_points], parity[component] * positive[::-1]
-            )
+            np.testing.assert_allclose(arrays[field_name][component_name], expected[component])

@@ -1,4 +1,4 @@
-"""State containers shared by the electromagnetic formulations."""
+"""Coupled state container for BSSN and Cartesian Maxwell evolution."""
 
 from typing import Generic, NamedTuple, TypeVar
 

@@ -1,10 +1,8 @@
-"""Shared flat-space initial data for wave-solver tests."""
+"""Shared flat-space initial data for Cartesian Maxwell tests."""
 
 import jax.numpy as jnp
 
 from JAX_BSSN.bssn import BSSNVariables
-
-from JAX_BSSN.EM.second_order.variables import EMVariables
 
 
 def flat_bssn_variables(shape, dtype=jnp.float64):
@@ -22,18 +20,3 @@ def flat_bssn_variables(shape, dtype=jnp.float64):
         lapse=jnp.ones(shape, dtype=dtype),
         shift=vector_zero,
     )
-
-
-def zero_bssn_rhs(bssn):
-    return BSSNVariables(*(jnp.zeros_like(field) for field in bssn))
-
-
-def zero_em_variables(shape, dtype=jnp.float64):
-    vector_zero = jnp.zeros((3,) + shape, dtype=dtype)
-    return EMVariables(
-        vector_zero,
-        vector_zero,
-        vector_zero,
-        vector_zero,
-    )
-

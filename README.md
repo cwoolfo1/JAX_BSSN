@@ -62,6 +62,7 @@ The default production runs compile substantial JAX kernels. The
 JAX_BSSN/
 ├── bssn/          # state, tensor algebra, geometry, equations, raw constraints
 ├── cartoon/       # spherical and axisymmetric reconstruction/evolution
+├── EM/            # Cartesian first-order Maxwell evolution and BSSN coupling
 ├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
 ├── fmr/           # nested-patch geometry, transfers, stage-synchronous RK4
 ├── diagnostics/   # reductions, reporting, plotting, openPMD
@@ -88,8 +89,8 @@ comparison and temporal self-convergence, with:
 python -m pytest tests/EM/test_em_waves.py
 ```
 
-EM coupling uses RK4 for BSSN with the staggered leapfrog solver. The wave
-formulation advances both systems with its `*_rk4_step` entry points.
+EM evolution uses the full Cartesian first-order Maxwell system, with RK4
+for BSSN and staggered leapfrog for the electromagnetic fields.
 Cartesian staggered EM supports metric-aware PEC walls through `PECBoundary` and the
 `pec_boundary` initializer/stepper argument. See
 [Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for the padded-grid

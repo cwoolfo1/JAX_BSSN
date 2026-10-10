@@ -1,13 +1,5 @@
 """Densitized first-order Maxwell fields coupled to BSSN."""
 
-from JAX_BSSN.EM.first_order.cartoon import (
-    axisymmetric_first_order_einstein_maxwell_step,
-    axisymmetric_densitized_constraint_divergences,
-    initialize_axisymmetric_first_order_state,
-    initialize_spherical_first_order_state,
-    spherical_first_order_einstein_maxwell_step,
-    spherical_densitized_constraint_divergences,
-)
 from JAX_BSSN.EM.first_order.diagnostics import (
     electromagnetic_output_fields,
     first_order_constraint_divergences,
@@ -60,8 +52,6 @@ __all__ = [
     "DensitizedMaxwellState",
     "EinsteinMaxwellVariables",
     "MAGNETIC_FIELD_LOCATIONS",
-    "axisymmetric_first_order_einstein_maxwell_step",
-    "axisymmetric_densitized_constraint_divergences",
     "bootstrap_densitized_maxwell_state",
     "collocate_densitized_fields",
     "common_densitized_fields",
@@ -78,11 +68,7 @@ __all__ = [
     "first_order_constraint_divergences",
     "first_order_einstein_maxwell_step",
     "initialize_densitized_maxwell_state",
-    "initialize_axisymmetric_first_order_state",
     "initialize_first_order_einstein_maxwell_state",
-    "initialize_spherical_first_order_state",
     "interpolate_between_locations",
     "physical_fields_at_centers",
-    "spherical_first_order_einstein_maxwell_step",
-    "spherical_densitized_constraint_divergences",
 ]

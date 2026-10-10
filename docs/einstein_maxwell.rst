@@ -4,19 +4,17 @@ Einstein--Maxwell coupling
 Time integration
 ----------------
 
-The Cartesian, axisymmetric, and spherical ``first_order`` couplers advance
-BSSN with classical RK4 and retain the second-order doubled-leapfrog Maxwell
-history. They evaluate the gravity RHS four times per step: at the initial
+The full Cartesian ``JAX_BSSN.EM.first_order`` solver advances BSSN with
+classical RK4 and retains the second-order doubled-leapfrog Maxwell
+history. It evaluates the gravity RHS four times per step: at the initial
 time, at two midpoint stages, and at an endpoint stage. The three Maxwell
 RHS evaluations use the initial metric, the second midpoint metric, and the
 final projected metric. The coupled staggered method remains second order
 overall. Spatial derivatives are unchanged.
 
-The ``second_order`` wave formulation exports ``einstein_maxwell_rk4_step``,
-``axisymmetric_einstein_maxwell_rk4_step``, and
-``spherical_einstein_maxwell_rk4_step``. Each advances both BSSN and Maxwell
-through the same four RK4 stages, retaining fourth-order temporal accuracy.
-Vacuum BSSN and FMR integrators also use RK4.
+EM evolution is supported on Cartesian grids. The second-order Maxwell wave
+formulation and EM Cartoon reductions have been removed. Vacuum BSSN Cartoon
+and FMR integrators continue to use RK4.
 
 Cartesian conducting walls
 -------------------------
@@ -38,8 +36,8 @@ coordinate covector ``E_i`` to have zero tangential components.
 
 Select paired walls using ``PECBoundary(axes=(0, 1, 2), guard_cells=3)``.
 The axes identify Cartesian x/y/z directions. This setting is independent
-of the gravity boundary codes in ``BSSNParameters``. It currently applies
-only to Cartesian staggered EM, not the wave formulation or Cartoon walls.
+of the gravity boundary codes in ``BSSNParameters`` and applies to the
+Cartesian staggered EM fields.
 
 Each selected axis must include explicit exterior layers. For ``N`` physical
 cell intervals and ``g`` guard layers, allocate ``N + 1 + 2*g`` samples.

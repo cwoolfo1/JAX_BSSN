@@ -34,22 +34,8 @@ from JAX_BSSN.EM.first_order import (
     interpolate_between_locations,
     physical_fields_at_centers,
 )
-from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
-    axisymmetric_densitized_constraint_divergences,
-    axisymmetric_first_order_einstein_maxwell_step,
-    expand_axisymmetric_densitized_state,
-    fill_axisymmetric_densitized_ghosts,
-    initialize_axisymmetric_first_order_state,
-)
-from JAX_BSSN.EM.first_order.cartoon.spherical_symmetry import (
-    initialize_spherical_first_order_state,
-    spherical_first_order_einstein_maxwell_step,
-)
 from JAX_BSSN.EM.first_order.staggering import (
     DISPLACEMENT_FIELD_LOCATIONS,
-)
-from JAX_BSSN.EM.second_order.energy_momentum import (
-    compute_electromagnetic_energy_momentum,
 )
 from tests.EM.em_helpers import flat_bssn_variables
 
@@ -307,7 +293,7 @@ def test_bootstrap_preserves_supplied_common_time_fields_exactly():
     np.testing.assert_array_equal(recovered_B, B)
 
 
-def test_first_and_second_order_stress_energy_agree_for_physical_fields():
+def test_stress_energy_matches_analytic_physical_fields():
     shape = (8, 6, 4)
     params = BSSNParameters(dx=0.2, dt=0.01, nu=0.0)
     raw_metric = jnp.asarray(
@@ -328,9 +314,15 @@ def test_first_and_second_order_stress_energy_agree_for_physical_fields():
     physical_metric = conformal_metric / 0.82**2
     D_down = jnp.einsum("ij,j...->i...", physical_metric, D_up)
     B_down = jnp.einsum("ij,j...->i...", physical_metric, B_up)
-    second = compute_electromagnetic_energy_momentum(D_down, B_down, bssn)
-    for first_field, second_field in zip(first, second):
-        np.testing.assert_allclose(first_field, second_field, rtol=3.0e-13)
+    rho = 0.5 * jnp.sum(D_up * D_down + B_up * B_down, axis=0)
+    momentum = 0.82**-3 * jnp.cross(D_up, B_up, axisa=0, axisb=0, axisc=0)
+    stress = (
+        physical_metric[:, :, None, None, None] * rho
+        - jnp.einsum("i...,j...->ij...", D_down, D_down)
+        - jnp.einsum("i...,j...->ij...", B_down, B_down)
+    )
+    for actual, expected in zip(first, (rho, momentum, stress)):
+        np.testing.assert_allclose(actual, expected, rtol=3.0e-13)
 
 
 def test_zero_fields_reduce_to_vacuum_bssn_step():
@@ -351,91 +343,6 @@ def test_zero_fields_reduce_to_vacuum_bssn_step():
         np.testing.assert_allclose(coupled_field, vacuum_field, atol=2.0e-14)
     for field in coupled.em:
         np.testing.assert_array_equal(field, zero)
-
-
-def test_axisymmetric_density_parity_preserves_twist_components():
-    num_rho, num_z = 8, 11
-    full_shape = (3, 2 * num_rho, 1, num_z)
-    values = jnp.arange(np.prod(full_shape), dtype=jnp.float64).reshape(full_shape)
-    state = DensitizedMaxwellState(values, 2.0 * values, -values, 0.5 * values)
-
-    # Compact through the public second-order-compatible state constructor,
-    # then fill/expand with first-order density parity.
-    from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
-        compact_axisymmetric_densitized_state,
-    )
-
-    compact = compact_axisymmetric_densitized_state(state)
-    filled = fill_axisymmetric_densitized_ghosts(compact)
-    positive = np.asarray(filled.magnetic_current[:, 4:, 0, :])
-    np.testing.assert_array_equal(
-        filled.magnetic_current[0, :4, 0, :], -positive[0, :4][::-1]
-    )
-    np.testing.assert_array_equal(
-        filled.magnetic_current[1, :4, 0, :], -positive[1, 1:5][::-1]
-    )
-    np.testing.assert_array_equal(
-        filled.magnetic_current[2, :4, 0, :], positive[2, 1:5][::-1]
-    )
-    expanded = expand_axisymmetric_densitized_state(compact)
-    assert float(jnp.max(jnp.abs(expanded.magnetic_current[1]))) > 0.0
-
-
-def test_axisymmetric_reconstruction_uses_each_native_yee_location():
-    from JAX_BSSN.EM.first_order.cartoon.axisymmetry import (
-        reconstruct_axisymmetric_densitized_support,
-    )
-
-    num_rho, num_z, dx = 16, 17, 0.1
-    shape = (3, num_rho + 4, 1, num_z)
-    params = BSSNParameters(
-        dx=dx,
-        dt=0.01,
-        nu=0.0,
-        x_min=-3.5 * dx,
-        y_min=-4.0 * dx,
-        z_min=-(num_z - 1) * dx / 2.0,
-        xr_bc=1,
-        zl_bc=1,
-        zr_bc=1,
-    )
-    field = jnp.zeros(shape, dtype=jnp.float64)
-    for component, location in enumerate(DISPLACEMENT_FIELD_LOCATIONS):
-        rho_offset = -0.5 if location[0] == "V" else 0.0
-        z_offset = -0.5 if location[2] == "V" else 0.0
-        rho = params.x_min + dx * (
-            jnp.arange(num_rho + 4, dtype=jnp.float64) + rho_offset
-        )
-        z = params.z_min + dx * (
-            jnp.arange(num_z, dtype=jnp.float64) + z_offset
-        )
-        R, Z = jnp.meshgrid(rho, z, indexing="ij")
-        profiles = (R, 0.3 * R, Z * (1.0 + 0.05 * R**2))
-        field = field.at[component, 4:, 0, :].set(profiles[component][4:])
-
-    zero = jnp.zeros_like(field)
-    state = DensitizedMaxwellState(zero, zero, field, field)
-    support = reconstruct_axisymmetric_densitized_support(state, params)
-    reconstructed = support.displacement_right_half
-
-    for component, location in enumerate(DISPLACEMENT_FIELD_LOCATIONS):
-        offsets = tuple(-0.5 if site == "V" else 0.0 for site in location)
-        x = params.x_min + dx * (jnp.arange(num_rho + 4) + offsets[0])
-        y = params.y_min + dx * (jnp.arange(9) + offsets[1])
-        z = params.z_min + dx * (jnp.arange(num_z) + offsets[2])
-        X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
-        radius = jnp.sqrt(X**2 + Y**2)
-        expected = (
-            X - 0.3 * Y,
-            Y + 0.3 * X,
-            Z * (1.0 + 0.05 * radius**2),
-        )[component]
-        np.testing.assert_allclose(
-            reconstructed[component, :-4, :, 3:-3],
-            expected[:-4, :, 3:-3],
-            atol=2.0e-11,
-            rtol=2.0e-11,
-        )
 
 
 def test_initializer_samples_all_six_native_W_factors():
@@ -548,75 +455,6 @@ def test_coupled_doubled_leapfrog_is_second_order_in_time():
     assert math.log2(coarse_medium / medium_fine) > 1.8
 
 
-def test_spherical_reconstruction_uses_native_radial_yee_grids():
-    from JAX_BSSN.EM.first_order.cartoon.spherical_symmetry import (
-        reconstruct_spherical_densitized_support,
-    )
-
-    num_radial_points, dx = 16, 0.1
-    shape = (3, num_radial_points + 4, 1, 1)
-    params = BSSNParameters(
-        dx=dx,
-        dt=0.01,
-        nu=0.0,
-        x_min=-3.5 * dx,
-        y_min=-4.0 * dx,
-        z_min=-4.0 * dx,
-        xr_bc=1,
-    )
-    radial_axis = params.x_min + dx * (
-        jnp.arange(num_radial_points + 4) - 0.5
-    )
-    radial_profile = radial_axis * (1.0 + 0.05 * radial_axis**2)
-    D = jnp.zeros(shape).at[0, 4:, 0, 0].set(radial_profile[4:])
-    zero = jnp.zeros_like(D)
-    state = DensitizedMaxwellState(zero, zero, D, D)
-    support = reconstruct_spherical_densitized_support(state, params)
-
-    for component, location in enumerate(DISPLACEMENT_FIELD_LOCATIONS):
-        offsets = tuple(-0.5 if site == "V" else 0.0 for site in location)
-        x = params.x_min + dx * (
-            jnp.arange(num_radial_points + 4) + offsets[0]
-        )
-        y = params.y_min + dx * (jnp.arange(9) + offsets[1])
-        z = params.z_min + dx * (jnp.arange(9) + offsets[2])
-        X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
-        radius_squared = X**2 + Y**2 + Z**2
-        expected = (X, Y, Z)[component] * (1.0 + 0.05 * radius_squared)
-        np.testing.assert_allclose(
-            support.displacement_right_half[component, :-4],
-            expected[:-4],
-            atol=2.0e-11,
-            rtol=2.0e-11,
-        )
-
-
-def test_spherical_initializer_and_step_use_shared_coupled_state():
-    num_radial_points = 6
-    dx = 0.2
-    shape = (num_radial_points + 4, 1, 1)
-    params = BSSNParameters(
-        dx=dx,
-        dt=0.001,
-        nu=0.0,
-        zero_shift=1,
-        x_min=-3.5 * dx,
-        y_min=-4.0 * dx,
-        z_min=-4.0 * dx,
-        xr_bc=1,
-    )
-    field = jnp.zeros((3,) + shape)
-    state = initialize_spherical_first_order_state(
-        flat_bssn_variables(shape), field, field, params
-    )
-    state = spherical_first_order_einstein_maxwell_step(state, params)
-    jax.block_until_ready(state)
-
-    assert isinstance(state, EinsteinMaxwellVariables)
-    assert isinstance(state.bssn, BSSNVariables)
-    assert isinstance(state.em, DensitizedMaxwellState)
-
-
 def test_dynamic_metric_stage_updates_differ_from_frozen_metric_update():
     num_points = 24
     dx = 2.0 * math.pi / num_points
@@ -717,154 +555,3 @@ def test_periodic_coupled_evolution_preserves_both_density_constraints():
     jax.block_until_ready((divergence_D, divergence_B))
     np.testing.assert_allclose(divergence_D, 0.0, atol=2.0e-13)
     np.testing.assert_allclose(divergence_B, 0.0, atol=2.0e-13)
-
-
-def test_axisymmetric_coupled_doubled_leapfrog_is_second_order_in_time():
-    num_rho, num_z = 6, 9
-    dx = 0.25
-    final_time = 0.04
-    shape = (num_rho + 4, 1, num_z)
-    z_min = -(num_z - 1) * dx / 2.0
-
-    rho = (jnp.arange(num_rho) + 0.5) * dx
-    z = z_min + dx * jnp.arange(num_z)
-    R, Z = jnp.meshgrid(rho, z, indexing="ij")
-    D = jnp.zeros((3,) + shape).at[1, 4:, 0, :].set(
-        0.1 * R * jnp.exp(-(R**2 + Z**2))
-    )
-    rho_vertex = jnp.arange(num_rho) * dx
-    z_vertex = z_min + dx * (jnp.arange(num_z) - 0.5)
-    R, Z = jnp.meshgrid(rho_vertex, z_vertex, indexing="ij")
-    B = jnp.zeros_like(D).at[1, 4:, 0, :].set(
-        -0.08 * R * jnp.exp(-(R**2 + Z**2))
-    )
-
-    solutions = []
-    for num_steps in (2, 4, 8):
-        params = BSSNParameters(
-            dx=dx,
-            dt=final_time / num_steps,
-            nu=0.0,
-            eta=0.0,
-            g=0.0,
-            zero_shift=1,
-            x_min=-3.5 * dx,
-            y_min=-4.0 * dx,
-            z_min=z_min,
-            xr_bc=1,
-            zl_bc=1,
-            zr_bc=1,
-        )
-        state = initialize_axisymmetric_first_order_state(
-            flat_bssn_variables(shape), D, B, params
-        )
-        assert isinstance(state, EinsteinMaxwellVariables)
-        assert isinstance(state.bssn, BSSNVariables)
-        assert isinstance(state.em, DensitizedMaxwellState)
-        for _ in range(num_steps):
-            state = axisymmetric_first_order_einstein_maxwell_step(
-                state, params
-            )
-            assert isinstance(state, EinsteinMaxwellVariables)
-        solutions.append(state)
-    jax.block_until_ready(tuple(solutions))
-
-    def difference(left, right):
-        D_left, B_left = common_densitized_fields(left.em)
-        D_right, B_right = common_densitized_fields(right.em)
-        squared = jnp.mean(
-            (D_left[:, 4:-1] - D_right[:, 4:-1]) ** 2
-        ) + jnp.mean((B_left[:, 4:-1] - B_right[:, 4:-1]) ** 2)
-        squared += sum(
-            jnp.mean(
-                (
-                    left_field[..., 4:-1, 0, 1:-1]
-                    - right_field[..., 4:-1, 0, 1:-1]
-                )
-                ** 2
-            )
-            for left_field, right_field in zip(left.bssn, right.bssn)
-        )
-        return float(jnp.sqrt(squared))
-
-    coarse_medium = difference(solutions[0], solutions[1])
-    medium_fine = difference(solutions[1], solutions[2])
-    assert math.log2(coarse_medium / medium_fine) > 1.8
-
-
-def test_axisymmetric_nonroundoff_constraints_are_second_order_in_space():
-    displacement_errors = []
-    magnetic_errors = []
-    for num_rho in (8, 16, 32):
-        num_z = 2 * num_rho + 1
-        dx = 2.0 / num_rho
-        z_min = -(num_z - 1) * dx / 2.0
-        shape = (3, num_rho + 4, 1, num_z)
-        params = BSSNParameters(
-            dx=dx,
-            dt=0.01,
-            nu=0.0,
-            x_min=-3.5 * dx,
-            y_min=-4.0 * dx,
-            z_min=z_min,
-            xr_bc=1,
-            zl_bc=1,
-            zr_bc=1,
-        )
-        rho_vertex = jnp.arange(num_rho) * dx
-        rho_center = (jnp.arange(num_rho) + 0.5) * dx
-        z_center = z_min + dx * jnp.arange(num_z)
-        z_vertex = z_min + dx * (jnp.arange(num_z) - 0.5)
-
-        D = jnp.zeros(shape)
-        R, Z = jnp.meshgrid(rho_vertex, z_center, indexing="ij")
-        D = D.at[0, 4:, 0, :].set(
-            2.0 * Z * R * jnp.exp(-(R**2 + Z**2))
-        )
-        R, Z = jnp.meshgrid(rho_center, z_vertex, indexing="ij")
-        D = D.at[2, 4:, 0, :].set(
-            2.0 * (1.0 - R**2) * jnp.exp(-(R**2 + Z**2))
-        )
-
-        B = jnp.zeros(shape)
-        R, Z = jnp.meshgrid(rho_center, z_vertex, indexing="ij")
-        B = B.at[0, 4:, 0, :].set(
-            1.4 * Z * R * jnp.exp(-(R**2 + Z**2))
-        )
-        R, Z = jnp.meshgrid(rho_vertex, z_center, indexing="ij")
-        B = B.at[2, 4:, 0, :].set(
-            1.4 * (1.0 - R**2) * jnp.exp(-(R**2 + Z**2))
-        )
-
-        em = DensitizedMaxwellState(B, B, D, D)
-        divergence_D, divergence_B = (
-            axisymmetric_densitized_constraint_divergences(em, params)
-        )
-        jax.block_until_ready((divergence_D, divergence_B))
-
-        R, Z = jnp.meshgrid(rho_center, z_center, indexing="ij")
-        D_mask = (R > 0.2) & (R < 1.0) & (jnp.abs(Z) < 1.0)
-        R, Z = jnp.meshgrid(rho_vertex, z_vertex, indexing="ij")
-        B_mask = (R > 0.2) & (R < 1.0) & (jnp.abs(Z) < 1.0)
-        D_values = divergence_D[4:, 0, :]
-        B_values = divergence_B[4:, 0, :]
-        displacement_errors.append(
-            float(
-                jnp.sqrt(
-                    jnp.sum(jnp.where(D_mask, D_values**2, 0.0))
-                    / jnp.sum(D_mask)
-                )
-            )
-        )
-        magnetic_errors.append(
-            float(
-                jnp.sqrt(
-                    jnp.sum(jnp.where(B_mask, B_values**2, 0.0))
-                    / jnp.sum(B_mask)
-                )
-            )
-        )
-
-    for errors in (displacement_errors, magnetic_errors):
-        assert math.log2(errors[0] / errors[1]) > 1.8
-        assert math.log2(errors[1] / errors[2]) > 1.8
