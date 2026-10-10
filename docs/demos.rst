@@ -1,8 +1,9 @@
 Demos
 =====
 
-The supported physical examples are gauge wave, linear wave, and spherical Cartoon
-puncture. Each demo owns its coordinates, initial data, parameters, and run loop.
+The supported physical examples are gauge wave, linear wave, spherical Cartoon
+puncture, and axisymmetric Cartoon collision. Each demo owns its coordinates,
+initial data, parameters, and run loop.
 
 Install demo support first:
 
@@ -70,3 +71,25 @@ Output is written under ``output/`` as ``cartoon_puncture.h5`` and
 ``2*Nr x 1 x 1`` axis, including all BSSN tensor components and Hamiltonian and
 momentum constraints. Constraint norms use only independent positive radii and
 exclude the four outer stencil-affected samples.
+
+Axisymmetric Cartoon Bowen–York collision
+----------------------------------------
+
+The collision demo initializes two nonspinning punctures on the z axis with
+opposite inward momenta. It solves the Hamiltonian constraint using the existing
+Cartesian Bowen–York solver and evolves the resulting x–z half-plane with
+``JAX_BSSN.cartoon.axisymmetry.axisymmetric_rk4_step``.
+
+.. code-block:: bash
+
+   python demos/axisymmetric_blackhole_collision/axisymmetric_blackhole_collision.py
+   python demos/axisymmetric_blackhole_collision/make_movies.py
+
+
+The initial solve uses a ``(2*Nrho)^3`` cell-centered Cartesian cube with the
+same spacing and x/z coordinates as the evolution plane. Only the regular
+correction ``u`` is interpolated to ``y=0`` with six-point Lagrange interpolation.
+The singular Brill–Lindquist factor and Bowen–York curvature are evaluated
+analytically on that plane. Initialization sets ``W=psi**-2``, unit conformal
+metric, BSSN traceless curvature ``psi**-6 * A_BY``, lapse ``W``, and zero trace
+curvature, connection functions, and shift.
