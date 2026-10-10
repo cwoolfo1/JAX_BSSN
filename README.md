@@ -29,6 +29,7 @@ The supported physical examples are:
 1. Gauge wave
 2. Linear wave
 3. Spherical Cartoon puncture
+4. Axisymmetric black hole head-on collision
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -51,6 +52,12 @@ axis to openPMD:
 
 ```bash
 python demos/spherically_symmetric_cartoon_puncture/cartoon_puncture.py
+```
+
+Run the axisymmetric Cartoon head-on collision of two black holes:
+
+```bash
+python demos/axisymmetric_blackhole_collision/axisymmetric_blackhole_collision.py
 ```
 
 The default production runs compile substantial JAX kernels. The
