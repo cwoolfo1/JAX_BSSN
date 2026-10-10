@@ -12,7 +12,7 @@ authors = [
 license = { file = "LICENSE" }
 
 dependencies = [
-    "PyPIC3D @ git+https://github.com/cwoolfo1/PyPIC3D.git@9124995c8eac57f92957a6a59089d04dac1a3392",
+    "PyPIC3D @ git+https://github.com/uwplasma/PyPIC3D.git",
     "jax",
     "jaxlib",
     "numpy",
