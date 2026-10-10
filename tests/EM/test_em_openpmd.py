@@ -9,7 +9,8 @@ import openpmd_api as io
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
 from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.EM.first_order import (
-    DensitizedMaxwellState,
+    initialize_densitized_maxwell_state,
+    make_em_grid,
     EinsteinMaxwellVariables,
     electromagnetic_output_fields,
 )
@@ -21,18 +22,13 @@ def test_openpmd_writes_common_time_physical_cartesian_fields(tmp_path):
     W = 0.8
     bssn = flat_bssn_variables(shape)._replace(conformal_factor=jnp.full(shape, W))
     displacement = jnp.broadcast_to(
-        jnp.array([1., 2., 3.])[:, None, None, None], (3,) + shape
+        jnp.array([1.0, 2.0, 3.0])[:, None, None, None], (3,) + shape
     )
-    magnetic = -2. * displacement
-    em = DensitizedMaxwellState(
-        magnetic_previous=7. * magnetic,
-        magnetic_current=magnetic,
-        displacement_left_half=displacement - 0.25,
-        displacement_right_half=displacement + 0.25,
-    )
-    fields = electromagnetic_output_fields(
-        EinsteinMaxwellVariables(bssn, em), BSSNParameters(dx=0.25)
-    )
+    magnetic = -2.0 * displacement
+    params = BSSNParameters(dx=0.25)
+    grid = make_em_grid(shape, params)
+    em = initialize_densitized_maxwell_state(displacement, magnetic, bssn, params, grid)
+    fields = electromagnetic_output_fields(EinsteinMaxwellVariables(bssn, em), grid)
 
     dx = 0.25
     z_min = -1.0
@@ -92,4 +88,6 @@ def test_openpmd_writes_common_time_physical_cartesian_fields(tmp_path):
 
     for field_name, expected in (("D", W**3 * displacement), ("B", W**3 * magnetic)):
         for component, component_name in enumerate(("x", "y", "z")):
-            np.testing.assert_allclose(arrays[field_name][component_name], expected[component])
+            np.testing.assert_allclose(
+                arrays[field_name][component_name], expected[component]
+            )

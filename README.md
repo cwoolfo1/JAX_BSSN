@@ -89,12 +89,13 @@ comparison and temporal self-convergence, with:
 python -m pytest tests/EM/test_em_waves.py
 ```
 
-EM evolution uses the full Cartesian first-order Maxwell system, with RK4
-for BSSN and staggered leapfrog for the electromagnetic fields.
-Cartesian staggered EM supports metric-aware PEC walls through `PECBoundary` and the
-`pec_boundary` initializer/stepper argument. See
-[Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for the padded-grid
-layout, wall convention, and time integration details.
+EM evolution imports PyPIC3D's particle-free static-metric loop and couples
+two Maxwell half-steps around a BSSN RK4 step. Synchronization and a metric-switch
+history correction retain second-order temporal accuracy without modifying
+PyPIC3D. Configure its Cartesian boundary modes independently of gravity with
+`make_em_grid`; initial data uses PyPIC3D's upper-half-cell V locations.
+See [Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for installation,
+editable sibling-checkout development, state migration, and cavity initialization.
 
-The convergence study uses 128 cells and three timestep sizes through `t=0.5`
-on the CPU in double precision. It writes no simulation output files.
+Tests use double precision and write no simulation output except dedicated
+openPMD round-trip tests in temporary directories.

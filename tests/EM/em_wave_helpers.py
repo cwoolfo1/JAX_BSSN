@@ -5,7 +5,7 @@ from scipy.integrate import solve_ivp
 import jax
 import jax.numpy as jnp
 from JAX_BSSN.bssn.variables import BSSNVariables
-from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
+from JAX_BSSN.EM.first_order import initialize_densitized_maxwell_state
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
 
 GHOSTS = 8
@@ -87,22 +87,21 @@ class RosenSolution:
 
     def fields(self, time):
         w = time-self.z-self.packet.offset
-        wb = w+self.dx/2  # B_y is on the lower z vertex, D_x at the center.
+        wb = w-self.dx/2  # PyPIC3D B_y is on the upper z vertex.
         d = -self.scale(w)[0]*profile(w,self.packet)/jnp.sqrt(4*jnp.pi)
         b = -self.scale(wb)[0]*profile(wb,self.packet)/jnp.sqrt(4*jnp.pi)
         zero = jnp.zeros_like(d)
         return jnp.stack((d,zero,zero)), jnp.stack((zero,b,zero))
 
-    def state(self, time, dt):
-        return EinsteinMaxwellVariables(self.bssn(time), DensitizedMaxwellState(
-            self.fields(time-dt)[1], self.fields(time)[1],
-            self.fields(time-dt/2)[0], self.fields(time+dt/2)[0]))
+    def state(self, time, params, grid):
+        bssn = self.bssn(time)
+        em = initialize_densitized_maxwell_state(*self.fields(time), bssn, params, grid)
+        return EinsteinMaxwellVariables(bssn, em)
 
-    def boundary(self, bssn, d, b, time):
-        reference = (self.bssn(time), *self.fields(time))
+    def boundary(self, bssn, time):
         def fill(value, exact):
             return value.at[...,:GHOSTS].set(exact[...,:GHOSTS]).at[...,-GHOSTS:].set(exact[...,-GHOSTS:])
-        return jax.tree_util.tree_map(fill, (bssn,d,b), reference)
+        return jax.tree_util.tree_map(fill, bssn, self.bssn(time))
 
 
 def prescribed_gauge(bssn, time):

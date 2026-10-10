@@ -1,51 +1,21 @@
-"""Diagnostics for densitized first-order Maxwell states."""
+"""Synchronized physical output and imported native Gauss constraints."""
 
+from functools import partial
 import jax
-
-from JAX_BSSN.bssn import BSSNParameters
-
-from JAX_BSSN.EM.first_order.equations import (
-    densitized_displacement_divergence,
-    densitized_magnetic_divergence,
-)
-from JAX_BSSN.EM.first_order.evolve import (
-    common_densitized_fields,
-    common_physical_fields,
-)
-from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
-from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
+from PyPIC3D.diagnostics.static_metric import divergence
+from .evolve import common_densitized_fields, common_physical_fields
 
 
-@jax.jit
-def first_order_constraint_divergences(
-    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
-    params: BSSNParameters,
-):
-    """Return the source-free densitized Gauss constraints."""
-
-    densitized_displacement, densitized_magnetic = common_densitized_fields(
-        state.em
-    )
+@partial(jax.jit, static_argnames=("grid",))
+def first_order_constraint_divergences(state, params, grid):
+    d, b = common_densitized_fields(state.em)
+    dynamic = grid.dynamic(params, state.em.half_dt)
     return (
-        densitized_displacement_divergence(densitized_displacement, params),
-        densitized_magnetic_divergence(densitized_magnetic, params),
+        grid.from_tile(divergence(d, dynamic)),
+        grid.from_tile(divergence(b, dynamic, forward=True)),
     )
 
 
-def electromagnetic_output_fields(
-    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
-    params: BSSNParameters,
-) -> dict:
-    """Return cell-centered physical contravariant D and B components."""
-
-    displacement, magnetic = common_physical_fields(state, params)
-    return {
-        "D": tuple(displacement[i] for i in range(3)),
-        "B": tuple(magnetic[i] for i in range(3)),
-    }
-
-
-__all__ = [
-    "electromagnetic_output_fields",
-    "first_order_constraint_divergences",
-]
+def electromagnetic_output_fields(state, grid):
+    d, b = common_physical_fields(state, grid)
+    return {"D": tuple(d), "B": tuple(b)}

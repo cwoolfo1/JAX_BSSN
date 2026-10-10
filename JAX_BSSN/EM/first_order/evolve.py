@@ -1,362 +1,112 @@
-"""Synchronized BSSN RK4 and doubled-leapfrog Maxwell evolution."""
+"""Strang orchestration of unchanged PyPIC3D vacuum steps and BSSN RK4."""
 
-import jax
-import jax.numpy as jnp
 from functools import partial
-
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+import jax
+from PyPIC3D.relativity.field_state import densitize_vector
 from JAX_BSSN.evolution.time_evolve import (
     compute_bssn_rhs_with_matter,
     enforce_algebraic_constraints,
 )
-
-from JAX_BSSN.EM.first_order.energy_momentum import (
-    compute_densitized_electromagnetic_energy_momentum,
-    physical_fields_at_centers,
-)
-from JAX_BSSN.EM.first_order.equations import (
-    densitized_maxwell_rhs,
-)
-from JAX_BSSN.EM.first_order.geometry import (
-    _conformal_factors_at_locations,
-)
-from JAX_BSSN.EM.first_order.staggering import (
-    DISPLACEMENT_FIELD_LOCATIONS,
-    MAGNETIC_FIELD_LOCATIONS,
-)
-from JAX_BSSN.EM.first_order.variables import DensitizedMaxwellState
-from JAX_BSSN.EM.first_order.pec import (
-    apply_pec_boundaries,
-    enforce_pec_B,
-    enforce_pec_D,
-)
 from JAX_BSSN.EM.variables import EinsteinMaxwellVariables
+from .geometry import build_yee_metric
+from .coupling import quadratic_moments, sources_from_moments
+from .energy_momentum import physical_fields_at_centers
+from .maxwell import initialize_native_state, maxwell_half_step, rephase_state_metric
 
 
-def _add_bssn_scaled(
-    bssn: BSSNVariables, rhs: BSSNVariables, scale
-) -> BSSNVariables:
-    return jax.tree_util.tree_map(
-        lambda field, derivative: field + scale * derivative,
-        bssn,
-        rhs,
-    )
+def common_densitized_fields(em):
+    """Synchronized native tiled densities, at the integer D time."""
+    return em.fields[0], em.synchronized_magnetic
 
 
-def _bssn_rhs_from_densities(
-    bssn: BSSNVariables,
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    params: BSSNParameters,
-) -> BSSNVariables:
-    energy_density, momentum_density, spatial_stress = (
-        compute_densitized_electromagnetic_energy_momentum(
-            densitized_displacement,
-            densitized_magnetic,
-            bssn,
-            params,
-        )
-    )
-    return compute_bssn_rhs_with_matter(
-        bssn,
-        params,
-        energy_density,
-        momentum_density,
-        spatial_stress,
-    )
-
-
-@jax.jit
-def common_densitized_fields(
-    em: DensitizedMaxwellState,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Return ``(mathcal D^n, mathcal B^n)`` at the common integer time."""
-
-    densitized_displacement = 0.5 * (
-        em.displacement_left_half + em.displacement_right_half
-    )
-    return densitized_displacement, em.magnetic_current
-
-
-@jax.jit
-def common_physical_fields(
-    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
-    params: BSSNParameters,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Return cell-centered physical contravariant fields at the common time."""
-
-    densitized_displacement, densitized_magnetic = common_densitized_fields(
-        state.em
-    )
+@partial(jax.jit, static_argnames=("grid",))
+def common_physical_fields(state, grid):
     return physical_fields_at_centers(
-        densitized_displacement,
-        densitized_magnetic,
-        state.bssn,
+        *common_densitized_fields(state.em), state.bssn, grid
+    )
+
+
+@partial(jax.jit, static_argnames=("grid",))
+def initialize_densitized_maxwell_state(displacement, magnetic, bssn, params, grid):
+    """Initialize from component-first native densities on the physical grid."""
+    metric = build_yee_metric(enforce_algebraic_constraints(bssn), grid)
+    return initialize_native_state(
+        tuple(grid.to_tile(v) for v in displacement),
+        tuple(grid.to_tile(v) for v in magnetic),
+        metric,
         params,
+        grid,
     )
 
 
-@jax.jit
-def bootstrap_densitized_maxwell_state(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    densitized_displacement_dot: jnp.ndarray,
-    densitized_magnetic_dot: jnp.ndarray,
-    dt: float,
-) -> DensitizedMaxwellState:
-    """Build second-order leapfrog history from common-time fields and dots."""
-
-    half_step = 0.5 * dt
-    return DensitizedMaxwellState(
-        magnetic_previous=densitized_magnetic - dt * densitized_magnetic_dot,
-        magnetic_current=densitized_magnetic,
-        displacement_left_half=(
-            densitized_displacement - half_step * densitized_displacement_dot
-        ),
-        displacement_right_half=(
-            densitized_displacement + half_step * densitized_displacement_dot
-        ),
-    )
-
-
-@partial(jax.jit, static_argnames=("pec_boundary",))
-def initialize_densitized_maxwell_state(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    bssn: BSSNVariables,
-    params: BSSNParameters,
-    *,
-    pec_boundary=None,
-) -> DensitizedMaxwellState:
-    """Bootstrap the doubled leapfrog from common-time density fields."""
-
-    bssn = enforce_algebraic_constraints(bssn)
-    if pec_boundary is not None:
-        densitized_displacement, densitized_magnetic = apply_pec_boundaries(
-            densitized_displacement, densitized_magnetic, bssn, params,
-            boundary=pec_boundary,
-        )
-    displacement_rhs, magnetic_rhs = densitized_maxwell_rhs(
-        densitized_displacement,
-        densitized_magnetic,
-        bssn,
-        params,
-    )
-    em = bootstrap_densitized_maxwell_state(
-        densitized_displacement,
-        densitized_magnetic,
-        displacement_rhs,
-        magnetic_rhs,
-        params.dt,
-    )
-    if pec_boundary is not None:
-        # First-order metric predictors suffice for second-order history data.
-        rhs = _bssn_rhs_from_densities(bssn, densitized_displacement, densitized_magnetic, params)
-
-        def metric_at(offset):
-            return enforce_algebraic_constraints(_add_bssn_scaled(bssn, rhs, offset * params.dt))
-
-        em = em._replace(
-            magnetic_previous=enforce_pec_B(em.magnetic_previous, metric_at(-1), params, boundary=pec_boundary),
-            displacement_left_half=enforce_pec_D(em.displacement_left_half, metric_at(-0.5), params, boundary=pec_boundary),
-            displacement_right_half=enforce_pec_D(em.displacement_right_half, metric_at(0.5), params, boundary=pec_boundary),
-        )
-    return em
-
-
-@partial(jax.jit, static_argnames=("pec_boundary",))
+@partial(jax.jit, static_argnames=("grid",))
 def initialize_first_order_einstein_maxwell_state(
-    bssn: BSSNVariables,
-    physical_displacement: jnp.ndarray,
-    physical_magnetic: jnp.ndarray,
-    params: BSSNParameters,
-    *,
-    pec_boundary=None,
-) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
-    """Initialize from physical contravariant fields on their native Yee sites."""
+    bssn, physical_displacement, physical_magnetic, params, grid
+):
+    """Initialize physical contravariant fields at PyPIC3D's native Yee sites.
 
+    Inputs have shape (3,) + grid.shape; they do not contain EM guard cells.
+    History is initialized once with spacing h=params.dt/2.
+    """
     bssn = enforce_algebraic_constraints(bssn)
-    displacement_W = _conformal_factors_at_locations(
-        bssn, DISPLACEMENT_FIELD_LOCATIONS, params
+    metric = build_yee_metric(bssn, grid)
+    d = densitize_vector(
+        tuple(grid.to_tile(v) for v in physical_displacement), metric.D
     )
-    magnetic_W = _conformal_factors_at_locations(
-        bssn, MAGNETIC_FIELD_LOCATIONS, params
+    b = densitize_vector(tuple(grid.to_tile(v) for v in physical_magnetic), metric.B)
+    return EinsteinMaxwellVariables(
+        bssn, initialize_native_state(d, b, metric, params, grid)
     )
-    densitized_displacement = displacement_W**-3 * physical_displacement
-    densitized_magnetic = magnetic_W**-3 * physical_magnetic
-    em = initialize_densitized_maxwell_state(
-        densitized_displacement,
-        densitized_magnetic,
-        bssn,
-        params,
-        pec_boundary=pec_boundary,
-    )
-    return EinsteinMaxwellVariables(bssn=bssn, em=em)
 
 
-@partial(jax.jit, static_argnames=("prescribed_gauge", "stage_boundary", "pec_boundary"))
+def _add(bssn, rhs, scale):
+    return jax.tree_util.tree_map(lambda q, r: q + scale * r, bssn, rhs)
+
+
+@partial(jax.jit, static_argnames=("grid", "prescribed_gauge", "gravity_boundary"))
 def first_order_einstein_maxwell_step(
-    state: EinsteinMaxwellVariables[DensitizedMaxwellState],
-    params: BSSNParameters,
-    *,
-    time=0.0,
-    prescribed_gauge=None,
-    stage_boundary=None,
-    pec_boundary=None,
-) -> EinsteinMaxwellVariables[DensitizedMaxwellState]:
-    """Advance one two-way coupled RK4/doubled-leapfrog timestep.
+    state, params, grid, *, time=0.0, prescribed_gauge=None, gravity_boundary=None
+):
+    """Two vacuum half-steps surrounding RK4 with fixed midpoint densities.
 
-    Optional pure, JAX-compatible callbacks are static compilation arguments.
-    ``stage_boundary(bssn, D, B, time)`` returns boundary-conditioned
-    ``(bssn, D, B)`` at one common time. ``prescribed_gauge(bssn, time)``
-    returns ``(lapse, shift, dt_lapse, dt_shift)`` at that time. The latter
-    replaces both gauge values and their RHS, without changing physical RHSs.
-    History fields are conditioned at their own integer/half-integer times.
-    During history-only calls, other inputs retain current-stage values and
-    their returned values are discarded. Prescribed boundary callbacks should
-    therefore obtain boundary data from time/coordinates, not those inputs.
-    ``pec_boundary`` selects metric-aware Cartesian conductor walls on an
-    explicitly padded grid. PEC runs after the optional stage callback and
-    uses the projected metric at each stage (and predicted history time).
+    prescribed_gauge(bssn,time) returns lapse, shift, dt_lapse, dt_shift.
+    gravity_boundary(bssn,time) returns BSSN boundary data only. Callbacks
+    are pure/JAX-compatible and static under JIT. Keep params.dt fixed after
+    initialization: retained PyPIC3D history has spacing params.dt/2.
     """
 
-    def prepare(bssn, displacement, magnetic, t):
-        if stage_boundary is not None:
-            bssn, displacement, magnetic = stage_boundary(bssn, displacement, magnetic, t)
+    def prepare(bssn, t):
+        if gravity_boundary is not None:
+            bssn = gravity_boundary(bssn, t)
         if prescribed_gauge is not None:
             lapse, shift, _, _ = prescribed_gauge(bssn, t)
             bssn = bssn._replace(lapse=lapse, shift=shift)
-        if pec_boundary is not None:
-            displacement, magnetic = apply_pec_boundaries(
-                displacement, magnetic, bssn, params, boundary=pec_boundary
-            )
-        return bssn, displacement, magnetic
+        return enforce_algebraic_constraints(bssn)
 
-    def gravity_rhs(bssn, displacement, magnetic, t):
-        rhs = _bssn_rhs_from_densities(bssn, displacement, magnetic, params)
+    bssn = prepare(state.bssn, time)
+    em = rephase_state_metric(state.em, build_yee_metric(bssn, grid), params, grid)
+    midpoint = maxwell_half_step(em, params, grid)
+    moments = quadratic_moments(*common_densitized_fields(midpoint), grid)
+
+    def rhs(q, t):
+        result = compute_bssn_rhs_with_matter(
+            q, params, *sources_from_moments(moments, q)
+        )
         if prescribed_gauge is not None:
-            _, _, lapse_dot, shift_dot = prescribed_gauge(bssn, t)
-            rhs = rhs._replace(lapse=lapse_dot, shift=shift_dot)
-        return rhs
+            _, _, lapse_dot, shift_dot = prescribed_gauge(q, t)
+            result = result._replace(lapse=lapse_dot, shift=shift_dot)
+        return result
 
     dt = params.dt
-    bssn_n = enforce_algebraic_constraints(state.bssn)
-    em = state.em
-    displacement_n, magnetic_n = common_densitized_fields(em)
-    bssn_n, displacement_n, magnetic_n = prepare(bssn_n, displacement_n, magnetic_n, time)
-
-    # BSSN k1 and the first member of the doubled magnetic leapfrog.
-    k1 = gravity_rhs(
-        bssn_n, displacement_n, magnetic_n, time
+    k1 = rhs(bssn, time)
+    k2 = rhs(prepare(_add(bssn, k1, dt / 2), time + dt / 2), time + dt / 2)
+    k3 = rhs(prepare(_add(bssn, k2, dt / 2), time + dt / 2), time + dt / 2)
+    k4 = rhs(prepare(_add(bssn, k3, dt), time + dt), time + dt)
+    increment = jax.tree_util.tree_map(
+        lambda a, b, c, d: (a + 2 * b + 2 * c + d) / 6, k1, k2, k3, k4
     )
-    _, magnetic_rhs_n = densitized_maxwell_rhs(
-        displacement_n, magnetic_n, bssn_n, params
+    final_bssn = prepare(_add(bssn, increment, dt), time + dt)
+    em = rephase_state_metric(
+        midpoint, build_yee_metric(final_bssn, grid), params, grid
     )
-    magnetic_previous = em.magnetic_previous
-    if stage_boundary is not None:
-        _, _, magnetic_previous = stage_boundary(bssn_n, displacement_n, magnetic_previous, time - dt)
-    if pec_boundary is not None:
-        previous_metric = enforce_algebraic_constraints(_add_bssn_scaled(bssn_n, k1, -dt))
-        magnetic_previous = enforce_pec_B(magnetic_previous, previous_metric, params, boundary=pec_boundary)
-    magnetic_left_half = 0.5 * (magnetic_previous + magnetic_n)
-    magnetic_right_half = magnetic_left_half + dt * magnetic_rhs_n
-
-    # Both RK4 midpoint stages represent the same physical half time, but use
-    # their own projected BSSN metrics for stress-energy and constitutive fields.
-    bssn_midpoint_1 = enforce_algebraic_constraints(
-        _add_bssn_scaled(bssn_n, k1, 0.5 * dt)
-    )
-    bssn_midpoint_1, displacement_half, magnetic_right_half = prepare(
-        bssn_midpoint_1, em.displacement_right_half, magnetic_right_half, time + 0.5 * dt
-    )
-    k2 = gravity_rhs(
-        bssn_midpoint_1,
-        displacement_half,
-        magnetic_right_half,
-        time + 0.5 * dt,
-    )
-
-    bssn_midpoint_2 = enforce_algebraic_constraints(
-        _add_bssn_scaled(bssn_n, k2, 0.5 * dt)
-    )
-    bssn_midpoint_2, displacement_half, magnetic_right_half = prepare(
-        bssn_midpoint_2, displacement_half, magnetic_right_half, time + 0.5 * dt
-    )
-    k3 = gravity_rhs(
-        bssn_midpoint_2,
-        displacement_half,
-        magnetic_right_half,
-        time + 0.5 * dt,
-    )
-    displacement_rhs_midpoint, magnetic_rhs_midpoint = densitized_maxwell_rhs(
-        displacement_half,
-        magnetic_right_half,
-        bssn_midpoint_2,
-        params,
-    )
-    magnetic_next = magnetic_n + dt * magnetic_rhs_midpoint
-    displacement_next = displacement_n + dt * displacement_rhs_midpoint
-
-    bssn_endpoint = enforce_algebraic_constraints(
-        _add_bssn_scaled(bssn_n, k3, dt)
-    )
-    bssn_endpoint, displacement_next, magnetic_next = prepare(
-        bssn_endpoint, displacement_next, magnetic_next, time + dt
-    )
-    k4 = gravity_rhs(
-        bssn_endpoint, displacement_next, magnetic_next, time + dt
-    )
-    bssn_increment = jax.tree_util.tree_map(
-        lambda d1, d2, d3, d4: (d1 + 2.0 * d2 + 2.0 * d3 + d4)
-        / 6.0,
-        k1,
-        k2,
-        k3,
-        k4,
-    )
-    bssn_next = enforce_algebraic_constraints(
-        _add_bssn_scaled(bssn_n, bssn_increment, dt)
-    )
-    bssn_next, displacement_next, magnetic_next = prepare(
-        bssn_next, displacement_next, magnetic_next, time + dt
-    )
-
-    # Finish the second electric leapfrog with the final projected spacetime.
-    displacement_rhs_endpoint, _ = densitized_maxwell_rhs(
-        displacement_next,
-        magnetic_next,
-        bssn_next,
-        params,
-    )
-    displacement_next_half = displacement_half + dt * (
-        displacement_rhs_endpoint
-    )
-    if stage_boundary is not None:
-        _, displacement_next_half, _ = stage_boundary(
-            bssn_next, displacement_next_half, magnetic_next, time + 1.5 * dt
-        )
-    if pec_boundary is not None:
-        half_metric = enforce_algebraic_constraints(_add_bssn_scaled(bssn_next, k4, 0.5 * dt))
-        displacement_next_half = enforce_pec_D(
-            displacement_next_half, half_metric, params, boundary=pec_boundary
-        )
-
-    return EinsteinMaxwellVariables(
-        bssn=bssn_next,
-        em=DensitizedMaxwellState(
-            magnetic_previous=magnetic_n,
-            magnetic_current=magnetic_next,
-            displacement_left_half=displacement_half,
-            displacement_right_half=displacement_next_half,
-        ),
-    )
-
-
-__all__ = [
-    "bootstrap_densitized_maxwell_state",
-    "common_densitized_fields",
-    "common_physical_fields",
-    "first_order_einstein_maxwell_step",
-    "initialize_densitized_maxwell_state",
-    "initialize_first_order_einstein_maxwell_state",
-]
+    return EinsteinMaxwellVariables(final_bssn, maxwell_half_step(em, params, grid))

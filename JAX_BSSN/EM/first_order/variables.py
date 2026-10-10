@@ -1,17 +1,17 @@
-"""State containers for the densitized first-order Maxwell system."""
+"""PyPIC3D runtime state and a derived synchronized magnetic field."""
 
 from typing import NamedTuple
 
-import jax.numpy as jnp
-
 
 class DensitizedMaxwellState(NamedTuple):
-    """Doubled Entity leapfrog state centered on one integer time."""
+    """Full PyPIC3D nine-slot field tuple plus common-time output B.
 
-    magnetic_previous: jnp.ndarray
-    magnetic_current: jnp.ndarray
-    displacement_left_half: jnp.ndarray
-    displacement_right_half: jnp.ndarray
+    fields[0] is D at t, fields[1] is B at t-h/2 and fields[7] stores
+    (D at t-h, B at t-3h/2), where h is half the coupled BSSN timestep.
+    synchronized_magnetic is a diagnostic/source view at t, never history.
+    half_dt records the history spacing; changing dt requires reinitializing.
+    """
 
-
-__all__ = ["DensitizedMaxwellState"]
+    fields: tuple
+    synchronized_magnetic: tuple
+    half_dt: object

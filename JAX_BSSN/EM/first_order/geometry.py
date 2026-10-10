@@ -1,97 +1,57 @@
-"""Interpolate existing BSSN variables onto the FPIC Yee locations."""
+"""Convert BSSN geometry to PyPIC3D's native metric samples."""
 
 import jax.numpy as jnp
-
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from dataclasses import replace
+from PyPIC3D.relativity.core import (
+    Metric,
+    YeeMetric,
+    D_FIELD_LOCATIONS,
+    B_FIELD_LOCATIONS,
+)
+from PyPIC3D.relativity.field_interpolation import location_interpolate
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
-from JAX_BSSN.bssn.tensor_algebra import (
-    determinant_3x3_metric,
-    invert_3x3_metric,
-)
-
-from JAX_BSSN.EM.first_order.staggering import (
-    CENTER_LOCATION,
-    DISPLACEMENT_FIELD_LOCATIONS,
-    MAGNETIC_FIELD_LOCATIONS,
-    interpolate_between_locations,
-)
+from .grid import CENTER_LOCATION
 
 
-def _metric_fields_at_location(
-    bssn: BSSNVariables,
-    location,
-    params: BSSNParameters,
-):
-    W = interpolate_between_locations(
-        bssn.conformal_factor, CENTER_LOCATION, location, params
+def build_yee_metric(bssn, grid):
+    """Project interpolated conformal metrics before deriving volume/inverse."""
+    # One extra layer makes the upper-neighbour interpolation valid even on
+    # the outermost metric halo. Trim after transfer, never wrap that halo.
+    padded = replace(
+        grid, static=grid.static._replace(guard_cells=grid.guard_cells + 1)
     )
-    lapse = interpolate_between_locations(
-        bssn.lapse, CENTER_LOCATION, location, params
-    )
-    shift = interpolate_between_locations(
-        bssn.shift, CENTER_LOCATION, location, params
-    )
-    conformal_metric = interpolate_between_locations(
-        bssn.conformal_metric, CENTER_LOCATION, location, params
+    W = padded.to_tile(bssn.conformal_factor)
+    lapse = padded.to_tile(bssn.lapse)
+    shift = tuple(padded.to_tile(v) for v in bssn.shift)
+    metric = tuple(
+        tuple(padded.to_tile(v) for v in row) for row in bssn.conformal_metric
     )
 
-    # Componentwise interpolation does not preserve unit determinant. Project
-    # after all spatial shifts, keeping W fixed as in the BSSN constraints.
-    # This changes the interpolated physical metric so its volume factor is
-    # W^-3, consistently with the densitized Maxwell fields. Invalid metrics
-    # remain invalid: do not floor or take the absolute value of the determinant.
-    determinant = determinant_3x3_metric(conformal_metric)
-    conformal_metric = conformal_metric * determinant ** (-1.0 / 3.0)
+    def sample(location):
+        def transfer(a):
+            return location_interpolate(a, CENTER_LOCATION, location)[
+                ..., 1:-1, 1:-1, 1:-1
+            ]
 
-    W = jnp.maximum(W, W_FLOOR_VALUE)
-    inverse_conformal_metric = invert_3x3_metric(conformal_metric)
-    return (
-        W,
-        lapse,
-        shift,
-        conformal_metric,
-        inverse_conformal_metric,
+        w = jnp.maximum(transfer(W), W_FLOOR_VALUE)
+        conformal = jnp.stack(
+            tuple(jnp.stack(tuple(transfer(v) for v in row)) for row in metric)
+        )
+        conformal = jnp.moveaxis(conformal, (0, 1), (-2, -1))
+        conformal *= jnp.linalg.det(conformal)[..., None, None] ** (-1 / 3)
+        inverse = jnp.linalg.inv(conformal) * w[..., None, None] ** 2
+        physical = conformal / w[..., None, None] ** 2
+        return Metric(
+            transfer(lapse),
+            jnp.stack(tuple(transfer(v) for v in shift), axis=-1),
+            physical,
+            inverse,
+            w**-3,
+        )
+
+    return YeeMetric(
+        tuple(sample(loc) for loc in D_FIELD_LOCATIONS),
+        tuple(sample(loc) for loc in B_FIELD_LOCATIONS),
+        sample(CENTER_LOCATION),
+        sample(("V", "V", "V")),
     )
-
-
-def _metric_fields_on_yee_sites(
-    bssn: BSSNVariables, params: BSSNParameters
-) -> tuple[tuple, tuple]:
-    """Return short-lived metric tuples on the six native field sites."""
-
-    displacement = tuple(
-        _metric_fields_at_location(bssn, location, params)
-        for location in DISPLACEMENT_FIELD_LOCATIONS
-    )
-    magnetic = tuple(
-        _metric_fields_at_location(bssn, location, params)
-        for location in MAGNETIC_FIELD_LOCATIONS
-    )
-    return displacement, magnetic
-
-
-def _conformal_factors_at_locations(
-    bssn: BSSNVariables,
-    locations,
-    params: BSSNParameters,
-) -> jnp.ndarray:
-    """Return floored ``W`` at three native Yee locations."""
-
-    return jnp.stack(
-        tuple(
-            jnp.maximum(
-                interpolate_between_locations(
-                    bssn.conformal_factor,
-                    CENTER_LOCATION,
-                    location,
-                    params,
-                ),
-                W_FLOOR_VALUE,
-            )
-            for location in locations
-        ),
-        axis=0,
-    )
-
-
-__all__ = []

@@ -7,11 +7,7 @@ from JAX_BSSN.bssn import BSSNParameters
 from JAX_BSSN.evolution.coordinates import axis_coordinates, grid_coordinates, cylindrical_volume_weights
 from JAX_BSSN.evolution.spatial_derivatives import diff1_physical, diff2_physical, diff1_upwind_physical
 from JAX_BSSN.evolution.derivatives import diff1_field, diff2_field
-from JAX_BSSN.EM.first_order.equations import (
-    _forward_difference, _backward_difference, curl_E_to_densitized_B,
-    curl_H_to_densitized_D, densitized_displacement_divergence, densitized_magnetic_divergence,
-)
-from JAX_BSSN.EM.first_order.staggering import DISPLACEMENT_FIELD_LOCATIONS, MAGNETIC_FIELD_LOCATIONS
+from PyPIC3D.relativity.core import D_FIELD_LOCATIONS as DISPLACEMENT_FIELD_LOCATIONS, B_FIELD_LOCATIONS as MAGNETIC_FIELD_LOCATIONS
 from tests.EM.em_helpers import flat_bssn_variables
 jax.config.update('jax_enable_x64', True)
 
@@ -42,21 +38,6 @@ def test_all_physical_derivatives_converge():
         errors.append(errs)
     rates=np.log2(np.asarray(errors[-2])/np.asarray(errors[-1]))
     assert np.min(rates)>3.6,(errors,rates)
-
-
-def test_yee_axial_derivatives_and_div_curl():
-    errors=[]
-    for n in (24,48,96):
-        p=params(n)
-        zc=axis_coordinates(2*n,2,p,jnp.float64,'C')[None,None,:]
-        zv=axis_coordinates(2*n,2,p,jnp.float64,'V')[None,None,:]
-        errors.append(max(float(jnp.max(jnp.abs(a-b)[...,4:-4])) for a,b in (
-            (_backward_difference(jnp.exp(-zc**2),2,p),-2*zv*jnp.exp(-zv**2)),
-            (_forward_difference(jnp.exp(-zv**2),2,p),-2*zc*jnp.exp(-zc**2)))))
-    assert np.log2(errors[-2]/errors[-1])>1.8,errors
-    p=params(24);f=jnp.asarray(np.random.default_rng(1).normal(size=(3,28,9,48)))
-    for curl,div in ((curl_E_to_densitized_B,densitized_magnetic_divergence),(curl_H_to_densitized_D,densitized_displacement_divergence)):
-        np.testing.assert_allclose(div(curl(f,p),p)[5:-4,2:-2,2:-2],0,atol=5e-12)
 
 
 def test_uniform_norms_use_physical_volume():

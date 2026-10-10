@@ -1,48 +1,32 @@
-"""Electromagnetic stress-energy from densitized first-order fields."""
+"""BSSN sources and physical output views of PyPIC3D densities."""
 
+from functools import partial
 import jax
 import jax.numpy as jnp
-
-from JAX_BSSN.bssn import BSSNParameters, BSSNVariables
+from PyPIC3D.relativity.core import D_FIELD_LOCATIONS, B_FIELD_LOCATIONS
+from PyPIC3D.relativity.field_interpolation import reconstruct_vector
 from JAX_BSSN.bssn.geometry import W_FLOOR_VALUE
-from JAX_BSSN.EM.first_order.coupling import quadratic_moments, sources_from_moments
-from JAX_BSSN.EM.first_order.equations import (
-    collocate_densitized_fields,
-)
+from .grid import CENTER_LOCATION
+from .coupling import quadratic_moments, sources_from_moments
 
 
-@jax.jit
-def physical_fields_at_centers(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    bssn: BSSNVariables,
-    params: BSSNParameters,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Return physical contravariant ``(D^i, B^i)`` at BSSN centers."""
-
-    displacement_density, magnetic_density = collocate_densitized_fields(
-        densitized_displacement, densitized_magnetic, params
-    )
+@partial(jax.jit, static_argnames=("grid",))
+def physical_fields_at_centers(displacement, magnetic, bssn, grid):
     W = jnp.maximum(bssn.conformal_factor, W_FLOOR_VALUE)
-    return W**3 * displacement_density, W**3 * magnetic_density
+
+    def center(vector, locations):
+        return W**3 * jnp.stack(
+            tuple(
+                grid.from_tile(v)
+                for v in reconstruct_vector(vector, locations, CENTER_LOCATION)
+            )
+        )
+
+    return center(displacement, D_FIELD_LOCATIONS), center(magnetic, B_FIELD_LOCATIONS)
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("grid",))
 def compute_densitized_electromagnetic_energy_momentum(
-    densitized_displacement: jnp.ndarray,
-    densitized_magnetic: jnp.ndarray,
-    bssn: BSSNVariables,
-    params: BSSNParameters,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """Return Eulerian ``(rho, S_i, S_ij)`` from native quadratic moments."""
-
-    return sources_from_moments(
-        quadratic_moments(densitized_displacement, densitized_magnetic, params),
-        bssn,
-    )
-
-
-__all__ = [
-    "compute_densitized_electromagnetic_energy_momentum",
-    "physical_fields_at_centers",
-]
+    displacement, magnetic, bssn, grid
+):
+    return sources_from_moments(quadratic_moments(displacement, magnetic, grid), bssn)
