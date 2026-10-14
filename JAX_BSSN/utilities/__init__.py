@@ -1,6 +1,10 @@
 """Reusable numerical-relativity utilities."""
 
 from JAX_BSSN.utilities.bowen_york_solver import (
+    axisymmetric_cell_centered_grid,
+    axisymmetric_hamiltonian_residual,
+    axisymmetric_laplacian,
+    axisymmetric_linearized_hamiltonian_operator,
     bowen_york_extrinsic_curvature,
     brill_lindquist_conformal_factor,
     cell_centered_grid,
@@ -10,10 +14,15 @@ from JAX_BSSN.utilities.bowen_york_solver import (
     laplacian,
     linearized_hamiltonian_operator,
     linearized_hamiltonian_source,
+    solve_axisymmetric_conformal_factor,
     solve_conformal_factor,
 )
 
 __all__ = [
+    "axisymmetric_cell_centered_grid",
+    "axisymmetric_hamiltonian_residual",
+    "axisymmetric_laplacian",
+    "axisymmetric_linearized_hamiltonian_operator",
     "bowen_york_extrinsic_curvature",
     "brill_lindquist_conformal_factor",
     "cell_centered_grid",
@@ -23,5 +32,6 @@ __all__ = [
     "laplacian",
     "linearized_hamiltonian_operator",
     "linearized_hamiltonian_source",
+    "solve_axisymmetric_conformal_factor",
     "solve_conformal_factor",
 ]

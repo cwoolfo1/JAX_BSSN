@@ -15,19 +15,17 @@ from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
 from JAX_BSSN.cartoon.axisymmetry import (
     axisymmetric_plane_output_fields,
     axisymmetric_rk4_step,
-    compact_axisymmetric_state,
     compute_axisymmetric_constraint_norms,
     compute_axisymmetric_constraints,
+    fill_axisymmetric_ghosts,
     validate_axisymmetric_grid,
 )
-from JAX_BSSN.cartoon.interpolation import lagrange6_nonperiodic
 from JAX_BSSN.diagnostics.openpmd import OpenPMDWriter
 from JAX_BSSN.evolution.boundaries import PERIODIC_BC, SOMMERFELD_BC
 from JAX_BSSN.utilities.bowen_york_solver import (
+    axisymmetric_cell_centered_grid,
     bowen_york_extrinsic_curvature,
-    brill_lindquist_conformal_factor,
-    cell_centered_grid,
-    solve_conformal_factor,
+    solve_axisymmetric_conformal_factor,
 )
 
 
@@ -38,15 +36,15 @@ MOMENTUM = 0.05
 
 # The full z interval has 2 * NUM_RADIAL_POINTS cells and the same spacing.
 R_MAX = 12.0
-NUM_RADIAL_POINTS = 48
+NUM_RADIAL_POINTS = 128
 CFL = 0.2
-FINAL_TIME = 50.0
+FINAL_TIME = 100.0
 SNAPSHOT_COUNT = 250
 
-NEWTON_TOLERANCE = 1.0e-10
-MAX_NEWTON_ITERATIONS = 12
-CG_TOLERANCE = 1.0e-10
-MAX_CG_ITERATIONS = 1000
+NEWTON_TOLERANCE = 1.0e-12
+MAX_NEWTON_ITERATIONS = 100
+LINEAR_TOLERANCE = 1.0e-12
+MAX_LINEAR_ITERATIONS = 1000
 
 KAPPA = 0.002
 ETA = 2.0
@@ -66,14 +64,12 @@ def bowen_york_plane_data(
     r_max=R_MAX,
     newton_tolerance=NEWTON_TOLERANCE,
     max_newton_iterations=MAX_NEWTON_ITERATIONS,
-    cg_tolerance=CG_TOLERANCE,
-    max_cg_iterations=MAX_CG_ITERATIONS,
+    linear_tolerance=LINEAR_TOLERANCE,
+    max_linear_iterations=MAX_LINEAR_ITERATIONS,
     verbose=False,
 ):
-    """Solve on a Cartesian cube and return compact BSSN data and residuals.
+    """Solve on the meridional grid and return compact BSSN data and residuals.
 
-    Only the regular correction is interpolated to y=0. The singular factor
-    and Bowen–York curvature are evaluated analytically at the plane samples.
     The solver's A_BY differs from the evolved BSSN curvature by psi**-6.
     """
     if len(masses) != 2 or any(not math.isfinite(m) or m <= 0 for m in masses):
@@ -87,36 +83,43 @@ def bowen_york_plane_data(
         raise ValueError("separation must place both punctures inside the four-cell boundary margin")
     if not math.isfinite(momentum) or momentum < 0:
         raise ValueError("momentum must be a finite nonnegative inward magnitude")
-    for name, value in (("newton_tolerance", newton_tolerance), ("cg_tolerance", cg_tolerance)):
+    for name, value in (
+        ("newton_tolerance", newton_tolerance),
+        ("linear_tolerance", linear_tolerance),
+    ):
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
     if not isinstance(max_newton_iterations, int) or max_newton_iterations < 0:
         raise ValueError("max_newton_iterations must be a nonnegative integer")
-    if not isinstance(max_cg_iterations, int) or max_cg_iterations < 1:
-        raise ValueError("max_cg_iterations must be a positive integer")
+    if not isinstance(max_linear_iterations, int) or max_linear_iterations < 1:
+        raise ValueError("max_linear_iterations must be a positive integer")
 
     positions = jnp.asarray(((0.0, 0.0, -separation / 2), (0.0, 0.0, separation / 2)))
     momenta = jnp.asarray(((0.0, 0.0, momentum), (0.0, 0.0, -momentum)))
-    grid, dx = cell_centered_grid(2 * num_radial_points, r_max)
-    _, u, residual_history = solve_conformal_factor(
-        masses, positions, momenta, grid, dx,
+    plane, dx = axisymmetric_cell_centered_grid(num_radial_points, r_max)
+    psi, _, residual_history = solve_axisymmetric_conformal_factor(
+        masses, positions, momenta, plane, dx,
         newton_tolerance=newton_tolerance,
         max_newton_iterations=max_newton_iterations,
-        cg_tolerance=cg_tolerance,
-        max_cg_iterations=max_cg_iterations,
+        linear_tolerance=linear_tolerance,
+        max_linear_iterations=max_linear_iterations,
         verbose=verbose,
     )
     if not math.isfinite(residual_history[-1]) or residual_history[-1] > newton_tolerance:
         raise RuntimeError("Bowen–York solve returned an invalid final residual")
-    u_plane = lagrange6_nonperiodic(u, jnp.asarray([num_radial_points - 0.5]), axis=1)
-    plane = grid[:, :1, :, :].at[..., 1].set(0.0)
-    psi = brill_lindquist_conformal_factor(masses, positions, plane) + u_plane
     if not bool(jnp.all(jnp.isfinite(psi) & (psi > 0))):
-        raise RuntimeError("Interpolated conformal factor must be finite and positive")
+        raise RuntimeError("Conformal factor must be finite and positive")
     curvature = bowen_york_extrinsic_curvature(momenta, positions, plane)
     W = psi**-2
     metric = jnp.broadcast_to(jnp.eye(3)[:, :, None, None, None], (3, 3) + W.shape)
-    state = compact_axisymmetric_state(BSSNVariables(
+
+    def add_radial_ghost_storage(field):
+        radial_axis = field.ndim - 3
+        padding = [(0, 0)] * field.ndim
+        padding[radial_axis] = (4, 0)
+        return jnp.pad(field, padding)
+
+    positive_state = BSSNVariables(
         conformal_metric=metric,
         conformal_factor=W,
         traceless_K=jnp.moveaxis(curvature, (-2, -1), (0, 1)) * psi**-6,
@@ -124,7 +127,10 @@ def bowen_york_plane_data(
         conformal_connection=jnp.zeros((3,) + W.shape),
         lapse=W,
         shift=jnp.zeros((3,) + W.shape),
-    ))
+    )
+    state = fill_axisymmetric_ghosts(
+        BSSNVariables(*(add_radial_ghost_storage(field) for field in positive_state))
+    )
     if not all(bool(jnp.all(jnp.isfinite(field))) for field in state):
         raise RuntimeError("Bowen–York initial state contains nonfinite fields")
     return state, residual_history
@@ -141,8 +147,8 @@ def run_axisymmetric_collision(
     snapshot_count=SNAPSHOT_COUNT,
     newton_tolerance=NEWTON_TOLERANCE,
     max_newton_iterations=MAX_NEWTON_ITERATIONS,
-    cg_tolerance=CG_TOLERANCE,
-    max_cg_iterations=MAX_CG_ITERATIONS,
+    linear_tolerance=LINEAR_TOLERANCE,
+    max_linear_iterations=MAX_LINEAR_ITERATIONS,
     kappa=KAPPA,
     eta=ETA,
     nu=NU,
@@ -172,7 +178,8 @@ def run_axisymmetric_collision(
 
     state, residual_history = bowen_york_plane_data(
         masses, separation, momentum, num_radial_points, r_max,
-        newton_tolerance, max_newton_iterations, cg_tolerance, max_cg_iterations,
+        newton_tolerance, max_newton_iterations,
+        linear_tolerance, max_linear_iterations,
         verbose=show_progress,
     )
     dx = r_max / num_radial_points
@@ -201,9 +208,13 @@ def run_axisymmetric_collision(
         "r_max": r_max, "cfl": cfl, "final_time": final_time,
         "num_steps": num_steps, "snapshot_count": snapshot_count,
         "newton_tolerance": newton_tolerance, "max_newton_iterations": max_newton_iterations,
-        "cg_tolerance": cg_tolerance, "max_cg_iterations": max_cg_iterations,
+        "linear_tolerance": linear_tolerance,
+        "max_linear_iterations": max_linear_iterations,
         "parameters": params._asdict(),
-        "initial_solver": "Cartesian seven-point Laplacian; u=0 on all outer grid layers",
+        "initial_solver": (
+            "2D centered-difference axisymmetric Laplacian with Newton-Raphson; "
+            "u=0 on outer rho and z cells"
+        ),
     }
     configuration_path.write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
     with residual_path.open("w", encoding="utf-8") as stream:

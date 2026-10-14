@@ -76,8 +76,8 @@ Axisymmetric Cartoon Bowen–York collision
 ----------------------------------------
 
 The collision demo initializes two nonspinning punctures on the z axis with
-opposite inward momenta. It solves the Hamiltonian constraint using the existing
-Cartesian Bowen–York solver and evolves the resulting x–z half-plane with
+opposite inward momenta. It solves the Hamiltonian constraint directly on the
+axisymmetric meridional grid and evolves the resulting x–z half-plane with
 ``JAX_BSSN.cartoon.axisymmetry.axisymmetric_rk4_step``.
 
 .. code-block:: bash
@@ -86,10 +86,11 @@ Cartesian Bowen–York solver and evolves the resulting x–z half-plane with
    python demos/axisymmetric_blackhole_collision/make_movies.py
 
 
-The initial solve uses a ``(2*Nrho)^3`` cell-centered Cartesian cube with the
-same spacing and x/z coordinates as the evolution plane. Only the regular
-correction ``u`` is interpolated to ``y=0`` with six-point Lagrange interpolation.
-The singular Brill–Lindquist factor and Bowen–York curvature are evaluated
-analytically on that plane. Initialization sets ``W=psi**-2``, unit conformal
-metric, BSSN traceless curvature ``psi**-6 * A_BY``, lapse ``W``, and zero trace
-curvature, connection functions, and shift.
+The initial solve runs directly on the ``Nrho x 2*Nrho`` cell-centered
+meridional grid. Newton–Raphson uses the centered finite-difference
+axisymmetric Laplacian, with even reflection at the axis and zero regular
+correction on the outer rho and z cells. The singular Brill–Lindquist factor
+and Bowen–York curvature are evaluated analytically on the same plane.
+Initialization sets ``W=psi**-2``, unit conformal metric, BSSN traceless
+curvature ``psi**-6 * A_BY``, lapse ``W``, and zero trace curvature,
+connection functions, and shift.
