@@ -30,6 +30,7 @@ The supported physical examples are:
 2. Linear wave
 3. Spherical Cartoon puncture
 4. Axisymmetric black hole head-on collision
+5. Full 3D single charged black hole
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -58,6 +59,23 @@ Run the axisymmetric Cartoon head-on collision of two black holes:
 
 ```bash
 python demos/axisymmetric_blackhole_collision/axisymmetric_blackhole_collision.py
+```
+
+Run the Cartesian Einstein--Maxwell evolution of one charged puncture on one
+explicitly selected GPU:
+
+```bash
+python demos/single_charged_blackhole/run_single_charged_blackhole.py
+```
+
+The charged demo defaults to a coarse `96^3` uniform grid with `M=1` and
+`Q=0.5`. Edit its configuration block before a production run. It is an
+initial-data and evolution setup, not a validated long-time calculation; it
+does not include mesh refinement, horizon finding, restart, or wave extraction.
+Run its CPU-scale analytic, one-step, and output checks with:
+
+```bash
+JAX_PLATFORMS=cpu python -m pytest tests/test_charged_puncture.py
 ```
 
 The default production runs compile substantial JAX kernels. The
@@ -103,6 +121,9 @@ PyPIC3D. Configure its Cartesian boundary modes independently of gravity with
 `make_em_grid`; initial data uses PyPIC3D's upper-half-cell V locations.
 See [Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for installation,
 editable sibling-checkout development, state migration, and cavity initialization.
+The charged-puncture demo initializes the native Yee-grid displacement density
+directly from the analytic Coulomb potential and uses constant-extrapolated EM
+boundaries because this backend does not provide an EM Sommerfeld condition.
 
 Tests use double precision and write no simulation output except dedicated
 openPMD round-trip tests in temporary directories.
