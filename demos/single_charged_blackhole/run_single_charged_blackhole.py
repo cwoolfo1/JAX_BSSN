@@ -238,6 +238,13 @@ def charged_blackhole_diagnostics(state, params, grid):
     output = {
         "lapse": state.bssn.lapse,
         "W": state.bssn.conformal_factor,
+        "conformal_metric_xx": state.bssn.conformal_metric[0, 0],
+        "conformal_metric_xy": state.bssn.conformal_metric[0, 1],
+        "conformal_metric_xz": state.bssn.conformal_metric[0, 2],
+        "conformal_metric_yy": state.bssn.conformal_metric[1, 1],
+        "conformal_metric_yz": state.bssn.conformal_metric[1, 2],
+        "conformal_metric_zz": state.bssn.conformal_metric[2, 2],
+        "shift": state.bssn.shift,
         "K": state.bssn.trace_K,
         "rho_EM": rho,
         "D": physical_displacement,
@@ -276,7 +283,7 @@ def snapshot_steps(num_steps, intervals):
 
 def _openpmd_fields(output):
     """Convert component-first JAX vectors to the writer's vector convention."""
-    vector_names = ("D", "B", "momentum_constraint", "gamma_constraint")
+    vector_names = ("D", "B", "momentum_constraint", "gamma_constraint", "shift")
     return {
         name: tuple(field[index] for index in range(3))
         if name in vector_names
@@ -304,7 +311,7 @@ def run_single_charged_blackhole(config=None):
 
     device = select_device(config.platform, config.device_index)
     outputs = snapshot_steps(num_steps, config.snapshot_intervals)
-    field_arrays = 21
+    field_arrays = 30
     storage_bytes = len(outputs) * field_arrays * config.num_points**3 * 8
     print(
         f"{config.platform.upper()} {config.device_index}: {device.device_kind}; "
@@ -346,7 +353,8 @@ def run_single_charged_blackhole(config=None):
             ),
             field_convention=(
                 "Native D^i=sqrt(gamma) E^i; physical D/B output is contravariant; "
-                "paper charge converted from Gaussian units by 1/sqrt(4*pi)"
+                "paper charge converted from Gaussian units by 1/sqrt(4*pi); "
+                "gamma_ij=conformal_metric_ij/W^2; shift is contravariant beta^i"
             ),
             maxwell_boundary="constant extrapolation on all faces",
             diagnostic_masks=(
