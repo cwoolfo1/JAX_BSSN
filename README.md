@@ -28,9 +28,9 @@ The supported physical examples are:
 
 1. Gauge wave
 2. Linear wave
-3. Single puncture
-4. Spherical Cartoon puncture
-5. Axisymmetric Cartoon puncture
+3. Spherical Cartoon puncture
+4. Axisymmetric black hole head-on collision
+5. Full 3D single charged black hole
 
 Each demo owns its initial data and run configuration. There is no generic
 simulation CLI or installed initial-data dispatcher.
@@ -38,40 +38,48 @@ simulation CLI or installed initial-data dispatcher.
 Run the periodic analytic gauge wave:
 
 ```bash
-python demos/gauge_wave/gauge_wave.py
+python demos/gravitational_waves/gauge_wave.py
 ```
 
 Run the linear wave through a nested fixed-refinement hierarchy and write composite
 openPMD output:
 
 ```bash
-python demos/linear_wave/linear_wave.py
-```
-
-Run the single Schwarzschild puncture from its demo directory so snapshots and
-the optional movie helper share one output path:
-
-```bash
-cd demos/single_puncture
-python single_puncture.py
-python make_movies.py  # optional; requires ffmpeg
+python demos/gravitational_waves/linear_wave.py
 ```
 
 Run the compact spherical Cartoon puncture and write its complete reflected
 axis to openPMD:
 
 ```bash
-python demos/cartoon_puncture/cartoon_puncture.py
+python demos/spherically_symmetric_cartoon_puncture/cartoon_puncture.py
 ```
 
-Run the z-axis axisymmetric Cartoon puncture and write a signed x-z plane:
+Run the axisymmetric Cartoon head-on collision of two black holes:
 
 ```bash
-python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
+python demos/axisymmetric_blackhole_collision/axisymmetric_blackhole_collision.py
 ```
 
-The default three-dimensional runs compile substantial JAX kernels. The
-[demo guide](docs/demos.rst) includes smaller smoke configurations.
+Run the Cartesian Einstein--Maxwell evolution of one charged puncture on one
+explicitly selected GPU:
+
+```bash
+python demos/single_charged_blackhole/run_single_charged_blackhole.py
+```
+
+The charged demo defaults to a coarse `96^3` uniform grid with `M=1` and
+`Q=0.5`. Edit its configuration block before a production run. It is an
+initial-data and evolution setup, not a validated long-time calculation; it
+does not include mesh refinement, horizon finding, restart, or wave extraction.
+Run its CPU-scale analytic, one-step, and output checks with:
+
+```bash
+JAX_PLATFORMS=cpu python -m pytest tests/test_charged_puncture.py
+```
+
+The default production runs compile substantial JAX kernels. The
+[demo guide](docs/demos.rst) describes the evolution and configuration options.
 
 ## Package structure
 
@@ -79,14 +87,16 @@ The default three-dimensional runs compile substantial JAX kernels. The
 JAX_BSSN/
 ├── bssn/          # state, tensor algebra, geometry, equations, raw constraints
 ├── cartoon/       # spherical and axisymmetric reconstruction/evolution
+├── EM/            # Cartesian first-order Maxwell evolution and BSSN coupling
 ├── evolution/     # derivatives, boundaries, RHS assembly, projections, RK4
 ├── fmr/           # nested-patch geometry, transfers, stage-synchronous RK4
-└── diagnostics/   # reductions, reporting, plotting, openPMD
+├── diagnostics/   # reductions, reporting, plotting, openPMD
+└── utilities/     # reusable initial-data and numerical helper routines
 ```
 
-Physical initial data lives under `demos/`, not in the installed source
-package. Gauge- and linear-wave tests use `tests/initial_data.py` and do not
-import executable demos.
+Demos own their physical initial data and configuration; reusable Bowen–York
+helpers live in `JAX_BSSN.utilities`. Analytic reference data lives under
+`tests/`, while integration tests also exercise demo runners.
 
 ## Tests
 
@@ -96,3 +106,24 @@ Install test dependencies and run the complete suite with:
 python -m pip install -e ".[test]"
 python -m pytest
 ```
+
+Run the in-memory Einstein--Maxwell Rosen wave tests, including analytical
+comparison and temporal self-convergence, with:
+
+```bash
+python -m pytest tests/EM/test_em_waves.py
+```
+
+EM evolution imports PyPIC3D's particle-free static-metric loop and couples
+two Maxwell half-steps around a BSSN RK4 step. Synchronization and a metric-switch
+history correction retain second-order temporal accuracy without modifying
+PyPIC3D. Configure its Cartesian boundary modes independently of gravity with
+`make_em_grid`; initial data uses PyPIC3D's upper-half-cell V locations.
+See [Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for installation,
+editable sibling-checkout development, state migration, and cavity initialization.
+The charged-puncture demo initializes the native Yee-grid displacement density
+directly from the analytic Coulomb potential and uses constant-extrapolated EM
+boundaries because this backend does not provide an EM Sommerfeld condition.
+
+Tests use double precision and write no simulation output except dedicated
+openPMD round-trip tests in temporary directories.

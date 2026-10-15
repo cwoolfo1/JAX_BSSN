@@ -69,6 +69,7 @@ Contents
    architecture
    bssn
    evolution
+   einstein_maxwell
    cartoon
    fmr
    diagnostics

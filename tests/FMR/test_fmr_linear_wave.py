@@ -170,7 +170,7 @@ def test_fmr_linear_wave_has_fourth_order_spatial_convergence():
 
 
 def test_small_production_fmr_run_writes_readable_visit_collection(tmp_path):
-    from demos.linear_wave.linear_wave import run_linear_wave
+    from demos.gravitational_waves.linear_wave import run_linear_wave
 
     base = tmp_path / "linear_wave_fmr"
     _, run = run_linear_wave(

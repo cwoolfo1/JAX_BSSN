@@ -104,3 +104,28 @@ nine z cells, ``mad_q=1``, ``x_min=-3.5*dx``, and ``y_min=-4*dx``. The radial
 ghost face and reconstructed y faces are periodic stencil faces; outer rho is
 Sommerfeld. Either periodic or Sommerfeld behavior may be selected at each
 physical z face.
+
+Uniform physical coordinates
+----------------------------
+
+All Cartoon solvers use uniform physical Cartesian spacing ``params.dx`` in
+x, y, and z. Coordinate minima refer to physical grid samples. Positive radial
+centers are ``(i+1/2)*dx``; native Yee vertices lie half a cell below centers.
+``axis_coordinates`` and ``grid_coordinates`` return these sample positions.
+Cartoon reconstruction rotates physical Cartesian components and interpolates
+at the corresponding uniform radial index. Yee transfers retain equal local
+averages on this grid.
+
+The BSSN operators retain their fourth-order stencils, and the EM operators
+retain their second-order stencils. Boundary closures, MAD weights, and KO
+dissipation use the same physical spacing. The demos choose ``dt=CFL*dx``;
+library steppers use the caller's ``params.dt``.
+
+Cylindrical norms retain the radial volume weight ``abs(rho)`` at each field's
+native site. Physical metric factors remain part of the Maxwell equations,
+stress tensor, and metric contractions. These factors are independent of grid
+spacing.
+
+Output uses Cartesian openPMD geometry. Readers reject legacy mapped meshes
+and checkpoints; old uniform checkpoints with absent or null mapping fields
+remain readable. Historical output files are not converted.

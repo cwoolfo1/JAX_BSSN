@@ -221,6 +221,12 @@ def test_default_demo_patch_has_32_root_and_31_active_fine_vertices(tmp_path):
     fine_patch = _read_patch(_patch_path(base, 1, 0), 0)
     assert root_patch["metadata"]["h_plus"]["shape"] == (32, 32, 32)
     assert fine_patch["metadata"]["h_plus"]["shape"] == (31, 31, 31)
+    assert fine_patch["metadata"]["h_plus"]["spacing"] == (dx / 2.0,) * 3
+    assert fine_patch["metadata"]["h_plus"]["origin"] == fine_origin
+    np.testing.assert_array_equal(
+        fine_patch["arrays"]["h_plus"][io.Mesh_Record_Component.SCALAR],
+        np.asarray(native_fine),
+    )
 
 
 def test_patch_series_writes_three_level_parent_chain_and_manifest(tmp_path):
@@ -242,14 +248,11 @@ def test_patch_series_writes_three_level_parent_chain_and_manifest(tmp_path):
     assert finest["attributes"]["fmrParent"] == 1
     assert finest["attributes"]["coarseStart"] == [1, 1, 1]
     lines = base.with_suffix(".visit").read_text().splitlines()
-    assert lines[0] == "!NBLOCKS 3"
-    assert lines[3].startswith("three_level_level_02_patch_000_")
-    assert fine_patch["metadata"]["h_plus"]["spacing"] == (dx / 2.0,) * 3
-    assert fine_patch["metadata"]["h_plus"]["origin"] == fine_origin
-    np.testing.assert_array_equal(
-        fine_patch["arrays"]["h_plus"][io.Mesh_Record_Component.SCALAR],
-        np.asarray(native_fine),
-    )
+    assert lines == [
+        "!NBLOCKS 3",
+        "!TIME 0.0",
+        *(_patch_path(base, level, 0, suffix="opmd").name for level in range(3)),
+    ]
 
 
 def test_cartoon_output_writes_complete_reflected_axis_with_parity(tmp_path):

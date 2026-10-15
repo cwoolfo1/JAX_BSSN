@@ -1,9 +1,9 @@
 Demos
 =====
 
-The supported physical examples are gauge wave, linear wave, Cartesian single
-puncture, axisymmetric Cartoon puncture, and spherical Cartoon puncture. Each demo contains its own
-coordinates, initial data, parameters, and run loop.
+The supported physical examples are gauge wave, linear wave, spherical Cartoon
+puncture, axisymmetric Cartoon collision, and a full 3D single charged black
+hole. Each demo owns its coordinates, initial data, parameters, and run loop.
 
 Install demo support first:
 
@@ -20,7 +20,7 @@ RMS errors against the analytic solution at the final time.
 
 .. code-block:: bash
 
-   python demos/gauge_wave/gauge_wave.py
+   python demos/gravitational_waves/gauge_wave.py
 
 The default configuration uses ``grid_size=60``, amplitude ``0.1``, wavelength
 ``1``, CFL ``1``, and one wavelength of evolution.
@@ -35,10 +35,10 @@ available value at each physical location.
 
 .. code-block:: bash
 
-   python demos/linear_wave/linear_wave.py
+   python demos/gravitational_waves/linear_wave.py
 
 The default run writes the VisIt multiblock collection
-``demos/linear_wave/output/linear_wave_fmr.visit``. Open that file in VisIt to
+``demos/gravitational_waves/output/linear_wave_fmr.visit``. Open that file in VisIt to
 load the root and fine patches together. The collection spatially aligns the
 overlapping blocks; it does not remove root cells covered by the fine patch or
 encode native AMR nesting.
@@ -48,47 +48,19 @@ Each patch is also an independent file-based openPMD series, with per-patch
 the centered inclusive patch bounds land on coarse vertices. The demo rejects 
 a final normalized coarse or fine RMS wave error at or above five percent.
 
-Single puncture
----------------
 
-The single-puncture demo constructs time-symmetric Schwarzschild puncture data
-with :math:`W=\psi^{-2}` and evolves it with 1+log lapse and an evolved
-Gamma-driver shift. Its grid avoids sampling :math:`R=0` directly.
-
-Run from the demo directory so its snapshots and the movie helper agree on the
-output location:
-
-.. code-block:: bash
-
-   cd demos/single_puncture
-   python single_puncture.py
-
-The default run writes per-field ``.npy`` snapshots and
-``constraint_l2.txt`` under ``output/``, plus a final field plot. Grid size,
-domain width, CFL, final time, and snapshot cadence are explicit near the top
-of ``main``.
-
-After a run, optional MP4 rendering requires an ``ffmpeg`` executable visible
-to Matplotlib:
-
-.. code-block:: bash
-
-   python make_movies.py
-
-The renderer produces lapse, shift, and conformal-factor movies from the
-synchronized snapshots.
 
 Spherical Cartoon puncture
 --------------------------
 
-The Cartoon puncture demo evolves the same time-symmetric Schwarzschild data
+The Cartoon puncture demo evolves time-symmetric Schwarzschild data
 on ``Nr`` positive half-cell radii with four parity ghosts. Each RK stage
 reconstructs a temporary Cartesian support grid, so the installed Cartesian
 BSSN equations remain the single equation implementation.
 
 .. code-block:: bash
 
-   python demos/cartoon_puncture/cartoon_puncture.py
+   python demos/spherically_symmetric_cartoon_puncture/cartoon_puncture.py
 
 The production defaults reproduce the comparison configuration:
 ``Nr=2000``, ``rmax=100M``, CFL ``0.2``, final time ``100M``, and 500 output
@@ -100,17 +72,38 @@ Output is written under ``output/`` as ``cartoon_puncture.h5`` and
 momentum constraints. Constraint norms use only independent positive radii and
 exclude the four outer stencil-affected samples.
 
-Axisymmetric Cartoon puncture
------------------------------
+Axisymmetric Cartoon Bowen–York collision
+----------------------------------------
 
-The parallel z-axis axisymmetric executable stores a positive-rho by full-z
-plane, reconstructs nine Cartesian y planes at every RK stage, and writes an
-expanded signed x-z plane to a distinct openPMD file:
+The collision demo initializes two nonspinning punctures on the z axis with
+opposite inward momenta. It solves the Hamiltonian constraint directly on the
+axisymmetric meridional grid and evolves the resulting x–z half-plane with
+``JAX_BSSN.cartoon.axisymmetry.axisymmetric_rk4_step``.
 
 .. code-block:: bash
 
-   python demos/axisymmetric_cartoon_puncture/axisymmetric_cartoon_puncture.py
+   python demos/axisymmetric_blackhole_collision/axisymmetric_blackhole_collision.py
+   python demos/axisymmetric_blackhole_collision/make_movies.py
 
-Its defaults are ``rho_max=32M``, ``z in [-32M,32M]``, ``Nrho=256``,
-``Nz=512``, CFL ``0.2``, and final time ``10M``. Constraints are evaluated only at
-the initial, output, and final iterations.
+
+The initial solve runs directly on the ``Nrho x 2*Nrho`` cell-centered
+meridional grid. Newton–Raphson uses the centered finite-difference
+axisymmetric Laplacian, with even reflection at the axis and zero regular
+correction on the outer rho and z cells. The singular Brill–Lindquist factor
+and Bowen–York curvature are evaluated analytically on the same plane.
+Initialization sets ``W=psi**-2``, unit conformal metric, BSSN traceless
+curvature ``psi**-6 * A_BY``, lapse ``W``, and zero trace curvature,
+connection functions, and shift.
+
+Single charged black hole
+-------------------------
+
+Edit the configuration block at the top of the script, then run:
+
+.. code-block:: bash
+
+   python demos/single_charged_blackhole/run_single_charged_blackhole.py
+
+The demo evolves one nonspinning, initially stationary charged puncture with
+the full Cartesian Einstein--Maxwell system. The default is ``M=1``, ``Q=0.5``,
+``96^3`` cell centers over ``[-12,12]^3``, CFL ``0.2``, and final time ``100M``.

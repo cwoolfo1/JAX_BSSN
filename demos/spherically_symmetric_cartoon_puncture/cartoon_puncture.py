@@ -46,7 +46,7 @@ def cartoon_parameters(
 
     dx = r_max / num_radial_points
 
-    return BSSNParameters(
+    params = BSSNParameters(
         eta=ETA,
         kappa=KAPPA,
         nu=NU,
@@ -66,6 +66,8 @@ def cartoon_parameters(
         z_min=-CARTOON_GHOST_CELLS * dx,
         mad_q=1.0,
     )
+
+    return params
 
 
 def schwarzschild_axis_data(

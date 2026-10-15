@@ -6,6 +6,8 @@ half-cell centres.  Reconstruction produces the nine Cartesian ``y`` planes
 needed by the existing fourth-order derivative operators.
 """
 
+import math
+
 import jax.numpy as jnp
 
 from JAX_BSSN.bssn.variables import BSSNParameters, BSSNVariables
@@ -106,11 +108,11 @@ def validate_axisymmetric_grid(
         raise ValueError("axisymmetric Cartoon requires mad_q=1")
 
     dx = float(params.dx)
-    if dx <= 0.0:
-        raise ValueError("axisymmetric Cartoon requires dx > 0")
+    if not math.isfinite(dx) or dx <= 0.0:
+        raise ValueError("axisymmetric Cartoon requires finite dx > 0")
     if not jnp.isclose(params.x_min, -3.5 * dx):
         raise ValueError("axisymmetric Cartoon requires x_min=-3.5*dx")
-    if not jnp.isclose(params.y_min, -4.0 * dx):
+    if not jnp.isclose(params.y_min, -4.0 * params.dx):
         raise ValueError("axisymmetric Cartoon requires y_min=-4*dx")
 
 
@@ -178,10 +180,10 @@ def _outer_buffer(reference, asymptotic, params):
     dx = jnp.asarray(params.dx, dtype=dtype)
     rho_edge = (num_radial_points - 0.5) * dx
     z = jnp.asarray(params.z_min, dtype=dtype) + dx * jnp.arange(nz, dtype=dtype)
-    r_edge = jnp.sqrt(rho_edge**2 + z**2)
     rho_buffer = rho_edge + dx * jnp.arange(
         1, AXISYMMETRIC_OUTER_BUFFER_CELLS + 1, dtype=dtype
     )
+    r_edge = jnp.sqrt(rho_edge**2 + z**2)
     r_buffer = jnp.sqrt(rho_buffer[:, None] ** 2 + z[None, :] ** 2)
     ratio = r_edge[None, :] / r_buffer
 
@@ -198,7 +200,7 @@ def _support_geometry(reference, params):
     dtype = reference.dtype
     dx = jnp.asarray(params.dx, dtype=dtype)
     x = (jnp.arange(nx, dtype=dtype) - 3.5) * dx
-    y = (jnp.arange(AXISYMMETRIC_SUPPORT_SIZE, dtype=dtype) - 4.0) * dx
+    y = (jnp.arange(AXISYMMETRIC_SUPPORT_SIZE, dtype=dtype) - 4.0) * params.dx
     X = x[:, None]
     Y = y[None, :]
     rho = jnp.sqrt(X**2 + Y**2)
@@ -219,6 +221,24 @@ def _rotation_matrix(cosine, sine, dtype):
     return jnp.stack(rows, axis=0).astype(dtype)[..., None]
 
 
+def _rotate_vector(vector, cosine, sine, dtype):
+    """Apply the sparse z-axis rotation without batched small matrix products."""
+    c = jnp.asarray(cosine, dtype=dtype)[..., None]
+    s = jnp.asarray(sine, dtype=dtype)[..., None]
+    return jnp.stack((c * vector[0] - s * vector[1],
+                      s * vector[0] + c * vector[1], vector[2]))
+
+
+def _rotate_tensor(tensor, cosine, sine, dtype):
+    """Compute R T R^T for any rank-two tensor, including nonsymmetric moments."""
+    c = jnp.asarray(cosine, dtype=dtype)[..., None]
+    s = jnp.asarray(sine, dtype=dtype)[..., None]
+    left = jnp.stack((c * tensor[0] - s * tensor[1],
+                      s * tensor[0] + c * tensor[1], tensor[2]))
+    return jnp.stack((c * left[:, 0] - s * left[:, 1],
+                      s * left[:, 0] + c * left[:, 1], left[:, 2]), axis=1)
+
+
 def _interpolate_scalar(field, asymptotic, params):
     reference = _reference_plane(field)
     source = _outer_buffer(reference, asymptotic, params)
@@ -231,8 +251,7 @@ def _interpolate_vector(field, asymptotic, params):
     source = _outer_buffer(reference, asymptotic, params)
     q, cosine, sine = _support_geometry(reference, params)
     radial_values = lagrange6_nonperiodic(source, q, axis=-2)
-    rotation = _rotation_matrix(cosine, sine, field.dtype)
-    return jnp.einsum("ijxyz,jxyz->ixyz", rotation, radial_values)
+    return _rotate_vector(radial_values, cosine, sine, field.dtype)
 
 
 def _interpolate_tensor(field, asymptotic, params):
@@ -240,10 +259,7 @@ def _interpolate_tensor(field, asymptotic, params):
     source = _outer_buffer(reference, asymptotic, params)
     q, cosine, sine = _support_geometry(reference, params)
     radial_values = lagrange6_nonperiodic(source, q, axis=-2)
-    rotation = _rotation_matrix(cosine, sine, field.dtype)
-    return jnp.einsum(
-        "ikxyz,klxyz,jlxyz->ijxyz", rotation, radial_values, rotation
-    )
+    return _rotate_tensor(radial_values, cosine, sine, field.dtype)
 
 
 def reconstruct_axisymmetric_support(
