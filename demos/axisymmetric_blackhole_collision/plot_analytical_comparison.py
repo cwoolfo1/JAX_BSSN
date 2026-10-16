@@ -5,6 +5,8 @@ x axis at y=z=0, R=x*sqrt(gamma_yy) is the equatorial circumference radius.
 It is the areal radius only under spherical symmetry. The height-function
 transformation T=t-h(r), h'=b/D, also assumes stationarity of the metric and
 radius map. This slice alone cannot establish either assumption.
+The analytical mass comes from the common apparent horizon's physical area
+on the full saved plane; that calculation does not assume stationarity.
 
 gamma_ij = conformal_metric_ij / W**2
 b = gamma_xj * beta^j, D = alpha**2 - gamma_ij * beta^i * beta^j
@@ -15,9 +17,12 @@ import json
 from pathlib import Path
 import sys
 
+import jax
 import matplotlib
 import numpy as np
 import openpmd_api as io
+
+jax.config.update("jax_enable_x64", True)  # The horizon solver refuses float32.
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -27,10 +32,13 @@ if str(DEMO_DIRECTORY.parents[1]) not in sys.path:
     sys.path.insert(0, str(DEMO_DIRECTORY.parents[1]))
 
 from JAX_BSSN.diagnostics.mesh_coordinates import mesh_axis_coordinates
+from JAX_BSSN.utilities.apparent_horizon import find_apparent_horizon
 
 INPUT_DIRECTORY = DEMO_DIRECTORY / "output"
-OUTPUT_DIRECTORY = INPUT_DIRECTORY / "analytical_comparison"
-MASS = 1.0  # Fixed reference: saved bare puncture masses 0.5 + 0.5, not a fit.
+OUTPUT_DIRECTORY = INPUT_DIRECTORY / "analytical_comparison_horizon_mass"
+HORIZON_CENTER = (0.0, 0.0, 0.0)
+HORIZON_THETA_NODES = 24
+HORIZON_MAX_THETA_NODES = 96
 INNER_RADIUS_LIMIT = 10.0  # R/M
 METRIC_COMPONENTS = (("xx", 0, 0), ("xy", 0, 1), ("xz", 0, 2),
                      ("yy", 1, 1), ("yz", 1, 2), ("zz", 2, 2))
@@ -50,8 +58,8 @@ def equatorial_stencil(z):
     return start, weights
 
 
-def read_final_slice(input_directory=INPUT_DIRECTORY):
-    """Read only the four z planes needed for the final equatorial profile."""
+def read_final_state(input_directory=INPUT_DIRECTORY):
+    """Read the final y=0 plane for horizon finding and equatorial slicing."""
     input_directory = Path(input_directory)
     configuration = json.loads((input_directory / "run_configuration.json").read_text())
     series = io.Series(str(input_directory / "axisymmetric_blackhole_collision.h5"),
@@ -67,8 +75,9 @@ def read_final_slice(input_directory=INPUT_DIRECTORY):
         x, y, z = coordinates
         if len(y) != 1 or not np.isclose(y[0], 0.0):
             raise ValueError("Expected the saved axisymmetric y=0 plane")
-        iz, weights = equatorial_stencil(z)
-        names = ["lapse", "W"] + ["conformal_metric_" + c for c, _, _ in METRIC_COMPONENTS]
+        names = ["lapse", "W", "K"] + [prefix + c
+            for prefix in ("conformal_metric_", "traceless_K_")
+            for c, _, _ in METRIC_COMPONENTS]
         records = {name: (meshes[name], meshes[name][scalar]) for name in names}
         records.update({"beta_" + c: (meshes["shift"], meshes["shift"][c]) for c in "xyz"})
         pending = {}
@@ -76,7 +85,7 @@ def read_final_slice(input_directory=INPUT_DIRECTORY):
             if any(not np.array_equal(mesh_axis_coordinates(mesh, record, i), coordinates[i])
                    for i in range(3)):
                 raise ValueError(f"{name} is not on the same Cartesian grid as lapse")
-            pending[name] = record.load_chunk([0, 0, iz], [len(x), 1, 4])
+            pending[name] = record.load_chunk()
         time = float(iteration.time)
         series.flush()
         fields = {name: np.array(array[:, 0, :], copy=True) for name, array in pending.items()}
@@ -84,13 +93,27 @@ def read_final_slice(input_directory=INPUT_DIRECTORY):
         series.close()
 
     # Divide by W**2 at native samples before interpolating the physical metric.
-    gamma = np.empty((3, 3, len(x)))
+    gamma = np.empty((3, 3, len(x), len(z)))
+    Kij = np.empty_like(gamma)
     for name, i, j in METRIC_COMPONENTS:
-        physical = fields["conformal_metric_" + name] / fields["W"]**2
-        gamma[i, j] = physical @ weights
+        conformal = fields["conformal_metric_" + name]
+        gamma[i, j] = conformal / fields["W"]**2
         gamma[j, i] = gamma[i, j]
-    alpha = fields["lapse"] @ weights
-    beta = np.stack([fields["beta_" + c] @ weights for c in "xyz"])
+        Kij[i, j] = (fields["traceless_K_" + name] + conformal*fields["K"]/3) / fields["W"]**2
+        Kij[j, i] = Kij[i, j]
+    return {
+        "x": x, "z": z, "gamma": gamma, "Kij": Kij, "alpha": fields["lapse"],
+        "beta": np.stack([fields["beta_" + c] for c in "xyz"]),
+    }, step, time, configuration
+
+
+def equatorial_slice(state):
+    """Interpolate the physical fields from the saved plane to z=0, x>0."""
+    x = state["x"]
+    iz, weights = equatorial_stencil(state["z"])
+    gamma = state["gamma"][..., iz:iz + 4] @ weights
+    alpha = state["alpha"][..., iz:iz + 4] @ weights
+    beta = state["beta"][..., iz:iz + 4] @ weights
     positive = x > 0.0
     # Match the evolution diagnostic's four-cell outer boundary margin.
     interior = np.arange(len(x)) < len(x) - 4
@@ -98,7 +121,7 @@ def read_final_slice(input_directory=INPUT_DIRECTORY):
         "r": x[positive], "alpha": alpha[positive],
         "gamma": gamma[:, :, positive], "beta": beta[:, positive],
         "interior": interior[positive],
-    }, step, time, configuration
+    }
 
 
 def reconstruct_metric(r, alpha, gamma, beta, interior):
@@ -137,16 +160,23 @@ def reconstruct_metric(r, alpha, gamma, beta, interior):
 
 
 def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
-    fields, step, time, configuration = read_final_slice(input_directory)
+    state, step, time, configuration = read_final_state(input_directory)
+    horizon = find_apparent_horizon(
+        (state["x"], state["z"]), state["gamma"], state["Kij"],
+        center=HORIZON_CENTER, n_theta=HORIZON_THETA_NODES,
+        max_angular=HORIZON_MAX_THETA_NODES,
+    )
+    mass = horizon["mass"]
+    fields = equatorial_slice(state)
     profiles = reconstruct_metric(**fields)
     R, valid = profiles["R"], profiles["valid"]
-    radius = R / MASS
+    radius = R / mass
     # The analytical exterior is independent of the numerical D=0 surface.
-    exterior = profiles["outer_branch"] & (R > 2*MASS)
+    exterior = profiles["outer_branch"] & (R > 2*mass)
     analytical_grr = np.full_like(R, np.nan)
     analytical_gtt = np.full_like(R, np.nan)
-    analytical_grr[exterior] = 1.0 / (1.0 - 2*MASS/R[exterior])
-    analytical_gtt[exterior] = -(1.0 - 2*MASS/R[exterior])
+    analytical_grr[exterior] = 1.0 / (1.0 - 2*mass/R[exterior])
+    analytical_gtt[exterior] = -(1.0 - 2*mass/R[exterior])
     comparison = valid & exterior
     if not np.any(comparison):
         raise ValueError("No resolved exterior samples for the Schwarzschild comparison")
@@ -156,8 +186,21 @@ def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     print(f"Source: {Path(input_directory) / 'axisymmetric_blackhole_collision.h5'}")
-    print(f"step={step}, t={time:g}, t/M={time/MASS:g}; fixed reference M={MASS:g}")
-    print(f"Saved bare puncture mass sum={bare_mass_sum:g}; no measured remnant mass or fit.")
+    print(f"step={step}, t={time:g}, t/M={time/mass:g}; horizon-area mass M={mass:.12g}")
+    print(f"Saved bare puncture mass sum={bare_mass_sum:g}; no mass fit or time rescaling.")
+    print(f"Horizon area={horizon['area']:.12g}; coordinate radius range="
+          f"[{horizon['radius'].min():.9g}, {horizon['radius'].max():.9g}]")
+    print(f"Dimensionless expansion residual={horizon['residual']:.6e}; "
+          f"independent audit={horizon['audit_residual']:.6e}")
+    print(f"Relative angular mass change={horizon['mass_relative_change']:.6e}; "
+          f"recentered by {horizon['recenter_shift'][2]:+.6e} in z")
+    for polar, azimuthal, measured_mass, residual, audit, iterations in horizon["convergence"]:
+        print(f"  {int(polar)}x{int(azimuthal)} angular nodes: M={measured_mass:.12g}, "
+              f"residual={residual:.3e}, audit={audit:.3e}, "
+              f"Newton iterations={int(iterations)}")
+    for failure in horizon["search_failures"]:
+        print(f"Additional seed failed: {failure}")
+    print("Horizon mass is irreducible mass, identified with remnant mass for this nonspinning collision.")
     print("Cubic interpolation to z=0, y=0, x>0; assumes stationarity and spherical symmetry.")
     print("R=x*sqrt(gamma_yy) is the equatorial circumference radius, areal in spherical symmetry.")
     print(f"Valid numerical exterior: {valid.sum()}/{len(R)} samples, "
@@ -171,9 +214,7 @@ def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
     ):
         figure, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
         figure.suptitle(
-            "Final axisymmetric collision: stationary spherical reconstruction at z=0\n"
-            f"step={step}, t/M={time/MASS:g}; fixed reference M={MASS:g} "
-            f"(saved bare-mass sum={bare_mass_sum:g}); no fit or time rescaling",
+            "Numerical vs Analytical Comparison at z=0\n",
             fontsize=12,
         )
         for axis, title, upper in zip(axes, ("Inner range", "Full resolved exterior"),
@@ -184,7 +225,7 @@ def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
                       label="Analytical Schwarzschild")
             axis.set_xlim(2.0, upper)
             axis.set_yscale(scale)
-            axis.set_xlabel(r"Areal radius $R/M$ (assuming spherical symmetry)")
+            axis.set_xlabel(r"Areal radius $R/M$")
             axis.set_ylabel(label)
             axis.set_title(title)
             axis.grid(alpha=0.25, which="both")
@@ -205,6 +246,13 @@ def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
             relative = numerical[index] / analytical[index] - 1.0
             print(f"R/M={radius[index]:.6f}: {component}={numerical[index]:.9g}, "
                   f"Schwarzschild={analytical[index]:.9g}, relative mismatch={relative:+.6e}")
+    archive = output_directory / "final_horizon.npz"
+    np.savez(archive, **horizon, step=step, time=time,
+             source=str(Path(input_directory) / "axisymmetric_blackhole_collision.h5"),
+             convergence_columns=np.array(["n_theta", "n_phi", "mass", "residual",
+                                           "audit_residual", "iterations"]),
+             mass_definition="sqrt(area/(16*pi))")
+    print(f"Saved {archive}")
     return profiles
 
 
