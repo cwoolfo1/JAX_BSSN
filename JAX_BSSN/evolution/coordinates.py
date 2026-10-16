@@ -4,9 +4,15 @@ import jax.numpy as jnp
 
 
 def axis_coordinates(size, direction, params, dtype, site="C"):
-    """Return centers or their lower vertices, including parity ghosts."""
+    """Return centers or their upper vertices, including parity ghosts.
+
+    A ``V`` site is the upper half-cell neighbour of the ``C`` site sharing its
+    index, ``V = C + dx/2``.  This is PyPIC3D's convention: a C-to-V transfer in
+    ``PyPIC3D.relativity.field_interpolation.location_interpolate`` averages with
+    the upper neighbour, so ``V[i] = (C[i] + C[i+1])/2``.
+    """
     minimum = (params.x_min, params.y_min, params.z_min)[direction]
-    offset = -0.5 if site == "V" else 0.0
+    offset = 0.5 if site == "V" else 0.0
     return jnp.asarray(minimum, dtype=dtype) + jnp.asarray(params.dx, dtype=dtype) * (
         jnp.arange(size, dtype=dtype) + offset
     )

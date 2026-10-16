@@ -1,7 +1,12 @@
 """Reusable numerical-relativity utilities."""
 
-from JAX_BSSN.utilities.charged_puncture_solver import (
-    single_charged_puncture_state,
+from JAX_BSSN.utilities.apparent_horizon import AngularGrid, find_apparent_horizon
+
+from JAX_BSSN.utilities.horizon_geometry import (
+    AxisymmetricGeometry,
+    CartesianGeometry,
+    SphericalGeometry,
+    build_geometry,
 )
 
 from JAX_BSSN.utilities.bowen_york_solver import (
@@ -22,7 +27,22 @@ from JAX_BSSN.utilities.bowen_york_solver import (
     solve_conformal_factor,
 )
 
+
+def __getattr__(name):
+    # Pure geometry diagnostics do not need the charged solver's PyPIC3D stack.
+    if name == "single_charged_puncture_state":
+        from JAX_BSSN.utilities.charged_puncture_solver import single_charged_puncture_state
+        return single_charged_puncture_state
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
+    "AngularGrid",
+    "AxisymmetricGeometry",
+    "CartesianGeometry",
+    "SphericalGeometry",
+    "build_geometry",
+    "find_apparent_horizon",
     "single_charged_puncture_state",
     "axisymmetric_cell_centered_grid",
     "axisymmetric_hamiltonian_residual",

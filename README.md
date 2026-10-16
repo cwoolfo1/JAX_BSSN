@@ -71,7 +71,7 @@ python demos/single_charged_blackhole/run_single_charged_blackhole.py
 The charged demo defaults to a coarse `96^3` uniform grid with `M=1` and
 `Q=0.5`. Edit its configuration block before a production run. It is an
 initial-data and evolution setup, not a validated long-time calculation; it
-does not include mesh refinement, horizon finding, restart, or wave extraction.
+does not include mesh refinement, restart, or wave extraction.
 Run its CPU-scale analytic, one-step, and output checks with:
 
 ```bash
