@@ -110,7 +110,7 @@ Uniform physical coordinates
 
 All Cartoon solvers use uniform physical Cartesian spacing ``params.dx`` in
 x, y, and z. Coordinate minima refer to physical grid samples. Positive radial
-centers are ``(i+1/2)*dx``; native Yee vertices lie half a cell below centers.
+centers are ``(i+1/2)*dx``; native Yee vertices lie half a cell above centers.
 ``axis_coordinates`` and ``grid_coordinates`` return these sample positions.
 Cartoon reconstruction rotates physical Cartesian components and interpolates
 at the corresponding uniform radial index. Yee transfers retain equal local

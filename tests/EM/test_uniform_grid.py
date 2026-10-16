@@ -60,10 +60,10 @@ def test_native_coordinates_and_cylindrical_volume_weights(location):
     shape = (16, 9, 24)
     for d, coordinate in enumerate(grid_coordinates(shape, p, jnp.float64, location)):
         expected = (p.x_min, p.y_min, p.z_min)[d] + p.dx * (
-            np.arange(shape[d]) - (0.5 if location[d] == 'V' else 0.0)
+            np.arange(shape[d]) + (0.5 if location[d] == 'V' else 0.0)
         )
         np.testing.assert_allclose(np.ravel(coordinate), expected, atol=1e-15)
-    rho = (np.arange(shape[0]) - 3.5 - (0.5 if location[0] == 'V' else 0.0)) * p.dx
+    rho = (np.arange(shape[0]) - 3.5 + (0.5 if location[0] == 'V' else 0.0)) * p.dx
     expected_weight = np.broadcast_to(np.abs(rho[:, None]), (16, 24))
     np.testing.assert_allclose(cylindrical_volume_weights(shape, p, jnp.float64, location), expected_weight)
 
