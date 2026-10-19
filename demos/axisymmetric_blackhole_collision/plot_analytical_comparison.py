@@ -35,10 +35,11 @@ from JAX_BSSN.diagnostics.mesh_coordinates import mesh_axis_coordinates
 from JAX_BSSN.utilities.apparent_horizon import find_apparent_horizon
 
 INPUT_DIRECTORY = DEMO_DIRECTORY / "output"
-OUTPUT_DIRECTORY = INPUT_DIRECTORY / "analytical_comparison_horizon_mass"
+OUTPUT_DIRECTORY = INPUT_DIRECTORY / "analytical_comparison_dense_newton"
 HORIZON_CENTER = (0.0, 0.0, 0.0)
-HORIZON_THETA_NODES = 24
-HORIZON_MAX_THETA_NODES = 96
+HORIZON_INITIAL_RADIUS = 2.4
+HORIZON_THETA_NODES = 12
+HORIZON_MAX_THETA_NODES = 48
 INNER_RADIUS_LIMIT = 10.0  # R/M
 METRIC_COMPONENTS = (("xx", 0, 0), ("xy", 0, 1), ("xz", 0, 2),
                      ("yy", 1, 1), ("yz", 1, 2), ("zz", 2, 2))
@@ -163,7 +164,7 @@ def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
     state, step, time, configuration = read_final_state(input_directory)
     horizon = find_apparent_horizon(
         (state["x"], state["z"]), state["gamma"], state["Kij"],
-        center=HORIZON_CENTER, n_theta=HORIZON_THETA_NODES,
+        center=HORIZON_CENTER, initial_radius=HORIZON_INITIAL_RADIUS, n_theta=HORIZON_THETA_NODES,
         max_angular=HORIZON_MAX_THETA_NODES,
     )
     mass = horizon["mass"]
@@ -193,13 +194,11 @@ def main(input_directory=INPUT_DIRECTORY, output_directory=OUTPUT_DIRECTORY):
     print(f"Dimensionless expansion residual={horizon['residual']:.6e}; "
           f"independent audit={horizon['audit_residual']:.6e}")
     print(f"Relative angular mass change={horizon['mass_relative_change']:.6e}; "
-          f"recentered by {horizon['recenter_shift'][2]:+.6e} in z")
+          f"fixed center={horizon['center']}")
     for polar, azimuthal, measured_mass, residual, audit, iterations in horizon["convergence"]:
         print(f"  {int(polar)}x{int(azimuthal)} angular nodes: M={measured_mass:.12g}, "
               f"residual={residual:.3e}, audit={audit:.3e}, "
               f"Newton iterations={int(iterations)}")
-    for failure in horizon["search_failures"]:
-        print(f"Additional seed failed: {failure}")
     print("Horizon mass is irreducible mass, identified with remnant mass for this nonspinning collision.")
     print("Cubic interpolation to z=0, y=0, x>0; assumes stationarity and spherical symmetry.")
     print("R=x*sqrt(gamma_yy) is the equatorial circumference radius, areal in spherical symmetry.")

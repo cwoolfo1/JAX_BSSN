@@ -1,13 +1,6 @@
 """Reusable numerical-relativity utilities."""
 
-from JAX_BSSN.utilities.apparent_horizon import AngularGrid, find_apparent_horizon
-
-from JAX_BSSN.utilities.horizon_geometry import (
-    AxisymmetricGeometry,
-    CartesianGeometry,
-    SphericalGeometry,
-    build_geometry,
-)
+from JAX_BSSN.utilities.apparent_horizon import build_geometry, find_apparent_horizon
 
 from JAX_BSSN.utilities.bowen_york_solver import (
     axisymmetric_cell_centered_grid,
@@ -37,10 +30,6 @@ def __getattr__(name):
 
 
 __all__ = [
-    "AngularGrid",
-    "AxisymmetricGeometry",
-    "CartesianGeometry",
-    "SphericalGeometry",
     "build_geometry",
     "find_apparent_horizon",
     "single_charged_puncture_state",
