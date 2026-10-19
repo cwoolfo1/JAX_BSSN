@@ -1,6 +1,7 @@
-"""Render every saved spherical Cartoon BSSN field as an MP4."""
+"""Render spherical Cartoon movies and the final lapse-versus-K plot."""
 
 import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter
 import numpy as np
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
 from JAX_BSSN.diagnostics.mesh_coordinates import mesh_axis_coordinates
 
 import openpmd_api as io
@@ -174,7 +180,7 @@ def load_snapshots(path: Path, movie_specs: tuple[MovieSpec, ...] = MOVIES):
             component = mesh[_component_name(mesh, requested_component)]
             pending[(mesh_name, requested_component)] = component.load_chunk()
 
-            if x is None and mesh_name == "W":
+            if x is None:
                 x = mesh_axis_coordinates(mesh, component, 0)
 
         series.flush()
@@ -314,12 +320,45 @@ def render_movie(
     return output_path
 
 
+def plot_lapse_vs_K(steps, times, x, snapshots, output_path):
+    """Plot the final lapse against K on the entire positive radial axis."""
+    step, time = steps[-1], times[-1]
+    positive = x >= 0.0
+    trace_K = snapshots[("K", None)][-1, positive]
+    lapse = snapshots[("lapse", None)][-1, positive]
+    finite = np.isfinite(trace_K) & np.isfinite(lapse)
+    if not np.all(finite):
+        raise ValueError(
+            f"final iteration {step} contains {np.count_nonzero(~finite)} "
+            "non-finite positive-axis K/lapse samples"
+        )
+    output_path = Path(output_path)
+
+    figure, axis = plt.subplots(figsize=(10.0, 8.0))
+    axis.plot(trace_K, lapse, linewidth=2.0)
+    axis.set_xlabel("K", fontsize=18)
+    axis.set_ylabel(r"$\alpha$", fontsize=18)
+    axis.tick_params(labelsize=15)
+    figure.tight_layout()
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=180)
+    plt.close(figure)
+    print(
+        f"Wrote {output_path} from step {step}, t={time:.16g}, "
+        f"using {trace_K.size} positive-axis samples"
+    )
+
+    return output_path
+
+
 def parse_args() -> argparse.Namespace:
     """Return command-line controls without changing the demo defaults."""
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DATA_PATH)
     parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--lapse-output", type=Path, default=None)
     parser.add_argument("--display-radius", type=float, default=DISPLAY_RADIUS)
     parser.add_argument("--fps", type=int, default=FPS)
     parser.add_argument("--dpi", type=int, default=DPI)
@@ -327,7 +366,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Render one movie for each logical BSSN state variable."""
+    """Render the movies before checking and plotting final K/lapse data."""
 
     args = parse_args()
     movie_dir = args.output_dir or args.input.parent / "movies"
@@ -371,6 +410,14 @@ def main() -> None:
             dpi=args.dpi,
         )
         print(f"Wrote {output_path}")
+
+    if ("K", None) in snapshots and ("lapse", None) in snapshots:
+        plot_lapse_vs_K(
+            steps, times, x, snapshots,
+            args.lapse_output or args.input.parent / "lapse_vs_K.png",
+        )
+    else:
+        print("Skipped lapse-versus-K plot: K or lapse is absent")
 
 
 if __name__ == "__main__":
