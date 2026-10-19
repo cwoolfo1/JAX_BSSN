@@ -1,187 +1,179 @@
-"""Apparent horizons in full 3D, axisymmetry and spherical symmetry.
+"""One dense-Newton finder for star-shaped marginally outer trapped surfaces.
 
-This is a JAX postprocessing solver for physical gamma_ij and K_ij, with the
-BSSN convention dt(gamma_ij) = -2 alpha K_ij + Lie_beta(gamma_ij).  It solves
-D_i s^i + K_ij s^i s^j - K = 0 on a star-shaped surface r = h(theta, phi) about
-a center, following Thornburg, Class. Quantum Grav. 21 (2004) 743,
-https://arxiv.org/abs/gr-qc/0306056.
+Solve D_i s^i + K_ij s^i s^j - K = 0 using physical covariant spatial tensors,
+with the BSSN sign convention dt(gamma_ij) = -2 alpha K_ij + Lie_beta(gamma_ij).
+The center and initial guess are supplied by the caller and never searched or
+recentered. A converged root is not a proof of global outermostness.
 
-The unknowns are the radii themselves on a cell-centered finite-difference
-angular grid, not the coefficients of any angular basis.  Symmetry therefore
-only collapses the shape of that grid -- h(theta, phi) in 3D, h(theta) in
-axisymmetry, a single radius in spherical symmetry -- while the residual, the
-area integral and the Newton solve are shared by all three.  The poles are
-never sampled and the theta ghost rows are the exact index shift
-h(-theta, phi) = h(theta, phi + pi), so no basis function or pole regularity
-condition enters anywhere.
-
-No stationarity or spherical symmetry of the data is assumed.  The search
-selects the outermost nested candidate it finds; it does not establish global
-outermostness outside this star-shaped family.
+The full h(theta,phi) grid is used for every storage layout. Following
+Thornburg (2004), https://arxiv.org/abs/gr-qc/0306056, angular derivatives are
+fourth-order finite differences. JAX differentiates the entire discrete
+residual, including interpolation and motion through the spatial geometry.
 """
 
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jax import jacfwd, jit, jvp
-from jax.scipy.sparse.linalg import gmres
-from scipy.optimize import brentq
 
 from JAX_BSSN.cartoon.interpolation import lagrange6_nonperiodic
-from JAX_BSSN.utilities.horizon_geometry import build_geometry
-
-# Below this many unknowns an exact dense Jacobian beats a Krylov solve.
-DENSE_JACOBIAN_LIMIT = 256
-# Centered fourth-order stencils on offsets -2..2.
-FIRST_DERIVATIVE_STENCIL = np.array([1.0, -8.0, 0.0, 8.0, -1.0])/12.0
-SECOND_DERIVATIVE_STENCIL = np.array([-1.0, 16.0, -30.0, 16.0, -1.0])/12.0
-GHOST_WIDTH = 3  # Theta ghost rows needed by six-point angular interpolation.
+from JAX_BSSN.utilities.hermite_interpolation import interpolate_point
 
 
-def _polar_weights(n_theta, theta):
-    """Quadrature weights for integral(f(theta) sin(theta) dtheta) on cell centers.
+def build_geometry(coordinates, gamma, Kij, margin=4):
+    """Return (table, sample), where sample(table, points) evaluates the geometry.
 
-    The area element carries a sin(theta) whose periodic extension has a kink at
-    the poles, so the plain midpoint rule would cap the area at second order.
-    Absorbing sin(theta) into the weights instead integrates the regular factor
-    exactly through cosine mode n_theta-1, which is the same spectral accuracy
-    the uniform phi rule already has.
+    Coordinates are (r,), (x,z), or (x,y,z); tensors have shape (3,3,*grid).
+    sample returns gamma[n,i,j], d_gamma[n,k,i,j], Kij[n,i,j], valid[n].
+    The coordinate origin/axis of reduced data is independent of the supplied
+    horizon center. No translation of the geometry is implied by that center.
     """
+    if isinstance(coordinates, np.ndarray) and coordinates.ndim == 1:
+        coordinates = (coordinates,)
+    axes = tuple(np.asarray(axis, dtype=float) for axis in coordinates)
+    if len(axes) not in (1, 2, 3):
+        raise ValueError('Pass (r,), (x,z), or (x,y,z) coordinates')
+    if margin < 2:
+        raise ValueError('Hermite interpolation needs at least two margin cells')
+    for axis in axes:
+        if (axis.ndim != 1 or len(axis) < max(6, 2*margin + 2)
+                or axis[1] <= axis[0]
+                or not np.allclose(np.diff(axis), axis[1] - axis[0], rtol=1.e-10, atol=1.e-14)):
+            raise ValueError('Coordinates must be increasing uniform axes with a resolved interior')
+    shape = (3, 3) + tuple(len(axis) for axis in axes)
+    gamma, Kij = np.asarray(gamma), np.asarray(Kij)
+    if gamma.shape != shape or Kij.shape != shape:
+        raise ValueError(f'Physical gamma and Kij must have shape {shape}')
+    for tensor in (gamma, Kij):
+        if not np.allclose(tensor, tensor.swapaxes(0, 1), rtol=1.e-12, atol=1.e-14):
+            raise ValueError('Physical gamma and Kij must be symmetric')
+    if len(axes) == 1:
+        if axes[0][0] <= 0:
+            raise ValueError('The radial line must contain positive radii')
+        for tensor in (gamma, Kij):
+            scale = np.max(np.abs(tensor), axis=(0, 1))
+            error = np.maximum.reduce([np.abs(tensor[1, 1] - tensor[2, 2]),
+                                       np.abs(tensor[0, 1]), np.abs(tensor[0, 2]),
+                                       np.abs(tensor[1, 2])])
+            # Evolved Cartoon data can carry roundoff in nominally zero terms.
+            if np.any(error > 1.e-10*scale + 1.e-14):
+                raise ValueError('Radial tensors must be diagonal with equal transverse components')
+        table = jnp.asarray(np.stack([gamma[0, 0], gamma[1, 1], Kij[0, 0], Kij[1, 1]]))
+    else:
+        if len(axes) == 2 and not axes[0][margin] < 0 < axes[0][-margin - 1]:
+            raise ValueError('Axisymmetric input needs a signed x-z plane')
+        table = jnp.asarray(np.concatenate((gamma.reshape((9,) + shape[2:]),
+                                            Kij.reshape((9,) + shape[2:]))))
+    origin = jnp.asarray([axis[0] for axis in axes])
+    spacing = jnp.asarray([axis[1] - axis[0] for axis in axes])
+    sizes = jnp.asarray([len(axis) for axis in axes])
 
+    def stored_coordinates(point):
+        if len(axes) == 1:
+            return jnp.linalg.norm(point)[None]
+        if len(axes) == 2:
+            return jnp.array([jnp.linalg.norm(point[:2]), point[2]])
+        return point
+
+    def tensors(values, point):
+        coordinate = stored_coordinates(point)
+        data = interpolate_point(values, (coordinate - origin)/spacing)
+        if len(axes) == 1:
+            normal = point/jnp.maximum(coordinate[0], 1.e-30)
+            radial = normal[:, None]*normal[None, :]
+            transverse = jnp.eye(3) - radial
+            return data[0]*radial + data[1]*transverse, data[2]*radial + data[3]*transverse
+        metric, curvature = data[:9].reshape(3, 3), data[9:].reshape(3, 3)
+        if len(axes) == 2:
+            c, s = point[:2]/jnp.maximum(coordinate[0], 1.e-30)
+            rotation = jnp.array([[c, -s, 0.], [s, c, 0.], [0., 0., 1.]])
+            metric = rotation @ metric @ rotation.T
+            curvature = rotation @ curvature @ rotation.T
+        return metric, curvature
+
+    def resolved(point):
+        coordinate = stored_coordinates(point)
+        index = (coordinate - origin)/spacing
+        inside = jnp.all((index >= margin) & (index <= sizes - 1 - margin))
+        if len(axes) < 3:
+            inside &= coordinate[0] > 1.e-10*spacing[0]
+        return inside
+
+    def sample(values, points):
+        metric, curvature = jax.vmap(tensors, in_axes=(None, 0))(values, points)
+        derivative = jax.vmap(jax.jacfwd(lambda p: tensors(values, p)[0]))(points)
+        return metric, jnp.moveaxis(derivative, -1, 1), curvature, jax.vmap(resolved)(points)
+
+    return table, sample
+
+
+def angular_grid(n_theta, n_phi):
+    """Cell-centered polar nodes, periodic azimuthal nodes, and polar area weights."""
+    if n_theta < 6 or n_phi < 6 or n_phi % 2:
+        raise ValueError('Use at least six nodes per angle and an even n_phi')
+    theta = (np.arange(n_theta) + 0.5)*np.pi/n_theta
+    phi = np.arange(n_phi)*2*np.pi/n_phi
+    # Integrate the regular area factor against sin(theta), exactly for the
+    # resolved cosine modes. A plain midpoint rule would cap area at order two.
     modes = np.arange(n_theta)
     integrals = np.zeros(n_theta)
     even = modes[modes % 2 == 0]
-    integrals[even] = 2.0/(1.0 - even.astype(float)**2)
-    integrals[1:] *= 2.0  # Orthogonality of cos(k theta) on cell centers.
-    return integrals @ np.cos(np.outer(modes, theta))/n_theta
+    integrals[even] = 2/(1 - even**2)
+    integrals[1:] *= 2
+    weights = integrals @ np.cos(np.outer(modes, theta))/n_theta
+    return theta, phi, weights
 
 
-def _theta_ghosts(field, width):
-    """Extend across both poles with the exact shift h(-theta,phi)=h(theta,phi+pi)."""
-
+def theta_ghosts(field, width):
+    """A scalar crossing a pole reappears half a turn around the azimuth."""
     shift = field.shape[1]//2
     low = jnp.flip(jnp.roll(field[:width], shift, axis=1), axis=0)
     high = jnp.flip(jnp.roll(field[-width:], shift, axis=1), axis=0)
     return jnp.concatenate((low, field, high), axis=0)
 
 
-class AngularGrid:
-    """Cell-centered theta nodes and uniform periodic phi nodes.
+def angular_derivatives(field):
+    """h_theta, h_thetatheta, h_phi, h_phiphi, h_thetaphi on the full sphere."""
+    n_theta, n_phi = field.shape
+    first = (1/12, -2/3, 0., 2/3, -1/12)
+    second = (-1/12, 4/3, -2.5, 4/3, -1/12)
 
-    A collapsed axis carries a single node and contributes zero derivatives,
-    which is exactly what axisymmetry (n_phi=1) and spherical symmetry
-    (n_theta=n_phi=1) require of the surface.
-    """
+    def polar(values, stencil, power):
+        extended = theta_ghosts(values, 2)
+        return sum(w*extended[k:k + n_theta] for k, w in enumerate(stencil) if w)/(np.pi/n_theta)**power
 
-    def __init__(self, n_theta, n_phi):
-        if n_theta != 1 and n_theta < 6:
-            raise ValueError("A resolved theta grid needs at least six nodes")
-        if n_phi != 1 and (n_phi < 6 or n_phi % 2):
-            raise ValueError("A resolved phi grid needs an even count of at least six")
-        self.shape = (int(n_theta), int(n_phi))
-        self.size = int(n_theta*n_phi)
-        self.d_theta = np.pi/n_theta
-        self.d_phi = 2*np.pi/n_phi
-        self.theta = (np.arange(n_theta) + 0.5)*self.d_theta
-        self.phi = np.arange(n_phi)*self.d_phi
-        self.theta_weights = _polar_weights(n_theta, self.theta)
+    def azimuthal(values, stencil, power):
+        return sum(w*jnp.roll(values, 2 - k, axis=1) for k, w in enumerate(stencil) if w)/(2*np.pi/n_phi)**power
 
-    def refined(self, max_theta):
-        """Next grid of the resolution ladder, or None when none exists."""
-
-        n_theta, n_phi = self.shape
-        if n_theta == 1:
-            return None  # A single radius has no angular resolution to double.
-        if 2*n_theta > max_theta:
-            return None
-        return AngularGrid(2*n_theta, n_phi if n_phi == 1 else 2*n_phi)
-
-    def audit(self):
-        """An independent grid whose nodes never coincide with this one's."""
-
-        n_theta, n_phi = self.shape
-        if n_theta == 1:
-            # A constant radius is only tested by sampling genuinely new angles.
-            return AngularGrid(9, 8)
-        return AngularGrid(2*n_theta + 2, n_phi if n_phi == 1 else 2*n_phi)
-
-    def derivatives(self, field):
-        """Fourth-order h_theta, h_thetatheta, h_phi, h_phiphi, h_thetaphi."""
-
-        def along_theta(values, stencil, power):
-            if self.shape[0] == 1:
-                return jnp.zeros_like(values)
-            extended = _theta_ghosts(values, 2)
-            total = sum(weight*extended[k:k + self.shape[0]]
-                        for k, weight in enumerate(stencil) if weight)
-            return total/self.d_theta**power
-
-        def along_phi(values, stencil, power):
-            if self.shape[1] == 1:
-                return jnp.zeros_like(values)
-            total = sum(weight*jnp.roll(values, 2 - k, axis=1)
-                        for k, weight in enumerate(stencil) if weight)
-            return total/self.d_phi**power
-
-        d_phi = along_phi(field, FIRST_DERIVATIVE_STENCIL, 1)
-        return (along_theta(field, FIRST_DERIVATIVE_STENCIL, 1),
-                along_theta(field, SECOND_DERIVATIVE_STENCIL, 2),
-                d_phi,
-                along_phi(field, SECOND_DERIVATIVE_STENCIL, 2),
-                along_theta(d_phi, FIRST_DERIVATIVE_STENCIL, 1))
-
-    def triad(self):
-        """Unit radial, polar and azimuthal vectors of shape (n_theta,n_phi,3)."""
-
-        theta, phi = self.theta[:, None], self.phi[None, :]
-        sin_t, cos_t = np.sin(theta), np.cos(theta)
-        sin_p, cos_p = np.sin(phi), np.cos(phi)
-        zero, one = np.zeros(self.shape), np.ones(self.shape)
-        radial = np.stack(np.broadcast_arrays(sin_t*cos_p, sin_t*sin_p, cos_t*one), axis=-1)
-        polar = np.stack(np.broadcast_arrays(cos_t*cos_p, cos_t*sin_p, -sin_t*one), axis=-1)
-        azimuthal = np.stack(np.broadcast_arrays(-sin_p*one, cos_p*one, zero), axis=-1)
-        return jnp.asarray(radial), jnp.asarray(polar), jnp.asarray(azimuthal)
+    h_phi = azimuthal(field, first, 1)
+    return polar(field, first, 1), polar(field, second, 2), h_phi, azimuthal(field, second, 2), polar(h_phi, first, 1)
 
 
-def interpolate_angular(field, grid, target):
-    """Evaluate ``field`` given on ``grid`` at the nodes of ``target``."""
-
-    if grid.shape == target.shape:
-        return field
-    n_theta, n_phi = grid.shape
-    if n_theta == 1:
-        field = jnp.repeat(field, target.shape[0], axis=0)
-    else:
-        extended = _theta_ghosts(field, GHOST_WIDTH)
-        index = target.theta/grid.d_theta - 0.5 + GHOST_WIDTH
-        field = lagrange6_nonperiodic(extended, jnp.asarray(index), axis=0)
-    if n_phi == 1:
-        return jnp.repeat(field, target.shape[1], axis=1)
-    extended = jnp.concatenate(
-        (field[:, -GHOST_WIDTH:], field, field[:, :GHOST_WIDTH]), axis=1)
-    index = target.phi/grid.d_phi + GHOST_WIDTH
-    return lagrange6_nonperiodic(extended, jnp.asarray(index), axis=1)
+def interpolate_angular(radius, theta, phi):
+    """Interpolate a surface onto new angular nodes with the same pole extension."""
+    n_theta, n_phi = radius.shape
+    field = theta_ghosts(radius, 3)
+    field = lagrange6_nonperiodic(field, jnp.asarray(theta)*n_theta/np.pi - 0.5 + 3, axis=0)
+    field = jnp.concatenate((field[:, -3:], field, field[:, :3]), axis=1)
+    return lagrange6_nonperiodic(field, jnp.asarray(phi)*n_phi/(2*np.pi) + 3, axis=1)
 
 
-def _surface(radius, center, geometry, tables, grid):
-    """Outgoing expansion and area density of the trial surface r=h(theta,phi).
-
-    Returns the expansion and the area density on the grid, plus a flag that
-    is false when any node left the resolved region or produced a nonphysical
-    interpolated metric.  Out-of-domain samples stay finite so that a Newton
-    line search can back out of them.
-    """
-
-    radial, polar, azimuthal = grid.triad()
-    h_t, h_tt, h_p, h_pp, h_tp = grid.derivatives(radius)
-    sine = jnp.asarray(np.sin(grid.theta))[:, None]
-    cotangent = jnp.asarray(np.cos(grid.theta))[:, None]/sine
-
+def surface(radius, center, table, sample):
+    """Expansion, regular area density, and validity on a full angular grid."""
+    theta, phi, _ = angular_grid(*radius.shape)
+    theta, phi = theta[:, None], phi[None, :]
+    sin_t, cos_t = np.sin(theta), np.cos(theta)
+    sin_p, cos_p = np.sin(phi), np.cos(phi)
+    one = np.ones(radius.shape)
+    radial = jnp.asarray(np.stack(np.broadcast_arrays(sin_t*cos_p, sin_t*sin_p, cos_t*one), axis=-1))
+    polar = jnp.asarray(np.stack(np.broadcast_arrays(cos_t*cos_p, cos_t*sin_p, -sin_t*one), axis=-1))
+    azimuthal = jnp.asarray(np.stack(np.broadcast_arrays(-sin_p*one, cos_p*one, np.zeros(radius.shape)), axis=-1))
+    h_t, h_tt, h_p, h_pp, h_tp = angular_derivatives(radius)
+    sine = jnp.asarray(sin_t)
+    cotangent = jnp.asarray(cos_t/sin_t)
     points = center + radius[..., None]*radial
-    gamma, d_gamma, curvature, resolved = geometry.sample(
-        tables, points.reshape(-1, 3))
+    gamma, d_gamma, curvature, resolved = sample(table, points.reshape(-1, 3))
 
-    flat = (lambda values: jnp.broadcast_to(values, grid.shape).reshape(-1))
+    flat = (lambda values: jnp.broadcast_to(values, radius.shape).reshape(-1))
     h, h_t, h_tt = flat(radius), flat(h_t), flat(h_tt)
     h_p, h_pp, h_tp = flat(h_p), flat(h_pp), flat(h_tp)
     sine, cotangent = flat(sine), flat(cotangent)
@@ -230,387 +222,117 @@ def _surface(radius, center, geometry, tables, grid):
     density = jnp.sqrt(metric_tt*metric_pp - metric_tp**2)
 
     usable = (jnp.all(resolved) & physical & jnp.all(jnp.isfinite(expansion))
-              & jnp.all(jnp.isfinite(density)) & jnp.all(h >= geometry.inner_radius))
-    return expansion.reshape(grid.shape), density.reshape(grid.shape), usable
+              & jnp.all(jnp.isfinite(density)) & jnp.all(h > 0))
+    return expansion.reshape(radius.shape), density.reshape(radius.shape), usable
 
 
-class _Kernels:
-    """Compiled trial-surface evaluations for one geometry and angular grid."""
+def dense_jacobian(residual, radius):
+    """Differentiate all residuals with respect to all radii, 16 columns at a time.
 
-    def __init__(self, geometry, grid):
-        self.geometry, self.grid = geometry, grid
-
-        def surface(tables, flat, center):
-            return _surface(flat.reshape(grid.shape), center, geometry, tables, grid)
-
-        def expansion(tables, flat, center):
-            return surface(tables, flat, center)[0].reshape(-1)
-
-        self._expansion = expansion
-        self._surface = jit(surface)
-        self._jacobian = None
-        self._action = None
-
-    def surface(self, radius, center):
-        """Expansion, area density and the resolved flag of a trial surface."""
-
-        return self._surface(self.geometry.tables, radius.reshape(-1), center)
-
-    def measure(self, radius, center):
-        """Expansion, area and the resolved flag of a trial surface."""
-
-        expansion, density, usable = self.surface(radius, center)
-        weights = jnp.asarray(self.grid.theta_weights)[:, None]
-        return expansion, float(self.grid.d_phi*jnp.sum(weights*density)), bool(usable)
-
-    def mean_expansion(self, radius, center):
-        """Area-weighted mean expansion, the quantity the seed search brackets."""
-
-        expansion, _, usable = self.surface(radius, center)
-        weights = jnp.asarray(self.grid.theta_weights)[:, None]
-        return float(jnp.sum(weights*expansion)/(2*self.grid.shape[1])), bool(usable)
-
-    def update(self, radius, center, residual, preconditioner):
-        """Newton update solving J du = -residual."""
-
-        flat = radius.reshape(-1)
-        if self.grid.size <= DENSE_JACOBIAN_LIMIT:
-            if self._jacobian is None:
-                self._jacobian = jit(jacfwd(self._expansion, argnums=1))
-            jacobian = self._jacobian(self.geometry.tables, flat, center)
-            return jnp.linalg.solve(jacobian, -residual)
-        if self._action is None:
-            self._action = jit(lambda tables, values, origin, vector: jvp(
-                lambda trial: self._expansion(tables, trial, origin),
-                (values,), (vector,))[1])
-        action = lambda vector: self._action(self.geometry.tables, flat, center, vector)
-        update, _ = gmres(action, -residual, M=preconditioner, tol=1.e-8, atol=0.0,
-                          restart=min(flat.size, 40), maxiter=20)
-        return update
-
-
-class _KernelCache:
-    """One compiled kernel set per angular grid shape, reused across the solve."""
-
-    def __init__(self, geometry):
-        self.geometry, self._cache = geometry, {}
-
-    def __call__(self, grid):
-        if grid.shape not in self._cache:
-            self._cache[grid.shape] = _Kernels(self.geometry, grid)
-        return self._cache[grid.shape]
-
-
-def _dimensionless_residual(radius, expansion):
-    """Mean coordinate radius times the largest outgoing expansion."""
-
-    return float(np.mean(np.asarray(radius))*np.max(np.abs(np.asarray(expansion))))
-
-
-def helmholtz_preconditioner(grid, radius):
-    """Approximate inverse Jacobian from the flat-space linearization of Theta.
-
-    Linearizing Theta about a sphere of radius R gives -(2 + Laplacian)/R^2, so
-    (2 - Laplacian)/R^2 shares its sign and its large-l growth while staying
-    invertible.  A uniform phi grid decouples the azimuthal index, leaving one
-    dense theta system per index; the pole reflection enters those systems as
-    the sign (-1)^m.  This only reshapes the Newton update: the unknowns stay
-    grid radii and the solve converges without it, more slowly.
+    linearize retains the primal intermediates once. Each batch propagates
+    exact AD directional derivatives, not finite perturbations of the surface.
     """
+    _, tangent = jax.linearize(residual, radius)
+    size = radius.size
 
-    n_theta, n_phi = grid.shape
-    theta = grid.theta
-    operators = []
-    for parity in (1.0, -1.0):
-        first = np.zeros((n_theta, n_theta))
-        second = np.zeros((n_theta, n_theta))
-        for row in range(n_theta):
-            for offset in range(-2, 3):
-                index, sign = row + offset, 1.0
-                if index < 0:
-                    index, sign = -1 - index, parity
-                elif index >= n_theta:
-                    index, sign = 2*n_theta - 1 - index, parity
-                if 0 <= index < n_theta:
-                    weight = sign*FIRST_DERIVATIVE_STENCIL[offset + 2]
-                    first[row, index] += weight/grid.d_theta
-                    weight = sign*SECOND_DERIVATIVE_STENCIL[offset + 2]
-                    second[row, index] += weight/grid.d_theta**2
-        operators.append(-(second + np.cos(theta)[:, None]/np.sin(theta)[:, None]*first))
+    def columns(start):
+        basis = jax.nn.one_hot(start + jnp.arange(16), size, dtype=radius.dtype)
+        return jax.vmap(tangent)(basis.reshape((16,) + radius.shape)).reshape(16, size)
 
-    modes = np.arange(n_phi//2 + 1)
-    matrices = np.stack([operators[mode % 2]
-                         + np.diag(mode**2/np.sin(theta)**2 + 2.0) for mode in modes])
-    matrices = jnp.asarray(matrices/radius**2, dtype=complex)
-
-    def apply(vector):
-        spectrum = jnp.fft.rfft(vector.reshape(grid.shape), axis=1)
-        solution = jnp.linalg.solve(matrices, spectrum.T[..., None])[..., 0]
-        return jnp.fft.irfft(solution.T, n=n_phi, axis=1).reshape(-1)
-
-    return apply
+    blocks = jax.lax.map(columns, jnp.arange(0, size, 16))
+    return blocks.reshape(-1, size)[:size].T
 
 
-def _newton(radius, center, kernels, tolerance, max_iterations, preconditioned):
-    """Damped Newton solve of the expansion on the angular grid."""
+def find_apparent_horizon(coordinates, gamma, Kij, *, center, initial_radius,
+                         n_theta=12, n_phi=24, max_angular=48,
+                         tolerance=1.e-8, audit_tolerance=1.e-4,
+                         mass_tolerance=1.e-3, max_iterations=50, margin=4):
+    """Find the marginal surface reached from the supplied center and guess.
 
-    grid = kernels.grid
-    radius = jnp.asarray(radius)
-    for iteration in range(max_iterations + 1):
-        expansion, _, usable = kernels.measure(radius, center)
-        if not usable:
-            raise ValueError("Trial horizon leaves the resolved interpolation domain")
-        residual = _dimensionless_residual(radius, expansion)
-        if residual < tolerance:
-            return radius, residual, iteration
-        if iteration == max_iterations:
-            break
+    initial_radius is a scalar or a positive (n_theta,n_phi) array. An array
+    defines the starting grid, overriding n_theta and n_phi. The center stays
+    fixed in Cartesian coordinates. There is no automatic seed search.
 
-        preconditioner = None
-        if preconditioned and grid.size > DENSE_JACOBIAN_LIMIT:
-            preconditioner = helmholtz_preconditioner(grid, float(jnp.mean(radius)))
-        update = kernels.update(radius, center, expansion.reshape(-1), preconditioner)
-        if not np.all(np.isfinite(np.asarray(update))):
-            raise RuntimeError("Horizon Newton update is not finite")
-
-        previous = float(jnp.linalg.norm(expansion))
-        damping = 1.0
-        for _ in range(20):
-            trial = radius + damping*update.reshape(grid.shape)
-            attempt, _, trial_usable = kernels.measure(trial, center)
-            if trial_usable and float(jnp.linalg.norm(attempt)) < (1 - 1.e-4*damping)*previous:
-                radius = trial
-                break
-            damping *= 0.5  # Back out of out-of-domain or nonphysical trial surfaces.
-        else:
-            raise RuntimeError(f"Horizon Newton line search failed; residual={residual:.3e}")
-    raise RuntimeError(f"Horizon Newton solve did not converge; residual={residual:.3e}")
-
-
-def _centroid_shift(radius, center, kernels):
-    """Area-weighted offset of the surface from its star-shape center."""
-
-    _, density, usable = kernels.surface(radius, center)
-    if not bool(usable):
-        raise ValueError("Trial horizon leaves the resolved interpolation domain")
-    weights = jnp.asarray(kernels.grid.theta_weights)[:, None]*density
-    radial = kernels.grid.triad()[0]
-    return np.asarray(jnp.einsum("tp,tpi->i", weights*radius, radial)/jnp.sum(weights))
-
-
-def _recenter(radius, center, kernels, free_axes, tolerance, max_passes,
-              newton_arguments):
-    """Move the star-shape center onto the surface centroid and re-solve."""
-
-    shift_total = np.zeros(3)
-    residual = iterations = None
-    for _ in range(max_passes):
-        shift = _centroid_shift(radius, center, kernels)*free_axes
-        if np.linalg.norm(shift) < tolerance*float(jnp.mean(radius)):
-            break
-        center = center + jnp.asarray(shift)
-        shift_total = shift_total + shift
-        # First-order reparametrization about the new center; exact for a sphere.
-        radial = kernels.grid.triad()[0]
-        radius = radius - jnp.einsum("i,tpi->tp", jnp.asarray(shift), radial)
-        radius, residual, iterations = _newton(radius, center, kernels, *newton_arguments)
-    return radius, center, shift_total, residual, iterations
-
-
-def _candidate(seed, center, cache, settings):
-    """Converge one seed through the angular-resolution ladder."""
-
-    grid = AngularGrid(*settings["grid_shape"])
-    center = jnp.asarray(center, dtype=float)
-    radius = jnp.full(grid.shape, float(seed))
-    free_axes = np.asarray(settings["free_axes"], dtype=float)
-    newton_arguments = (settings["tolerance"], settings["max_iterations"],
-                        settings["preconditioned"])
-    history, shift_total = [], np.zeros(3)
-    mass = mass_change = None
+    Every accepted result passes a separate angular audit and area-mass
+    convergence between two resolutions. Residuals are mean(h)*max(abs(Theta)).
+    Returns a plain dictionary; raises RuntimeError on numerical failure.
+    Enable jax_enable_x64 before calling. Dense Jacobian storage is O(N**2)
+    and factorization O(N**3), where N=n_theta*n_phi.
+    """
+    if not jax.config.x64_enabled:
+        raise ValueError('Horizon finding requires jax_enable_x64')
+    table, sample = build_geometry(coordinates, gamma, Kij, margin=margin)
+    center = np.asarray(center, dtype=float)
+    if center.shape != (3,) or not np.all(np.isfinite(center)):
+        raise ValueError('center must be a finite Cartesian triple')
+    initial = np.asarray(initial_radius, dtype=float)
+    if initial.ndim == 0:
+        initial = np.full((n_theta, n_phi), initial)
+    elif initial.ndim != 2:
+        raise ValueError('initial_radius must be a scalar or a two-dimensional angular surface')
+    angular_grid(*initial.shape)
+    if not np.all(np.isfinite(initial)) or np.any(initial <= 0):
+        raise ValueError('The initial surface must have finite positive radii')
+    if max_angular < 2*initial.shape[0]:
+        raise ValueError('max_angular must allow at least one angular refinement')
+    radius = jnp.asarray(initial)
+    center_jax = jnp.asarray(center)
+    history = []
+    previous_mass = None
+    measure = jax.jit(lambda h, data: surface(h, center_jax, data, sample))
+    # Passing table as an argument keeps large grid data out of XLA constants.
+    jacobian_fn = jax.jit(lambda h, data: dense_jacobian(
+        lambda r: measure(r, data)[0].reshape(-1), h))
+    solve = jax.jit(jnp.linalg.solve)
 
     while True:
-        kernels = cache(grid)
-        radius, residual, iterations = _newton(radius, center, kernels, *newton_arguments)
-        if np.any(free_axes):
-            radius, center, shift, moved_residual, moved_iterations = _recenter(
-                radius, center, kernels, free_axes, settings["recenter_tolerance"],
-                settings["max_recenter"], newton_arguments)
-            shift_total = shift_total + shift
-            if moved_residual is not None:
-                residual, iterations = moved_residual, moved_iterations
+        for iteration in range(max_iterations + 1):
+            expansion, density, usable = measure(radius, table)
+            residual_norm = float(jnp.mean(radius)*jnp.max(jnp.abs(expansion)))
+            if not bool(usable):
+                raise RuntimeError('Surface leaves the resolved domain or has nonphysical geometry')
+            if residual_norm < tolerance:
+                break
+            if iteration == max_iterations:
+                raise RuntimeError(f'Newton did not converge after {max_iterations} iterations: {residual_norm:.3e}')
+            jacobian = jacobian_fn(radius, table)
+            delta = solve(jacobian, -expansion.reshape(-1)).reshape(radius.shape)
+            if not bool(jnp.all(jnp.isfinite(delta))):
+                raise RuntimeError('Newton Jacobian solve is singular or nonfinite')
+            step = min(1., float(0.1*jnp.mean(radius)/jnp.max(jnp.abs(delta))))
+            # The physical domain and positive-definite metric are checked on
+            # every trial, including those rejected by the line search.
+            for backtrack in range(20):
+                trial = radius + step*delta
+                trial_expansion, _, trial_usable = measure(trial, table)
+                trial_norm = float(jnp.mean(trial)*jnp.max(jnp.abs(trial_expansion)))
+                if bool(trial_usable) and trial_norm < residual_norm*(1 - 1.e-4*step):
+                    radius = trial
+                    break
+                step *= 0.5
+            else:
+                raise RuntimeError(f'Newton line search stalled at residual {residual_norm:.3e}')
 
-        expansion, area, _ = kernels.measure(radius, center)
-        previous_mass, mass = mass, float(np.sqrt(area/(16*np.pi)))
-
-        audit_grid = grid.audit()
-        audit_radius = interpolate_angular(radius, grid, audit_grid)
-        audit_expansion, _, audit_usable = cache(audit_grid).measure(
-            audit_radius, center)
-        if not audit_usable:
-            raise ValueError("Converged horizon leaves the resolved domain between nodes")
-        audit_residual = _dimensionless_residual(audit_radius, audit_expansion)
-
-        # The first pass has nothing to compare against, so it never converges.
-        mass_change = abs(mass/previous_mass - 1) if previous_mass else np.inf
-        if grid.size == 1:
-            mass_change = 0.0  # A single radius has no angular resolution to refine.
-        history.append((grid.shape[0], grid.shape[1], mass, residual,
-                        audit_residual, iterations))
-        if (audit_residual < settings["audit_tolerance"]
-                and mass_change < settings["mass_tolerance"]):
-            return {
-                "theta": np.asarray(grid.theta), "phi": np.asarray(grid.phi),
-                "radius": np.asarray(radius), "area": area, "mass": mass,
-                "center": np.asarray(center), "expansion": np.asarray(expansion),
-                "residual": residual, "audit_residual": audit_residual,
-                "mass_relative_change": mass_change, "recenter_shift": shift_total,
-                "convergence": np.asarray(history), "seed_radius": float(seed),
-                "symmetry": cache.geometry.symmetry, "grid": grid,
-            }
-        finer = grid.refined(settings["max_angular"])
-        if finer is None:
-            raise RuntimeError("Horizon failed angular residual or mass convergence: "
-                               f"audit={audit_residual:.3e}, mass change={mass_change:.3e}")
-        radius, grid = interpolate_angular(radius, grid, finer), finer
-
-
-def _seed_radii(cache, center, grid_shape, initial_radii, failures):
-    """Trial-sphere radii where the area-weighted mean expansion changes sign."""
-
-    inner, outer = cache.geometry.radial_bounds(center)
-    if outer <= 1.1*inner:
-        raise ValueError("Insufficient resolved domain around the horizon center")
-    kernels = cache(AngularGrid(*grid_shape))
-    center = jnp.asarray(center, dtype=float)
-
-    def mean_expansion(value):
-        mean, usable = kernels.mean_expansion(
-            jnp.full(kernels.grid.shape, float(value)), center)
-        if not usable:
-            raise ValueError(f"trial sphere r={value:.6g} leaves the resolved domain")
-        return mean
-
-    radii = np.geomspace(1.01*inner, 0.99*outer, 48)
-    values = np.full_like(radii, np.nan)
-    for index, value in enumerate(radii):
-        try:
-            values[index] = mean_expansion(value)
-        except ValueError:
-            continue
-    seeds = [] if initial_radii is None else [float(r) for r in initial_radii]
-    for index in range(len(radii) - 1):
-        if values[index]*values[index + 1] <= 0:
-            try:
-                seeds.append(brentq(mean_expansion, radii[index], radii[index + 1]))
-            except ValueError as error:
-                # A sign change across an interpolation singularity is not a seed.
-                failures.append(f"sphere bracket [{radii[index]:.6g}, "
-                                f"{radii[index + 1]:.6g}]: {error}")
-    if not seeds:
-        raise RuntimeError("No horizon seed: no resolved trial-sphere expansion sign "
-                           "change about the search center; pass center or initial_radii")
-    return sorted(set(seeds), reverse=True)
-
-
-def _select_outermost(candidates, tolerance):
-    """Keep the candidate that encloses every other one."""
-
-    reference = candidates[0]["center"]
-    comparison = max((candidate["grid"] for candidate in candidates),
-                     key=lambda grid: grid.size).audit()
-    profiles = []
-    for candidate in candidates:
-        offset = candidate["center"] - reference
-        scale = float(np.mean(candidate["radius"]))
-        if np.linalg.norm(offset) > 0.25*scale:
-            raise RuntimeError("Converged horizon candidates have different centers; "
-                               "outermost is ambiguous")
-        radial = comparison.triad()[0]
-        shape = interpolate_angular(jnp.asarray(candidate["radius"]),
-                                    candidate["grid"], comparison)
-        profiles.append(np.asarray(shape + jnp.einsum("i,tpi->tp",
-                                                      jnp.asarray(offset), radial)))
-
-    selected = 0
-    for index in range(1, len(candidates)):
-        margin = 10*tolerance*max(profiles[selected].mean(), profiles[index].mean())
-        if np.all(profiles[index] >= profiles[selected] - margin):
-            selected = index
-        elif not np.all(profiles[selected] >= profiles[index] - margin):
-            raise RuntimeError("Converged horizon candidates are not nested; "
-                               "outermost is ambiguous")
-    return candidates[selected]
-
-
-def find_apparent_horizon(coordinates, gamma, Kij, symmetry=None, center=(0.0, 0.0, 0.0),
-                          initial_radii=None, n_theta=24, n_phi=48, max_angular=96,
-                          tolerance=1.e-6, audit_tolerance=1.e-4, mass_tolerance=1.e-3,
-                          max_iterations=30, max_recenter=3, recenter_tolerance=1.e-3,
-                          preconditioned=True, margin=4):
-    """Find the outermost resolved, nested apparent horizon candidate.
-
-    ``coordinates`` is the tuple of coordinate axes, and selects the symmetry:
-    ``(r,)`` with gamma and Kij of shape (3,3,nr) for spherical symmetry,
-    ``(x, z)`` with shape (3,3,nx,nz) on the signed y=0 plane for axisymmetry,
-    and ``(x, y, z)`` with shape (3,3,nx,ny,nz) in full 3D.  Each axis must be
-    increasing and uniform; gamma and Kij are physical covariant tensors.
-    ``margin`` cells are dropped at every outer face.
-
-    The surface starts on an ``n_theta`` by ``n_phi`` angular grid that is
-    doubled until the area mass settles or ``max_angular`` theta nodes are
-    reached.  Up to ``max_recenter`` passes move the star-shape center onto the
-    surface centroid along the axes the symmetry leaves free, stopping once the
-    shift falls below ``recenter_tolerance`` times the mean radius.  Optional
-    ``initial_radii`` add spherical seeds to the automatic sign-change search,
-    which is what to reach for when a strongly distorted surface has no trial
-    sphere bracketing it.  ``preconditioned`` only affects how fast the Krylov
-    path converges, never what it converges to.
-
-    Returns a dictionary with the angular grid, the coordinate radii, area,
-    mass (irreducible), the center and the distance it moved, the outgoing
-    expansion, and the angular-convergence history.  Residuals are
-    dimensionless: mean coordinate radius times max |Theta|.  Raises
-    RuntimeError if no candidate passes the independent residual and
-    mass-convergence checks.  There is no fixed-mass or spherical fallback.
-    """
-
-    if not jax.config.read("jax_enable_x64"):
-        raise ValueError("Horizon finding needs float64; enable jax_enable_x64")
-    geometry = build_geometry(coordinates, gamma, Kij, symmetry=symmetry, margin=margin)
-    center = np.asarray(center, dtype=float)
-    if center.shape != (3,):
-        raise ValueError("center must be a Cartesian triple")
-
-    grid_shape, free_axes = {
-        "spherical": ((1, 1), (0.0, 0.0, 0.0)),
-        "axisymmetric": ((n_theta, 1), (0.0, 0.0, 1.0)),
-        "3d": ((n_theta, n_phi), (1.0, 1.0, 1.0)),
-    }[geometry.symmetry]
-    if geometry.symmetry != "spherical" and (n_theta < 6 or max_angular < 2*n_theta):
-        raise ValueError("Angular convergence requires at least two theta resolutions")
-    settings = {
-        "grid_shape": grid_shape, "free_axes": free_axes, "tolerance": tolerance,
-        "audit_tolerance": audit_tolerance, "mass_tolerance": mass_tolerance,
-        "max_iterations": max_iterations, "max_angular": max_angular,
-        "max_recenter": max_recenter, "recenter_tolerance": recenter_tolerance,
-        "preconditioned": preconditioned,
-    }
-
-    failures = []
-    cache = _KernelCache(geometry)
-    seeds = _seed_radii(cache, center, grid_shape, initial_radii, failures)
-    candidates = []
-    for seed in seeds:
-        try:
-            candidates.append(_candidate(seed, center, cache, settings))
-        except (RuntimeError, ValueError) as error:
-            failures.append(f"seed {seed:.6g}: {error}")
-    if not candidates:
-        raise RuntimeError("No converged apparent horizon. " + "; ".join(failures))
-
-    selected = _select_outermost(candidates, tolerance)
-    selected.pop("grid")
-    selected["candidate_count"] = len(candidates)
-    selected["search_failures"] = np.asarray(failures, dtype=str)
-    return selected
+        n_theta, n_phi = radius.shape
+        theta, phi, weights = angular_grid(n_theta, n_phi)
+        area = float(jnp.sum(jnp.asarray(weights)[:, None]*density)*(2*np.pi/n_phi))
+        mass = np.sqrt(area/(16*np.pi))
+        audit_theta, audit_phi, _ = angular_grid(2*n_theta + 2, 2*n_phi + 2)
+        audit_radius = interpolate_angular(radius, audit_theta, audit_phi)
+        audit_expansion, _, audit_usable = measure(audit_radius, table)
+        if not bool(audit_usable):
+            raise RuntimeError('Angular audit leaves the resolved domain or has nonphysical geometry')
+        audit = float(jnp.mean(audit_radius)*jnp.max(jnp.abs(audit_expansion)))
+        mass_change = np.inf if previous_mass is None else abs(mass/previous_mass - 1)
+        history.append((n_theta, n_phi, mass, residual_norm, audit, iteration))
+        if previous_mass is not None and audit < audit_tolerance and mass_change < mass_tolerance:
+            return dict(theta=theta, phi=phi, radius=np.asarray(radius), center=center,
+                        expansion=np.asarray(expansion), area=area, mass=float(mass),
+                        residual=residual_norm, audit_residual=audit,
+                        mass_relative_change=mass_change, convergence=np.asarray(history),
+                        iterations=sum(int(row[5]) for row in history))
+        if 2*n_theta > max_angular:
+            raise RuntimeError(f'Angular convergence failed: audit={audit:.3e}, mass change={mass_change:.3e}')
+        theta, phi, _ = angular_grid(2*n_theta, 2*n_phi)
+        radius = interpolate_angular(radius, theta, phi)
+        previous_mass = mass

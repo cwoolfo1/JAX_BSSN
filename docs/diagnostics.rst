@@ -50,48 +50,33 @@ Apparent horizons
 -----------------
 
 ``JAX_BSSN.utilities.find_apparent_horizon`` solves
-:math:`\Theta = D_i s^i + K_{ij}s^i s^j - K = 0` on a star-shaped surface
-:math:`r = h(\theta,\phi)` about a center, for physical covariant
-:math:`\gamma_{ij}` and :math:`K_{ij}` taken off a finished slice. The unknowns
-are the radii themselves on a cell-centered finite-difference angular grid, not
-the coefficients of an angular basis, so one solver covers every symmetry the
-code evolves. Which one is in use follows from the coordinate axes passed:
+:math:`D_i s^i + K_{ij}s^i s^j - K = 0` on a closed star-shaped surface
+:math:`r=h(\theta,\phi)`. Supply physical covariant ``gamma`` and ``Kij``:
 
-.. list-table:: Horizon input layouts
-   :header-rows: 1
-   :widths: 22 24 24 30
+* ``(r,)``: positive radial samples on the +x line, tensors ``(3,3,nr)``.
+* ``(x,z)``: signed Cartesian y=0 plane with symmetry about z, tensors ``(3,3,nx,nz)``.
+* ``(x,y,z)``: full Cartesian volume, tensors ``(3,3,nx,ny,nz)``.
 
-   * - Symmetry
-     - Coordinates
-     - ``gamma``/``Kij`` shape
-     - Unknowns
-   * - ``spherical``
-     - ``(r,)``
-     - ``(3, 3, nr)``
-     - a single radius
-   * - ``axisymmetric``
-     - ``(x, z)``
-     - ``(3, 3, nx, nz)``
-     - :math:`h(\theta)`, center on the axis
-   * - ``3d``
-     - ``(x, y, z)``
-     - ``(3, 3, nx, ny, nz)``
-     - :math:`h(\theta,\phi)`, free center
+Metric interpolation lives in ``utilities/hermite_interpolation.py``. All
+horizon geometry reconstruction, spatial differentiation, and Newton logic
+live in ``utilities/apparent_horizon.py``.
 
-The reduced layouts are not a reduced solver. A geometry provider rotates the
-stored plane or line onto whatever Cartesian point the surface asks for, and
-forward-mode AD of that interpolation supplies :math:`\partial_k\gamma_{ij}`,
-including the azimuthal terms the reduced storage never holds explicitly.
+Every layout uses the same full two-dimensional angular grid. Only the tensor
+reconstruction depends on symmetry. Reduced data remain symmetric about their
+coordinate origin/axis; changing the horizon center does not translate them.
+Axes must be uniform. The default interpolation margin is four cells.
 
-The poles are never sampled and the :math:`\theta` ghost rows are the exact
-shift :math:`h(-\theta,\phi) = h(\theta,\phi+\pi)`, so no pole regularity
-condition enters. Newton updates use an exact AD Jacobian: dense below
-``DENSE_JACOBIAN_LIMIT`` unknowns, and otherwise matrix-free GMRES
-preconditioned by the flat-space linearization of :math:`\Theta`.
+Both the center and initial guess are required::
 
-Every solve is audited. The center is moved onto the surface centroid along the
-axes the symmetry leaves free, the angular grid is doubled until the area mass
-stops moving, and the converged surface is re-evaluated on an independent
-angular grid. Failures raise: there is no fixed-mass or spherical fallback, and
-the returned dictionary carries the convergence history, both residuals and the
-seeds that did not converge.
+    jax.config.update("jax_enable_x64", True)
+    horizon = find_apparent_horizon(
+        (x, z), gamma, Kij, center=(0., 0., 0.), initial_radius=1.0)
+
+``initial_radius`` may instead be a positive ``(n_theta,n_phi)`` array, whose
+shape overrides the starting angular resolution. The center stays fixed.
+
+The finder uses cubic Hermite interpolation. JAX differentiates this interpolant, 
+including the rotation of reduced tensors. Angular derivatives use fourth-order differences,
+periodic azimuths, and polar reflection with a half-turn azimuthal shift; no
+node lies at a pole. The complete dense Newton Jacobian is assembled by AD in
+batches of 16 columns and solved directly.
