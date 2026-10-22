@@ -107,23 +107,5 @@ python -m pip install -e ".[test]"
 python -m pytest
 ```
 
-Run the in-memory Einstein--Maxwell Rosen wave tests, including analytical
-comparison and temporal self-convergence, with:
-
-```bash
-python -m pytest tests/EM/test_em_waves.py
-```
-
-EM evolution imports PyPIC3D's particle-free static-metric loop and couples
-two Maxwell half-steps around a BSSN RK4 step. Synchronization and a metric-switch
-history correction retain second-order temporal accuracy without modifying
-PyPIC3D. Configure its Cartesian boundary modes independently of gravity with
-`make_em_grid`; initial data uses PyPIC3D's upper-half-cell V locations.
-See [Einstein–Maxwell coupling](docs/einstein_maxwell.rst) for installation,
-editable sibling-checkout development, state migration, and cavity initialization.
-The charged-puncture demo initializes the native Yee-grid displacement density
-directly from the analytic Coulomb potential and uses constant-extrapolated EM
-boundaries because this backend does not provide an EM Sommerfeld condition.
-
 Tests use double precision and write no simulation output except dedicated
 openPMD round-trip tests in temporary directories.

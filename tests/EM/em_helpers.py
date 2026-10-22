@@ -3,6 +3,7 @@
 import jax.numpy as jnp
 
 from JAX_BSSN.bssn import BSSNVariables
+from JAX_BSSN.evolution.coordinates import grid_coordinates
 
 
 def flat_bssn_variables(shape, dtype=jnp.float64):
@@ -20,3 +21,7 @@ def flat_bssn_variables(shape, dtype=jnp.float64):
         lapse=jnp.ones(shape, dtype=dtype),
         shift=vector_zero,
     )
+
+
+def coordinates(shape, params, location=("C", "C", "C")):
+    return grid_coordinates(shape, params, jnp.float64, location)

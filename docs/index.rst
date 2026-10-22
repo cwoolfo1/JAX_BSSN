@@ -69,7 +69,7 @@ Contents
    architecture
    bssn
    evolution
-   einstein_maxwell
+   matter_sources
    cartoon
    fmr
    diagnostics

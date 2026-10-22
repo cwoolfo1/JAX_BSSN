@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from functools import partial
 import json
 import math
+import numpy as np
 
 import jax
 
@@ -48,8 +49,26 @@ POSITION = (0.0, 0.0, 0.0)
 NUM_POINTS = 96
 HALF_WIDTH = 12.0
 CFL = 0.2
-FINAL_TIME = 100.0
+FINAL_TIME = 200.0
 SNAPSHOT_INTERVALS = 50
+ABSORBER_WIDTH = 3.0
+ABSORBER_ORDER = 4
+ABSORBER_ATTENUATION = 1.0e-3
+# Recorded numerical convention; these are not configurable method selectors.
+MAXWELL_METHOD = {
+    "metric_interpolation_method": "arithmetic",
+    "coefficient_placement": "target_metric",
+    "shift_transport": "unlimited_upwind",
+    "shift_reconstruction": "unlimited",
+    "shift_limiter": "none",
+    "upstream_selector": "-beta",
+    "constitutive_transfer": (
+        "Original target-only lapse-metric coefficients with arithmetic field averaging; "
+        "target beta times unlimited second-order upstream native fields "
+        "(centered slopes, no limiter), transport velocity -beta; "
+        "native Yee curls and time staggering unchanged"
+    ),
+}
 
 ETA = 2.0
 KAPPA = 0.002
@@ -75,6 +94,9 @@ class SingleChargedBlackHoleConfig:
     cfl: float = CFL
     final_time: float = FINAL_TIME
     snapshot_intervals: int = SNAPSHOT_INTERVALS
+    absorber_width: float = ABSORBER_WIDTH
+    absorber_order: int = ABSORBER_ORDER
+    absorber_attenuation: float = ABSORBER_ATTENUATION
     eta: float = ETA
     kappa: float = KAPPA
     nu: float = NU
@@ -116,6 +138,10 @@ def validate_config(config):
             raise ValueError(f"{name} must be finite and nonnegative")
     if config.platform not in ("cpu", "gpu"):
         raise ValueError("platform must be 'cpu' or 'gpu'")
+    if not 0 < config.absorber_width < config.half_width:
+        raise ValueError("absorber_width must leave an undamped interior")
+    if config.absorber_order < 1 or not 0 < config.absorber_attenuation < 1:
+        raise ValueError("absorber_order must be positive and attenuation between zero and one")
 
     dx = 2.0 * config.half_width / config.num_points
     margin = config.half_width - 4.5 * dx
@@ -160,10 +186,12 @@ def build_single_charged_blackhole(config=None):
     params, num_steps = evolution_parameters(config)
     shape = (config.num_points,) * 3
     em_grid = make_em_grid(
-        shape, params, boundary_conditions=("constant",) * 3
+        shape, params, boundary_conditions=("constant",) * 3,
     )
     state = single_charged_puncture_state(
-        config.mass, config.charge, config.position, params, em_grid
+        config.mass, config.charge, config.position, params, em_grid,
+        absorber_width=config.absorber_width, absorber_order=config.absorber_order,
+        absorber_attenuation=config.absorber_attenuation,
     )
     return state, params, em_grid, num_steps
 
@@ -216,6 +244,19 @@ def charged_blackhole_diagnostics(state, params, grid):
         "min_lapse": jnp.min(state.bssn.lapse),
         "min_W": jnp.min(state.bssn.conformal_factor),
     }
+    if state.em.absorber is not None:
+        # A point belongs to the layer when any native component has damping.
+        layer = jnp.zeros(grid.shape, dtype=bool)
+        for rates, _, _ in state.em.absorber:
+            for rate in rates:
+                layer = layer | (grid.from_tile(rate) > 0)
+        masks["sponge"] = layer
+        masks["undamped"] = ~layer
+        masks["undamped_resolved"] = ~layer & (state.bssn.conformal_factor > 0.1)
+    # Discrete Gauss flux through a centered coordinate cube of half-width 4M.
+    X, Y, Z = grid.coordinates(params)
+    charge_box = (jnp.abs(X) < 4) & (jnp.abs(Y) < 4) & (jnp.abs(Z) < 4)
+    norms["charge_4M"] = jnp.sum(jnp.where(charge_box, electric_divergence, 0.0)) * params.dx**3 / math.sqrt(4 * math.pi)
     for label, mask in masks.items():
         count = jnp.sum(mask)
         norms[f"{label}_points"] = count
@@ -281,6 +322,28 @@ def snapshot_steps(num_steps, intervals):
     return tuple((index * num_steps + count - 1) // count for index in range(count + 1))
 
 
+def save_failure(state, previous, step, time, output_dir):
+    """Retain the failed and immediately preceding native states for diagnosis."""
+    summary = {"step": step, "time": time, "states": {}}
+    for label, current in (("failed", state), ("previous", previous)):
+        if current is None:
+            continue
+        arrays = {name: np.asarray(value) for name, value in current.bssn._asdict().items()}
+        for name, vector in (("D", current.em.fields[0]), ("B", current.em.fields[1]),
+                             ("previous_D", current.em.fields[7][0]), ("previous_B", current.em.fields[7][1]),
+                             ("synchronized_B", current.em.synchronized_magnetic)):
+            for axis, value in zip("xyz", vector):
+                arrays[f"{name}_{axis}"] = np.asarray(value)
+        arrays["half_dt"] = np.asarray(current.em.half_dt)
+        np.savez_compressed(output_dir / f"{label}_native_state.npz", **arrays)
+        summary["states"][label] = {
+            name: {"nonfinite": int(np.count_nonzero(~np.isfinite(value))),
+                   "finite_max_abs": float(np.max(np.where(np.isfinite(value), np.abs(value), 0.0)))}
+            for name, value in arrays.items()
+        }
+    (output_dir / "failure.json").write_text(json.dumps(summary, indent=2) + "\n")
+
+
 def _openpmd_fields(output):
     """Convert component-first JAX vectors to the writer's vector convention."""
     vector_names = ("D", "B", "momentum_constraint", "gamma_constraint", "shift")
@@ -335,7 +398,7 @@ def run_single_charged_blackhole(config=None):
             raise RuntimeError("initial fields were not all placed on the selected device")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        metadata = asdict(config)
+        metadata = dict(asdict(config), **MAXWELL_METHOD)
         metadata["output_dir"] = str(output_dir.resolve())
         metadata.update(
             parameters=params._asdict(),
@@ -356,7 +419,18 @@ def run_single_charged_blackhole(config=None):
                 "paper charge converted from Gaussian units by 1/sqrt(4*pi); "
                 "gamma_ij=conformal_metric_ij/W^2; shift is contravariant beta^i"
             ),
-            maxwell_boundary="constant extrapolation on all faces",
+            maxwell_boundary=(
+                "Reference sponge on all six faces; fixed initial densitized D/B; "
+                "analytic initial densities in exterior ghosts and face-coincident V nodes; "
+                "not PML or Sommerfeld; no transverse EM damping"
+            ),
+            metric_interpolation_method="arithmetic",
+            metric_interpolation=(
+                "Original tensor-product two-point arithmetic averaging "
+                "for lapse, shift, W, and conformal metric; linear exterior metric extension"
+            ),
+            constitutive_interpolation=MAXWELL_METHOD["constitutive_transfer"],
+            absorber_sigma_max=-(config.absorber_order + 1) * math.log(config.absorber_attenuation) / config.absorber_width,
             diagnostic_masks=(
                 "interior excludes four outer cells; resolved also requires W>0.1"
             ),
@@ -388,9 +462,11 @@ def run_single_charged_blackhole(config=None):
                 unit="state",
                 disable=not config.show_progress,
             )
+            previous_state = None
             for step in progress:
                 time = config.final_time if step == num_steps else step * params.dt
                 if not bool(state_is_valid(state)):
+                    save_failure(state, previous_state, step, time, output_dir)
                     raise RuntimeError(
                         f"invalid evolved fields at step {step}, t={time:.8g}"
                     )
@@ -416,6 +492,7 @@ def run_single_charged_blackhole(config=None):
                             hamiltonian=f"{record['resolved_hamiltonian_rms']:.3e}",
                         )
                 if step < num_steps:
+                    previous_state = state
                     state = advance(state)
 
     return state, {
