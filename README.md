@@ -107,11 +107,5 @@ python -m pip install -e ".[test]"
 python -m pytest
 ```
 
-Generic matter-source tests live in `tests/test_bssn_matter_coupling.py`.
-JAX BSSN accepts external stress-energy projections and has no PyPIC3D dependency.
-Maxwell, PIC and coupled integration tests are maintained in PyPIC3D's `tests/EM/`.
-See [generic matter sources](docs/matter_sources.rst) for the NR interface.
-Historical charged-black-hole tests remain deferred and excluded from normal collection.
-
 Tests use double precision and write no simulation output except dedicated
 openPMD round-trip tests in temporary directories.
