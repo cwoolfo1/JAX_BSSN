@@ -12,7 +12,6 @@ authors = [
 license = { file = "LICENSE" }
 
 dependencies = [
-    "PyPIC3D @ git+https://github.com/uwplasma/PyPIC3D.git",
     "jax",
     "jaxlib",
     "numpy",
@@ -38,8 +37,6 @@ packages = [
     "JAX_BSSN.cartoon.axisymmetry",
     "JAX_BSSN.cartoon.spherical_symmetry",
     "JAX_BSSN.diagnostics",
-    "JAX_BSSN.EM",
-    "JAX_BSSN.EM.first_order",
     "JAX_BSSN.evolution",
     "JAX_BSSN.fmr",
     "JAX_BSSN.utilities",
