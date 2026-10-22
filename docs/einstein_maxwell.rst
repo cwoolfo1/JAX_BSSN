@@ -6,10 +6,15 @@ PyPIC3D dependency and ownership
 
 ``JAX_BSSN.EM.first_order`` imports PyPIC3D's static-metric Maxwell loop,
 constitutive fields, boundary conditions, interpolation, and diagnostics.
-There is no second Maxwell solver in JAX_BSSN. The required dependency is
-pinned to PyPIC3D commit ``9124995c8eac57f92957a6a59089d04dac1a3392``, which
-supports vacuum evolution with empty particle storage. No particles, charge,
-current, or external fields participate in this coupling.
+There is no second Maxwell solver in JAX_BSSN. The PyPIC3D dependency supports
+vacuum evolution with empty particle storage. This coupling has no
+particle/current deposition or externally imposed fields. The charged
+puncture's charge is encoded in the initial densitized electric flux.
+
+The reference sponge and unlimited second-order shift upwinding described
+below require the corresponding modified PyPIC3D checkout. Use both
+companion checkouts when reproducing the current charged-puncture runs;
+the historical pinned dependency did not provide these developments.
 
 Install normally with ``python -m pip install -e '.[test]'``. To develop
 against an already provisioned sibling checkout instead of the pinned Git
@@ -91,10 +96,34 @@ Periodic axes contain N physical C nodes for N cells. Conducting axes
 contain N+1 C nodes, including both walls, for N cells. The uppermost
 allocated V sample on a conducting axis is exterior data; exclude it from
 native-field physical-domain norms. Active axes need more than three cells;
-singleton axes must be periodic. Metric interpolation derives a consistent
-physical metric, inverse, and volume after projecting the interpolated
-conformal metric to unit determinant and applying the existing W floor.
-An additional metric halo prevents wraparound in exterior interpolation.
+singleton axes must be periodic. BSSN lapse, shift, W, and conformal metric
+components are transferred to native Yee locations by the original sequential
+two-point arithmetic averaging. Along an axis changing from C to V, the
+half-cell value is ``(f[i] + f[i+1]) / 2``. Applying this rule along each V axis
+gives equal averages of 2, 4, or 8 samples for locations with one, two, or
+three V coordinates. Unchanged C axes are not interpolated, and the CCC
+sample is unchanged. These are equal sample averages, not volume-weighted
+averages.
+
+The metric builder applies this transfer unconditionally at initialization
+and every coupled geometry rebuild. It then applies the existing W floor,
+projects the averaged conformal metric to unit determinant, and derives the
+physical metric, inverse, and volume from those values. The physical metric
+and its volume are therefore derived after averaging W and the conformal
+components, rather than averaged independently.
+
+One additional temporary metric halo layer supplies the upper neighbor for
+every retained EM ghost. The temporary layer is removed after the transfers;
+the physical domain and retained EM guard allocation are unchanged.
+Periodic copying and linear nonperiodic metric extrapolation retain their
+existing conventions. Smooth interior transfer is second order. Native EM
+density transfers, quadratic source averaging, Maxwell curls, time staggering,
+and the boundary sponge are unchanged.
+
+There is no production metric-interpolation selector. The shared Hermite
+utility in ``utilities/hermite_interpolation.py`` remains available for other
+interpolation tasks and archived comparison experiments; the production
+Yee metric builder does not use it.
 
 EM boundary names are ``periodic`` (default), ``conducting``, ``absorbing``
 (PyPIC3D's zero-exterior policy), and ``constant``. They are independent of
@@ -102,6 +131,98 @@ BSSN's per-face gravity boundary codes. Integer codes and EM ``sommerfeld``
 are rejected; gravity Sommerfeld remains supported. Absorbing exterior
 values are not a Sommerfeld radiation condition or an absorbing layer.
 PML, supergaussian absorber layers, and horizon policies are disabled.
+
+Reference sponge for the charged puncture
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The charged-puncture demo uses an additional runtime reference sponge, not
+the ``absorbing`` zero-exterior flag. BSSN retains its Sommerfeld condition.
+On all six EM faces a layer of coordinate width 3 damps deviations from the
+initial densitized Yee fields. The native references include analytically
+sampled exterior and face values and remain fixed when the metric changes.
+The original domain and interior Maxwell curls are unchanged.
+
+For distance d inward from a face, the rate is
+``sigma_max * clip(1-d/width, 0, 1)**order``. Face rates add at edges and
+corners. The defaults are order 4 and
+``sigma_max = -5*log(1e-3)/3``. The nominal attenuation is for a unit-speed
+crossing; it is not a guaranteed reflection coefficient. Coordinates are
+evaluated at each field component's native Yee sites. Exterior ghosts and
+face-coincident V nodes are fixed to the reference; C sites inside the faces
+remain evolved. There is no interior transverse EM dissipation or PML.
+
+``DensitizedMaxwellState.absorber`` optionally carries two tuples, one for D
+and one for B, each containing component tuples of rates, references, and
+exterior masks. All are runtime JAX arrays. PyPIC3D's GR Yee ``update_D``,
+``update_B``, and ``time_loop_static_metric`` accept optional absorber data;
+callers that omit it retain their original behavior. With midpoint curl C,
+each update integrates local relaxation exponentially::
+
+    F_new = F0 + exp(-sigma*dt)*(F_old-F0) + (-expm1(-sigma*dt)/sigma)*C
+
+At zero rate this is the original ``F_old + dt*C``. The same update is used
+for predictors, staggered history initialization, metric rephasing, and the
+synchronized magnetic field. References are never independently damped or
+redensitized. Negative steps used in history initialization are supported.
+
+Spatially varying relaxation does not preserve discrete Gauss constraints:
+the derivative of the rate contributes a source in the layer. Diagnostics
+therefore distinguish sponge, undamped, and resolved-undamped regions, and
+report the electric flux through a coordinate cube of half-width 4.
+``tests/EM/test_em_sponge.py`` checks relaxation and time convergence;
+``python -m tests.EM.sponge_wave_validation OUTPUT_DIRECTORY`` measures
+reflection and constraint errors against a larger-domain reference.
+
+Upwind shift products
+~~~~~~~~~~~~~~~~~~~~~
+
+The production E/H relations use ordinary arithmetic field interpolation
+for the lapse-metric term, followed by division by the target
+``sqrt_gamma``, contraction with the target spatial metric, and multiplication
+by the target lapse. Metric geometry itself retains its original two-point
+arithmetic transfer from the BSSN grid.
+
+Only the shift cross products use upstream reconstruction. For a native
+scalar density F, the unlimited slope and interface states are::
+
+    s_i = (F_{i+1} - F_{i-1}) / 2
+    left  = F_i     + s_i / 2
+    right = F_{i+1} - s_{i+1} / 2
+
+These brackets are shifted down one index for V-to-C transfer. Each
+cross-product term transfers along one axis. The transport velocity is
+``-beta``: positive target beta chooses the right state, negative beta the
+left. Multiplication by target beta gives zero at zero shift. E contains
+``+beta x B_density`` and H contains ``-beta x D_density``. There is no slope
+limiter or alternative production transport selector.
+
+This changes numerical dissipation and dispersion in the shift terms.
+The native curls, time staggering, retained histories, current normalization,
+source quadrature, and fixed-reference sponge are unchanged. The curl
+increment still satisfies discrete divergence-of-curl cancellation; the
+spatially varying sponge can introduce Gauss errors. No reciprocal
+quadratic-energy conservation is asserted for this operator. This is
+componentwise directional reconstruction, not a characteristic UCT scheme.
+
+The same E/H functions are called during initialization, native predictions
+and advances, metric-history rephasing, and common-time B reconstruction.
+The stencil requires at least two guard cells; the evolution entry point
+checks this, and the JAX adapter supplies three. Existing field boundary
+refresh and conducting projections remain responsible for boundary values.
+
+Restarting a historical method requires common-time D and synchronized B,
+then fresh history initialization with this operator. Historical retained
+histories cannot be reused by changing metadata or rephasing the metric.
+Retired experiments and their dependencies are archived under
+``demos/single_charged_blackhole/validation/sole_shift_upwind_20261020/before``.
+They are excluded from active test discovery. The fixed production method
+and source provenance are recorded in new outputs.
+
+A controlled 96-cubed charged-puncture run using these shift products and
+original target-metric terms completed 200M without the previous EM
+runaway. Completion does not establish stationary RN accuracy, nor does it
+qualify every metric and boundary configuration. Report growth, charge flux,
+constraints, and analytical accuracy separately.
 
 A conducting cavity can be initialized as follows::
 

@@ -15,3 +15,5 @@ class DensitizedMaxwellState(NamedTuple):
     fields: tuple
     synchronized_magnetic: tuple
     half_dt: object
+    # Optional D/B tuples (rates, initial densities, exterior masks), not static.
+    absorber: tuple | None = None

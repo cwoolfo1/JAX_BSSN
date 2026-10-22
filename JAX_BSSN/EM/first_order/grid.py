@@ -132,6 +132,9 @@ def make_em_grid(shape, params, *, boundary_conditions=("periodic",) * 3):
 
     Use names rather than BSSN's integer boundary codes: BSSN code 1 means
     Sommerfeld, whereas PyPIC3D code 1 means conducting.
+    Native shift products use unlimited second-order upwinding for -beta.
+    Geometry uses the original two-point arithmetic averaging at initialization
+    and every subsequent rebuild, independently of native field transport.
     """
     shape = tuple(shape)
     if len(shape) != 3 or any(

@@ -201,11 +201,11 @@ def test_metric_switch_rephases_history_without_changing_common_fields():
     assert_tree_close(shifted.fields[2:6], initial.em.fields[2:6])
 
 
-def test_native_metric_interpolation_is_second_order():
+def test_native_metric_arithmetic_interpolation_converges_at_second_order():
     errors = []
     for n in (16, 32, 64):
         shape = (n, 1, 1)
-        p = BSSNParameters(dx=2 * np.pi / n)
+        p = BSSNParameters(dx=2 * jnp.pi / n)
         grid = make_em_grid(shape, p)
         x = grid.coordinates(p)[0]
         bssn = flat_bssn_variables(shape)._replace(
@@ -224,4 +224,5 @@ def test_native_metric_interpolation_is_second_order():
             (grid.from_tile(metric.D[0].lapse) - (1 + 0.1 * jnp.cos(target))) ** 2
         )
         errors.append(float(jnp.sqrt(error)))
-    assert np.all(np.asarray(errors[:-1]) / errors[1:] > 3.8), errors
+    ratios = jnp.asarray(errors[:-1]) / jnp.asarray(errors[1:])
+    assert bool(jnp.all((ratios > 3.8) & (ratios < 4.2))), errors

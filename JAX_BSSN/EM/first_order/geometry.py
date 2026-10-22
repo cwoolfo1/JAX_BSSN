@@ -14,9 +14,14 @@ from .grid import CENTER_LOCATION
 
 
 def build_yee_metric(bssn, grid):
-    """Project interpolated conformal metrics before deriving volume/inverse."""
-    # One extra layer makes the upper-neighbour interpolation valid even on
-    # the outermost metric halo. Trim after transfer, never wrap that halo.
+    """Average conformal geometry, then derive its physical volume/inverse.
+
+    Each C-to-V transfer averages two adjacent samples with equal weights.
+    Apply one transfer per staggered axis to lapse, shift, W, and conformal
+    metric before the determinant projection and physical-metric conversion.
+    """
+    # One extra temporary halo covers the upper neighbor of every retained
+    # V node, including the outermost metric guard. Trim it after averaging.
     padded = replace(
         grid, static=grid.static._replace(guard_cells=grid.guard_cells + 1)
     )
@@ -29,9 +34,8 @@ def build_yee_metric(bssn, grid):
 
     def sample(location):
         def transfer(a):
-            return location_interpolate(a, CENTER_LOCATION, location)[
-                ..., 1:-1, 1:-1, 1:-1
-            ]
+            sampled = location_interpolate(a, CENTER_LOCATION, location)
+            return sampled[..., 1:-1, 1:-1, 1:-1]
 
         w = jnp.maximum(transfer(W), W_FLOOR_VALUE)
         conformal = jnp.stack(

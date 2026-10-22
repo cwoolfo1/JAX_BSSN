@@ -55,7 +55,9 @@ def _squared_radius(coordinates, position):
     )
 
 
-def single_charged_puncture_state(mass, charge, position, params, em_grid):
+def single_charged_puncture_state(mass, charge, position, params, em_grid, *,
+                                 absorber_width=0.0, absorber_order=4,
+                                 absorber_attenuation=1.0e-3):
     """Return analytic Reissner--Nordstrom puncture data and EM history.
 
     The BSSN variables live on the grid's C nodes.  Each native Maxwell
@@ -109,7 +111,7 @@ def single_charged_puncture_state(mass, charge, position, params, em_grid):
     normalization = charge / math.sqrt(4.0 * math.pi)
     displacement = []
     for component, location in enumerate(D_FIELD_LOCATIONS):
-        coordinates = em_grid.coordinates(params, location)
+        coordinates = em_grid.coordinates(params, location, tiled=absorber_width > 0)
         radius_squared = _squared_radius(coordinates, position)
         if bool(jnp.any(radius_squared == 0.0)):
             raise ValueError(
@@ -118,12 +120,27 @@ def single_charged_puncture_state(mass, charge, position, params, em_grid):
         density = normalization * (
             coordinates[component] - position[component]
         ) / radius_squared ** 1.5
-        displacement.append(jnp.broadcast_to(density, shape))
+        native_shape = ((1, 1, 1) + tuple(n + 2 * em_grid.guard_cells for n in em_grid.tile_shape)
+                        if absorber_width > 0 else shape)
+        displacement.append(jnp.broadcast_to(density, native_shape))
     displacement = tuple(displacement)
     magnetic = tuple(jnp.zeros_like(component) for component in displacement)
-    em = initialize_densitized_maxwell_state(
-        displacement, magnetic, bssn, params, em_grid
-    )
+    if absorber_width > 0:
+        from JAX_BSSN.EM.first_order.absorber import make_reference_sponge
+        from JAX_BSSN.EM.first_order.geometry import build_yee_metric
+        from JAX_BSSN.EM.first_order.maxwell import initialize_native_state
+
+        absorber = make_reference_sponge(
+            em_grid, params, displacement, magnetic, width=absorber_width,
+            order=absorber_order, target_attenuation=absorber_attenuation,
+        )
+        em = initialize_native_state(
+            displacement, magnetic, build_yee_metric(bssn, em_grid), params, em_grid, absorber
+        )
+    else:
+        em = initialize_densitized_maxwell_state(
+            displacement, magnetic, bssn, params, em_grid
+        )
     return EinsteinMaxwellVariables(bssn, em)
 
 

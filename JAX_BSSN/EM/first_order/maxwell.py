@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from PyPIC3D.boundary_conditions.staggered import refresh_fields
 from PyPIC3D.particles.particle_class import TiledParticles, SpeciesConfig
 from PyPIC3D.relativity.core import D_FIELD_LOCATIONS, B_FIELD_LOCATIONS
-from PyPIC3D.solvers.GR_yee.static_metric import (
+from PyPIC3D.solvers.GR_yee.curved_maxwell import (
     compute_covariant_E,
     compute_covariant_H,
     update_B,
@@ -33,11 +33,13 @@ def empty_particles(dtype):
 def refresh_state_metric(em, metric, grid):
     """Replace geometry and refresh boundary data without redensitizing."""
 
+    da, ba = (None, None) if em.absorber is None else em.absorber
+
     def D(v):
-        return refresh_fields(v, grid.static, D_FIELD_LOCATIONS, "D", metric)
+        return refresh_fields(v, grid.static, D_FIELD_LOCATIONS, "D", metric, da)
 
     def B(v):
-        return refresh_fields(v, grid.static, B_FIELD_LOCATIONS, "B", metric)
+        return refresh_fields(v, grid.static, B_FIELD_LOCATIONS, "B", metric, ba)
 
     d, b, current, rho, phi, external, _, previous, overflow = em.fields
     fields = (
@@ -71,8 +73,9 @@ def rephase_state_metric(em, metric, params, grid):
         zero = tuple(jnp.zeros_like(q) for q in d)
         ed = compute_covariant_E(d, b, m)
         hb = compute_covariant_H(d, b, m)
-        next_d = update_D(d, hb, zero, m, grid.static, dynamic, dynamic.dt)
-        next_b = update_B(ed, b, m, grid.static, dynamic, dynamic.dt)
+        da, ba = (None, None) if state.absorber is None else state.absorber
+        next_d = update_D(d, hb, zero, m, grid.static, dynamic, dynamic.dt, absorber=da)
+        next_b = update_B(ed, b, m, grid.static, dynamic, dynamic.dt, absorber=ba)
         return (
             tuple(a - q for a, q in zip(next_d, d)),
             tuple(a - q for a, q in zip(next_b, b)),
@@ -93,18 +96,20 @@ def rephase_state_metric(em, metric, params, grid):
     return refresh_state_metric(shifted, metric, grid)
 
 
-def initialize_native_state(displacement, magnetic, metric, params, grid):
+def initialize_native_state(displacement, magnetic, metric, params, grid, absorber=None):
     """One-time O(h^2) history initialization from common-time densities."""
     static = grid.static
     h = params.dt / 2
     dynamic = grid.dynamic(params, h)
-    d = refresh_fields(displacement, static, D_FIELD_LOCATIONS, "D", metric)
-    b = refresh_fields(magnetic, static, B_FIELD_LOCATIONS, "B", metric)
+    da, ba = (None, None) if absorber is None else absorber
+    d = refresh_fields(displacement, static, D_FIELD_LOCATIONS, "D", metric, da)
+    b = refresh_fields(magnetic, static, B_FIELD_LOCATIONS, "B", metric, ba)
     zero = tuple(jnp.zeros_like(v) for v in d)
-    e, H = compute_covariant_E(d, b, metric), compute_covariant_H(d, b, metric)
-    previous_d = update_D(d, H, zero, metric, static, dynamic, -h)
-    half_b = update_B(e, b, metric, static, dynamic, -h / 2)
-    previous_b = update_B(e, b, metric, static, dynamic, -3 * h / 2)
+    e = compute_covariant_E(d, b, metric)
+    H = compute_covariant_H(d, b, metric)
+    previous_d = update_D(d, H, zero, metric, static, dynamic, -h, absorber=da)
+    half_b = update_B(e, b, metric, static, dynamic, -h / 2, absorber=ba)
+    previous_b = update_B(e, b, metric, static, dynamic, -3 * h / 2, absorber=ba)
     fields = (
         d,
         half_b,
@@ -116,10 +121,10 @@ def initialize_native_state(displacement, magnetic, metric, params, grid):
         (previous_d, previous_b),
         jnp.asarray(False),
     )
-    return DensitizedMaxwellState(fields, b, jnp.asarray(h))
+    return DensitizedMaxwellState(fields, b, jnp.asarray(h), absorber)
 
 
-def synchronized_magnetic_after_step(before, after, grid, dynamic):
+def synchronized_magnetic_after_step(before, after, grid, dynamic, absorber=None):
     """Endpoint B, centered in time, using only imported Maxwell operations.
 
     Reconstruct B^n from the saved incoming history, then advance B^n by h
@@ -136,6 +141,7 @@ def synchronized_magnetic_after_step(before, after, grid, dynamic):
         grid.static,
         dynamic,
         dynamic.dt,
+        absorber=None if absorber is None else absorber[1],
     )
     midpoint_d = _average(d, after[0])
     return update_B(
@@ -145,6 +151,7 @@ def synchronized_magnetic_after_step(before, after, grid, dynamic):
         grid.static,
         dynamic,
         dynamic.dt,
+        absorber=None if absorber is None else absorber[1],
     )
 
 
@@ -158,7 +165,7 @@ def maxwell_half_step(em, params, grid):
     dynamic = grid.dynamic(params, em.half_dt)
     particles, species = empty_particles(em.fields[0][0].dtype)
     _, fields = time_loop_static_metric(
-        particles, species, em.fields, grid.static, dynamic
+        particles, species, em.fields, grid.static, dynamic, absorber=em.absorber,
     )
-    synchronized_b = synchronized_magnetic_after_step(em.fields, fields, grid, dynamic)
-    return DensitizedMaxwellState(fields, synchronized_b, em.half_dt)
+    synchronized_b = synchronized_magnetic_after_step(em.fields, fields, grid, dynamic, em.absorber)
+    return em._replace(fields=fields, synchronized_magnetic=synchronized_b)
